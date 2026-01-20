@@ -57,7 +57,8 @@ defmodule Metastatic.ValidatorTest do
 
     test "validates lambda" do
       ast =
-        {:lambda, ["x"], [], {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
+        {:lambda, ["x"], [],
+         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
 
       doc = Document.new(ast, :python)
 
@@ -68,7 +69,8 @@ defmodule Metastatic.ValidatorTest do
     test "validates collection operation" do
       ast =
         {:collection_op, :map,
-         {:lambda, ["x"], [], {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
+         {:lambda, ["x"], [],
+          {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
          {:variable, "list"}}
 
       doc = Document.new(ast, :python)
@@ -81,7 +83,8 @@ defmodule Metastatic.ValidatorTest do
   describe "validate/2 with M2.3 Native" do
     test "validates language-specific construct" do
       ast =
-        {:language_specific, :python, %{construct: :list_comprehension, data: "[x for x in range(10)]"}}
+        {:language_specific, :python,
+         %{construct: :list_comprehension, data: "[x for x in range(10)]"}}
 
       doc = Document.new(ast, :python)
 
@@ -93,10 +96,11 @@ defmodule Metastatic.ValidatorTest do
 
     test "counts multiple native constructs" do
       ast =
-        {:block, [
-          {:language_specific, :python, %{construct: :decorator, data: "@property"}},
-          {:language_specific, :python, %{construct: :walrus, data: ":="}}
-        ]}
+        {:block,
+         [
+           {:language_specific, :python, %{construct: :decorator, data: "@property"}},
+           {:language_specific, :python, %{construct: :walrus, data: ":="}}
+         ]}
 
       doc = Document.new(ast, :python)
 

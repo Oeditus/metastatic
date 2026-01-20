@@ -69,10 +69,11 @@ defmodule Metastatic.ASTTest do
 
     test "function_call" do
       ast =
-        {:function_call, "add", [
-          {:variable, "x"},
-          {:variable, "y"}
-        ]}
+        {:function_call, "add",
+         [
+           {:variable, "x"},
+           {:variable, "y"}
+         ]}
 
       assert AST.conforms?(ast)
     end
@@ -84,8 +85,7 @@ defmodule Metastatic.ASTTest do
 
     test "conditional" do
       ast =
-        {:conditional,
-         {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
+        {:conditional, {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
          {:literal, :integer, 1}, {:literal, :integer, -1}}
 
       assert AST.conforms?(ast)
@@ -98,11 +98,12 @@ defmodule Metastatic.ASTTest do
 
     test "block" do
       ast =
-        {:block, [
-          {:variable, "x"},
-          {:variable, "y"},
-          {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
-        ]}
+        {:block,
+         [
+           {:variable, "x"},
+           {:variable, "y"},
+           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
+         ]}
 
       assert AST.conforms?(ast)
     end
@@ -122,8 +123,7 @@ defmodule Metastatic.ASTTest do
   describe "M2.2 Extended conformance/1" do
     test "loop while" do
       ast =
-        {:loop, :while,
-         {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
+        {:loop, :while, {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
          {:block, [{:variable, "x"}]}}
 
       assert AST.conforms?(ast)
@@ -139,7 +139,8 @@ defmodule Metastatic.ASTTest do
 
     test "lambda" do
       ast =
-        {:lambda, ["x", "y"], [], {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+        {:lambda, ["x", "y"], [],
+         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
 
       assert AST.conforms?(ast)
     end
@@ -155,7 +156,8 @@ defmodule Metastatic.ASTTest do
     test "collection_op map" do
       ast =
         {:collection_op, :map,
-         {:lambda, ["x"], [], {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
+         {:lambda, ["x"], [],
+          {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
          {:variable, "list"}}
 
       assert AST.conforms?(ast)
@@ -195,8 +197,7 @@ defmodule Metastatic.ASTTest do
 
     test "exception_handling" do
       ast =
-        {:exception_handling,
-         {:block, [{:function_call, "risky", []}]},
+        {:exception_handling, {:block, [{:function_call, "risky", []}]},
          [{:error, {:variable, "e"}, {:function_call, "handle", [{:variable, "e"}]}}],
          {:function_call, "cleanup", []}}
 
@@ -205,8 +206,7 @@ defmodule Metastatic.ASTTest do
 
     test "async_operation" do
       ast =
-        {:async_operation, :await,
-         {:function_call, "fetch_data", [{:literal, :string, "url"}]}}
+        {:async_operation, :await, {:function_call, "fetch_data", [{:literal, :string, "url"}]}}
 
       assert AST.conforms?(ast)
     end
@@ -288,29 +288,30 @@ defmodule Metastatic.ASTTest do
       # (x + y) * z
       ast =
         {:binary_op, :arithmetic, :*,
-         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}},
-         {:variable, "z"}}
+         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}, {:variable, "z"}}
 
       assert AST.variables(ast) == MapSet.new(["x", "y", "z"])
     end
 
     test "function call with variables" do
       ast =
-        {:function_call, "add", [
-          {:variable, "a"},
-          {:variable, "b"}
-        ]}
+        {:function_call, "add",
+         [
+           {:variable, "a"},
+           {:variable, "b"}
+         ]}
 
       assert AST.variables(ast) == MapSet.new(["a", "b"])
     end
 
     test "block with variables" do
       ast =
-        {:block, [
-          {:variable, "x"},
-          {:variable, "y"},
-          {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
-        ]}
+        {:block,
+         [
+           {:variable, "x"},
+           {:variable, "y"},
+           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
+         ]}
 
       assert AST.variables(ast) == MapSet.new(["x", "y"])
     end

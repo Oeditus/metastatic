@@ -8,8 +8,8 @@ defmodule Metastatic.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Starts a worker by calling: Metastatic.Worker.start_link(arg)
-      # {Metastatic.Worker, arg}
+      # Adapter registry for managing language adapters
+      Metastatic.Adapter.Registry
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html

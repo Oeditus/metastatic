@@ -48,8 +48,8 @@ defmodule Metastatic.AST do
 
   This is the union of all meta-types across the three layers.
   """
+  # M2.1: Core layer - Universal programming concepts
   @type meta_ast ::
-          # M2.1: Core layer - Universal programming concepts
           literal()
           | variable()
           | binary_op()
@@ -301,7 +301,8 @@ defmodule Metastatic.AST do
        ]}
   """
   @type pattern_match ::
-          {:pattern_match, scrutinee :: meta_ast(), arms :: [{pattern :: meta_ast(), body :: meta_ast()}]}
+          {:pattern_match, scrutinee :: meta_ast(),
+           arms :: [{pattern :: meta_ast(), body :: meta_ast()}]}
 
   @typedoc """
   M2 meta-type: Exception handling.
@@ -527,6 +528,7 @@ defmodule Metastatic.AST do
 
   defp collect_variables({:pattern_match, scrutinee, arms}, acc) do
     acc = collect_variables(scrutinee, acc)
+
     Enum.reduce(arms, acc, fn {pattern, body}, a ->
       a = collect_variables(pattern, a)
       collect_variables(body, a)
@@ -535,10 +537,13 @@ defmodule Metastatic.AST do
 
   defp collect_variables({:exception_handling, try_block, rescue_clauses, finally_block}, acc) do
     acc = collect_variables(try_block, acc)
-    acc = Enum.reduce(rescue_clauses, acc, fn {_, var, body}, a ->
-      a = collect_variables(var, a)
-      collect_variables(body, a)
-    end)
+
+    acc =
+      Enum.reduce(rescue_clauses, acc, fn {_, var, body}, a ->
+        a = collect_variables(var, a)
+        collect_variables(body, a)
+      end)
+
     if finally_block, do: collect_variables(finally_block, acc), else: acc
   end
 

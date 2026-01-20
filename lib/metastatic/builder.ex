@@ -79,7 +79,7 @@ defmodule Metastatic.Builder do
   """
   @spec from_source(String.t(), atom()) :: {:ok, Document.t()} | {:error, term()}
   def from_source(source, language) when is_binary(source) and is_atom(language) do
-    with {:ok, adapter} <- Adapter.for_language(language) do
+    with {:ok, adapter} <- get_adapter(language) do
       Adapter.abstract(adapter, source, language)
     end
   end
@@ -154,7 +154,7 @@ defmodule Metastatic.Builder do
   def to_source(%Document{} = document, target_language \\ nil) do
     language = target_language || document.language
 
-    with {:ok, adapter} <- Adapter.for_language(language) do
+    with {:ok, adapter} <- get_adapter(language) do
       Adapter.reify(adapter, document)
     end
   end
@@ -244,32 +244,34 @@ defmodule Metastatic.Builder do
   """
   @spec supported_languages() :: [map()]
   def supported_languages do
-    # This would be dynamically populated by checking which adapters are loaded
-    # For now, return known languages
-    known_languages = [:python, :javascript, :typescript, :elixir, :ruby, :go, :rust]
-
-    Enum.flat_map(known_languages, fn lang ->
-      case Adapter.for_language(lang) do
-        {:ok, adapter} ->
-          [
-            %{
-              language: lang,
-              adapter: adapter,
-              extensions: adapter.file_extensions(),
-              loaded: true
-            }
-          ]
-
-        {:error, _} ->
-          []
-      end
+    # Get all registered adapters from the registry
+    Adapter.Registry.list()
+    |> Enum.map(fn {lang, adapter} ->
+      %{
+        language: lang,
+        adapter: adapter,
+        extensions: adapter.file_extensions(),
+        loaded: true
+      }
     end)
   end
 
   # Private helpers
 
+  defp get_adapter(language) do
+    # Try registry first, then fallback to hard-coded module lookup
+    case Adapter.Registry.get(language) do
+      {:ok, adapter} -> {:ok, adapter}
+      {:error, :not_found} -> Adapter.for_language(language)
+    end
+  end
+
   defp detect_or_use_language(file_path, nil) do
-    Adapter.detect_language(file_path)
+    # Try registry first for file extension detection
+    case Adapter.Registry.detect_language(file_path) do
+      {:ok, language} -> {:ok, language}
+      {:error, :unknown_extension} -> Adapter.detect_language(file_path)
+    end
   end
 
   defp detect_or_use_language(_file_path, language) when is_atom(language) do
