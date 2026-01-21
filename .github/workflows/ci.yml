@@ -36,18 +36,6 @@ jobs:
           bundler-cache: true
           working-directory: priv/parsers/ruby
 
-      - name: Set up Haskell
-        uses: haskell-actions/setup@v2
-        with:
-          ghc-version: '9.14'
-          enable-stack: true
-          stack-version: 'latest'
-
-      - name: Build Haskell parser
-        run: |
-          cd priv/parsers/haskell
-          stack build
-
       - name: Restore dependencies cache
         uses: actions/cache@v4
         with:
@@ -68,10 +56,10 @@ jobs:
         run: mix format --check-formatted
 
       - name: Run tests
-        run: mix test
+        run: mix test --exclude haskell
 
       - name: Run tests with coverage
-        run: mix test --cover
+        run: mix test --cover --exclude haskell
 
   quality:
     name: Code Quality

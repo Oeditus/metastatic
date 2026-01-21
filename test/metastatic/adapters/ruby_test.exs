@@ -1,6 +1,8 @@
 defmodule Metastatic.Adapters.RubyTest do
   use ExUnit.Case, async: true
 
+  @moduletag :ruby
+
   alias Metastatic.Adapters.Ruby
   alias Metastatic.Adapters.Ruby.ToMeta
 

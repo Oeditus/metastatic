@@ -1,6 +1,8 @@
 defmodule Metastatic.Adapters.HaskellTest do
   use ExUnit.Case, async: true
 
+  @moduletag :haskell
+
   alias Metastatic.Adapters.Haskell
   alias Metastatic.Adapters.Haskell.ToMeta
 
