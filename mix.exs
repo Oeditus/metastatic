@@ -139,6 +139,7 @@ defmodule Metastatic.MixProject do
       "GETTING_STARTED.md": [title: "Getting Started"],
       "THEORETICAL_FOUNDATIONS.md": [title: "Theoretical Foundations"],
       "SUPPLEMENTAL_MODULES.md": [title: "Supplemental Modules"],
+      "CONTRIBUTING_SUPPLEMENTALS.md": [title: "Contributing Supplementals"],
       "CHANGELOG.md": [title: "Changelog"]
     ]
   end

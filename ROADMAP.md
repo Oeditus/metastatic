@@ -242,25 +242,35 @@ SUPPLEMENTAL_MODULES.md                         # Comprehensive guide (602 lines
 
 ### Milestone 2.3: Supplemental Discovery & Validation ✅
 
-**Status:** PARTIAL (core validation complete, CLI tooling deferred)
+**Status:** COMPLETE
 
 **Deliverables:**
 - [x] Validator for AST analysis and supplemental detection
 - [x] Runtime validation of supplemental compatibility via Registry
-- [ ] CLI integration (deferred to Phase 2.5)
-- [ ] Compatibility matrix module (deferred to Phase 2.5)
+- [x] CLI integration (mix metastatic.supplemental_check)
+- [x] Compatibility matrix module
 
-**Notes:** Core validation infrastructure complete. Advanced tooling (static analyzer Mix task, compatibility matrix) deferred to future phase as they're not required for basic supplemental functionality.
+**Files Created:**
+```
+lib/mix/tasks/metastatic.supplemental_check.ex         # CLI task (273 lines)
+lib/metastatic/supplemental/compatibility_matrix.ex    # Compatibility matrix (282 lines)
+```
 
 ### Milestone 2.4: Community Supplemental Infrastructure ✅
 
-**Status:** PARTIAL (documentation complete, tooling deferred)
+**Status:** COMPLETE
 
 **Deliverables:**
-- [ ] Template generator (deferred to Phase 2.5)
+- [x] Template generator (mix metastatic.gen.supplemental)
 - [x] Comprehensive documentation for creating supplemental modules
-- [ ] Contribution guidelines (deferred to Phase 2.5)
+- [x] Contribution guidelines (CONTRIBUTING_SUPPLEMENTALS.md)
 - [x] Registry system supports community modules
+
+**Files Created:**
+```
+lib/mix/tasks/metastatic.gen.supplemental.ex     # Generator task (271 lines)
+CONTRIBUTING_SUPPLEMENTALS.md                   # Contribution guide (368 lines)
+```
 
 **Success Criteria:**
 - [x] Supplemental API stable and documented ✅

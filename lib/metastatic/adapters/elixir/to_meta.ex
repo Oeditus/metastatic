@@ -399,9 +399,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
     with {:ok, _arms} <- transform_case_arms(case_clauses) do
       # Mark this as needing the pipe argument
-      {:ok,
-       {:language_specific, :elixir, {:case, [], [clauses]}, "piped case expression"},
-       %{}}
+      {:ok, {:language_specific, :elixir, {:case, [], [clauses]}, "piped case expression"}, %{}}
     end
   end
 
