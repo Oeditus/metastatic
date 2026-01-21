@@ -415,123 +415,132 @@ lib/metastatic/analysis/purity/formatter.ex     # Report formatting (121 lines)
 5. Lines of Code (LoC) - logical vs physical
 6. Function length and parameter count
 
-### Milestone 4.1-4.4: Complete Implementation ✅
+### Milestone 4.1: Core Metrics (Cyclomatic, Cognitive, Nesting) ✅
 
 **Status:** COMPLETE
 
 **Deliverables:**
 - [x] Result struct with all metric fields and threshold checking
-- [x] Cyclomatic complexity calculator (McCabe metric)
-- [x] Cognitive complexity calculator with nesting penalties
-- [x] Nesting depth calculator
-- [x] Halstead metrics calculator (volume, difficulty, effort)
-- [x] Lines of Code calculator (logical, physical, comments)
-- [x] Function metrics calculator (statements, returns, variables)
-- [x] Formatter module (text, JSON, detailed formats)
-- [x] CLI tool with customizable thresholds
-- [x] Configurable thresholds and warnings
-
-**Files to Create:**
-```
-lib/metastatic/analysis/complexity.ex           # Core complexity analyzer
-lib/metastatic/analysis/complexity/cyclomatic.ex # McCabe complexity
-lib/metastatic/analysis/complexity/cognitive.ex  # Cognitive complexity
-lib/metastatic/analysis/complexity/control_flow.ex # CFG construction
-
-test/metastatic/analysis/complexity_test.exs    # 50+ tests
-```
-
-**API Design:**
-```elixir
-alias Metastatic.Analysis.Complexity
-
-# Analyze complexity
-{:ok, metrics} = Complexity.analyze(document)
-
-metrics.cyclomatic       # => 12
-metrics.cognitive        # => 18
-metrics.max_nesting      # => 4
-metrics.warnings         # => ["High complexity (>10)", "Deep nesting (>3)"]
-```
-
-### Milestone 4.2: Halstead Metrics & LoC
-
-**Deliverables:**
-- [ ] Halstead metrics implementation
-  - Operator and operand counting
-  - Vocabulary, length, volume, difficulty, effort
-- [ ] Lines of Code metrics
-  - Physical lines (raw line count)
-  - Logical lines (statement count at M2 level)
-  - Comment lines (from M1 metadata)
-- [ ] Maintainability Index calculation
-
-**Files to Create:**
-```
-lib/metastatic/analysis/complexity/halstead.ex  # Halstead metrics
-lib/metastatic/analysis/complexity/loc.ex       # LoC metrics
-lib/metastatic/analysis/complexity/maintainability.ex
-```
-
-### Milestone 4.3: Function & Module Metrics
-
-**Deliverables:**
-- [ ] Function-level metrics
-  - Function length (LoC, statement count)
-  - Parameter count
-  - Return point count
-  - Local variable count
-- [ ] Module-level metrics
-  - Functions per module
-  - Average complexity per module
-  - Module coupling metrics
-- [ ] Aggregate statistics and trends
-
-**Files to Create:**
-```
-lib/metastatic/analysis/complexity/function.ex  # Function metrics
-lib/metastatic/analysis/complexity/module.ex    # Module metrics
-lib/metastatic/analysis/complexity/aggregates.ex # Statistics
-```
-
-### Milestone 4.4: CLI Integration & Visualization
-
-**Deliverables:**
-- [ ] CLI command: `metastatic complexity <file>`
-- [ ] Multiple output formats: table, JSON, detailed report
-- [ ] Threshold-based warnings and errors
-- [ ] Integration with CI/CD (exit codes for failures)
-- [ ] Visual reports (HTML/terminal)
-- [ ] Comparison mode: compare metrics across versions
-
-**Files to Create:**
-```
-lib/mix/tasks/metastatic.complexity.ex          # CLI command
-lib/metastatic/analysis/complexity/formatter.ex # Report formatting
-lib/metastatic/analysis/complexity/reporter.ex  # Visual reports
-
-test/mix/tasks/metastatic_complexity_test.exs   # 30+ tests
-```
-
-**CLI Examples:**
-```bash
-# Analyze single file
-metastatic complexity my_file.py
-
-# Output as JSON
-metastatic complexity --format json my_file.py
-
-# Set thresholds
-metastatic complexity --max-cyclomatic 10 --max-cognitive 15 my_file.py
-
-# Analyze entire directory
-metastatic complexity --recursive lib/
-
-# Compare with previous version
-metastatic complexity --compare HEAD~1 my_file.py
-```
+- [x] Cyclomatic complexity calculator (McCabe metric) - counts decision points
+- [x] Cognitive complexity calculator with nesting penalties (Sonar specification)
+- [x] Nesting depth calculator - tracks maximum depth
+- [x] Core analyzer module with `analyze/1` and `analyze!/1`
+- [x] 75+ tests covering all core metrics
 
 **Files Created:**
+```
+lib/metastatic/analysis/complexity.ex                   # Core analyzer (192 lines)
+lib/metastatic/analysis/complexity/result.ex            # Result struct (385 lines)
+lib/metastatic/analysis/complexity/cyclomatic.ex        # McCabe complexity (202 lines)
+lib/metastatic/analysis/complexity/cognitive.ex         # Cognitive complexity (205 lines)
+lib/metastatic/analysis/complexity/nesting.ex           # Nesting depth (228 lines)
+
+test/metastatic/analysis/complexity_test.exs            # Core tests (15 tests)
+test/metastatic/analysis/complexity/cyclomatic_test.exs # 38 tests
+test/metastatic/analysis/complexity/cognitive_test.exs  # 19 tests
+test/metastatic/analysis/complexity/nesting_test.exs    # 18 tests
+```
+
+### Milestone 4.2: Halstead Metrics & Lines of Code ✅
+
+**Status:** COMPLETE
+
+**Deliverables:**
+- [x] Halstead metrics implementation
+  - Operator and operand counting (binary_op, unary_op, function_call, literals, variables)
+  - Vocabulary, length, volume, difficulty, effort calculations
+- [x] Lines of Code metrics
+  - Physical lines (from metadata)
+  - Logical lines (statement count at M2 level)
+  - Comment lines (from M1 metadata)
+
+**Files Created:**
+```
+lib/metastatic/analysis/complexity/halstead.ex          # Halstead metrics (270 lines)
+lib/metastatic/analysis/complexity/loc.ex               # LoC metrics (209 lines)
+```
+
+**Notes:** Maintainability Index deferred as optional enhancement (requires combining multiple metrics).
+
+### Milestone 4.3: Function Metrics ✅
+
+**Status:** COMPLETE (with documented limitations)
+
+**Deliverables:**
+- [x] Function-level metrics
+  - Statement count
+  - Return point count
+  - Local variable count
+- [x] Documentation of current limitations
+  - Analyzes entire document as single "function" (MetaAST lacks function_definition construct)
+  - Parameter count not tracked (no function signatures in current M2 model)
+
+**Files Created:**
+```
+lib/metastatic/analysis/complexity/function_metrics.ex  # Function metrics (167 lines)
+```
+
+**Future Work:** Module-level metrics (functions per module, average complexity, coupling) deferred to Phase 5+ as they require function_definition support in MetaAST core.
+
+### Milestone 4.4: CLI Integration & Output Formatting ✅
+
+**Status:** COMPLETE
+
+**Deliverables:**
+- [x] CLI command: `mix metastatic.complexity <file>`
+- [x] Multiple output formats: text, JSON, detailed report
+- [x] Threshold-based warnings (configurable via CLI flags)
+- [x] Integration with CI/CD (exit codes: 0=success, 1=error)
+- [x] Language auto-detection from file extension
+- [x] Customizable thresholds per metric
+
+**Files Created:**
+```
+lib/mix/tasks/metastatic.complexity.ex                  # CLI tool (173 lines)
+lib/metastatic/analysis/complexity/formatter.ex         # Output formatting (177 lines)
+```
+
+**CLI Usage:**
+```bash
+# Analyze single file
+mix metastatic.complexity my_file.py
+
+# Output as JSON
+mix metastatic.complexity --format json my_file.py
+
+# Detailed format with recommendations
+mix metastatic.complexity --format detailed my_file.py
+
+# Set custom thresholds
+mix metastatic.complexity --max-cyclomatic 10 --max-cognitive 15 my_file.py
+
+# Specify language explicitly
+mix metastatic.complexity --language elixir my_file.ex
+```
+
+**Notes:** 
+- Visual reports (HTML) and comparison mode deferred as optional enhancements
+- Directory recursion not implemented (analyze one file at a time)
+
+### Milestone 4.5: Documentation ✅
+
+**Status:** COMPLETE
+
+**Deliverables:**
+- [x] Updated README.md with Complexity Analysis section
+- [x] Updated ROADMAP.md marking Phase 4 complete
+- [x] API documentation with doctests (45 doctests across all modules)
+- [x] CLI usage examples and output format specifications
+
+**Files Updated:**
+```
+README.md       # Added complexity analysis section with examples
+ROADMAP.md      # Marked Phase 4 complete, updated metrics
+```
+
+### Implementation Summary
+
+**All Files Created (~2,200 lines):**
 ```
 lib/metastatic/analysis/complexity.ex                   # Core analyzer (192 lines)
 lib/metastatic/analysis/complexity/result.ex            # Result struct (385 lines)
@@ -544,7 +553,7 @@ lib/metastatic/analysis/complexity/function_metrics.ex  # Function metrics (167 
 lib/metastatic/analysis/complexity/formatter.ex         # Output formatting (177 lines)
 lib/mix/tasks/metastatic.complexity.ex                  # CLI tool (173 lines)
 
-test/metastatic/analysis/complexity_test.exs            # Core tests (207 lines)
+test/metastatic/analysis/complexity_test.exs            # Core tests (15 tests)
 test/metastatic/analysis/complexity/cyclomatic_test.exs # 38 tests
 test/metastatic/analysis/complexity/cognitive_test.exs  # 19 tests
 test/metastatic/analysis/complexity/nesting_test.exs    # 18 tests
