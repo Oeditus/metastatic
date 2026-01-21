@@ -81,9 +81,9 @@ defmodule Demo do
 
     IO.puts("""
     Original Elixir code:
-    
+
         stock >= quantity
-    
+
     This is a fundamental operation in Product.available?/2
     """)
 
@@ -105,13 +105,14 @@ defmodule Demo do
     IO.puts("  Node count: #{meta.node_count}")
 
     subsection("Cross-Language Equivalent:")
+
     IO.puts("""
       Python:   stock >= quantity
       JavaScript: stock >= quantity
       Ruby:     stock >= quantity
       Go:       stock >= quantity
       Rust:     stock >= quantity
-    
+
     All map to the SAME MetaAST node!
     """)
   end
@@ -121,11 +122,11 @@ defmodule Demo do
 
     IO.puts("""
     Original Elixir code:
-    
+
         base_price = price * quantity
         discount = base_price * discount_rate
         base_price - discount
-    
+
     Multi-step calculation from Product.calculate_price/2
     """)
 
@@ -150,6 +151,7 @@ defmodule Demo do
     IO.puts("\n  Variables in expression: #{inspect(MapSet.to_list(variables))}")
 
     subsection("Mutation Possibilities:")
+
     IO.puts("""
       Original operator: -
       Mutations:
@@ -165,7 +167,7 @@ defmodule Demo do
 
     IO.puts("""
     Original Elixir code:
-    
+
         cond do
           quantity >= 100 -> 0.20
           quantity >= 50 -> 0.15
@@ -173,7 +175,7 @@ defmodule Demo do
           quantity >= 5 -> 0.05
           true -> 0.0
         end
-    
+
     Tiered discount system with boundary conditions
     """)
 
@@ -215,6 +217,7 @@ defmodule Demo do
     IO.puts("  Tree depth: #{meta.depth}")
 
     subsection("Boundary Mutations:")
+
     IO.puts("""
       Critical for testing edge cases:
       
@@ -233,12 +236,12 @@ defmodule Demo do
 
     IO.puts("""
     Original Elixir code:
-    
+
         Enum.reduce(items, 0.0, fn {_id, item}, acc ->
           item_price = Product.calculate_price(product, qty)
           acc + item_price
         end)
-    
+
     Higher-order function from Cart.subtotal/1
     """)
 
@@ -246,7 +249,8 @@ defmodule Demo do
     lambda_body =
       {:block,
        [
-         {:function_call, "Product.calculate_price", [{:variable, "product"}, {:variable, "qty"}]},
+         {:function_call, "Product.calculate_price",
+          [{:variable, "product"}, {:variable, "qty"}]},
          {:binary_op, :arithmetic, :+, {:variable, "acc"}, {:variable, "item_price"}}
        ]}
 
@@ -256,6 +260,7 @@ defmodule Demo do
        {:literal, :float, 0.0}}
 
     subsection("MetaAST Representation (M2.2 Extended):")
+
     IO.puts("""
       CollectionOp(reduce):
         ├─ lambda: (item, acc) -> body
@@ -269,6 +274,7 @@ defmodule Demo do
     IO.puts("\n  Layer: #{meta.level} (extended - common in most languages)")
 
     subsection("Cross-Language Equivalents:")
+
     IO.puts("""
       Python:
         reduce(lambda acc, item: acc + calc(item), items, 0.0)
@@ -284,7 +290,7 @@ defmodule Demo do
         for _, item := range items {
           total += calc(item)
         }
-    
+
     MetaAST normalizes these to {:collection_op, :reduce, ...}
     """)
   end
@@ -317,6 +323,7 @@ defmodule Demo do
     IO.puts("  Warnings: #{length(meta.warnings)}")
 
     subsection("What This Enables:")
+
     IO.puts("""
       - Automatic complexity calculation
       - Variable dependency analysis
@@ -331,51 +338,55 @@ defmodule Demo do
     section("Practical Applications")
 
     subsection("1. Mutation Testing")
+
     IO.puts("""
     Generate test-quality metrics by mutating MetaAST:
-    
+
     Original:    stock >= quantity
     Mutants:     stock > quantity   (boundary)
                  stock <= quantity  (relational)
                  stock == quantity  (equality)
-    
+
     Run tests against each mutant.
     Good tests kill mutants. Survivors = weak tests!
     """)
 
     subsection("2. Purity Analysis")
+
     IO.puts("""
     Detect pure functions by walking MetaAST:
-    
+
     Product.calculate_price/2:
       ✓ No I/O operations
       ✓ No side effects
       ✓ Deterministic
       → Pure function!
-    
+
     Benefits: parallelization, memoization, optimization
     """)
 
     subsection("3. Complexity Metrics")
+
     IO.puts("""
     Calculate from MetaAST structure:
-    
+
     calculate_price/2:
       - Cyclomatic complexity: 5 (cond with 5 branches)
       - Nesting depth: 2
       - Decision points: 4
-    
+
     High complexity → needs refactoring or more tests
     """)
 
     subsection("4. Cross-Language Refactoring")
+
     IO.puts("""
     Transform at MetaAST level, generate any language:
-    
+
     Extract calculation:
       Before: inline price * quantity - discount
       After:  call calculate_discounted_price(...)
-    
+
     Apply transformation to Python, JS, Ruby simultaneously!
     """)
   end
@@ -385,7 +396,7 @@ defmodule Demo do
 
     IO.puts("""
     When Python adapter is implemented:
-    
+
     Python source code:
       ↓ PythonAdapter.parse()
     Python AST (M1)
@@ -395,13 +406,14 @@ defmodule Demo do
     Elixir AST (M1)
       ↓ ElixirAdapter.unparse()
     Elixir source code
-    
+
     Translation happens at the semantic level, not textual!
     """)
 
     subsection("Universal Tool Architecture:")
+
     IO.puts("""
-    
+
       ┌──────────┐  ┌────────────┐  ┌─────────┐
       │  Python  │  │ JavaScript │  │ Elixir  │
       └────┬─────┘  └─────┬──────┘  └────┬────┘
@@ -419,7 +431,7 @@ defmodule Demo do
       │ Mutator │  │  Purity  │  │Complexity│
       │ Engine  │  │ Analyzer │  │ Metrics  │
       └─────────┘  └──────────┘  └──────────┘
-    
+
     Write tools ONCE, apply EVERYWHERE!
     """)
   end
@@ -437,20 +449,20 @@ defmodule Demo do
 
     IO.puts("""
     This demo showed metastatic's core capabilities:
-    
+
     ✓ Universal MetaAST representation (M2 level)
     ✓ Three-layer architecture (Core/Extended/Native)
     ✓ Validation and metadata extraction
     ✓ Foundation for cross-language tools
-    
+
     Next steps:
     1. Explore lib/product.ex and lib/cart.ex
     2. Read THEORETICAL_FOUNDATIONS.md for the theory
     3. Check ROADMAP.md for upcoming features
     4. Wait for Phase 2: Python adapter!
-    
+
     metastatic: Build tools once, apply everywhere.
-    
+
     """)
   end
 end

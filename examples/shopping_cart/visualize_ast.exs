@@ -80,8 +80,16 @@ defmodule TreeVisualizer do
         if args != [] do
           Enum.with_index(args, fn arg, idx ->
             is_last_arg = idx == length(args) - 1
-            IO.puts("#{prefix}#{extension}#{if is_last_arg, do: "└── ", else: "├── "}arg[#{idx}]:")
-            print_tree(arg, prefix <> extension <> (if is_last_arg, do: "    ", else: "│   "), true)
+
+            IO.puts(
+              "#{prefix}#{extension}#{if is_last_arg, do: "└── ", else: "├── "}arg[#{idx}]:"
+            )
+
+            print_tree(
+              arg,
+              prefix <> extension <> if(is_last_arg, do: "    ", else: "│   "),
+              true
+            )
           end)
         end
 
@@ -94,7 +102,7 @@ defmodule TreeVisualizer do
 
           IO.puts("#{branch_prefix}#{if is_last_branch, do: "└── ", else: "├── "}Branch[#{idx}]:")
 
-          condition_prefix = branch_prefix <> (if is_last_branch, do: "    ", else: "│   ")
+          condition_prefix = branch_prefix <> if is_last_branch, do: "    ", else: "│   "
           IO.puts("#{condition_prefix}├── condition:")
           print_tree(condition, condition_prefix <> "│   ", true)
 
@@ -152,14 +160,16 @@ defmodule TreeVisualizer do
     {:ok, meta2} = Validator.validate(doc2)
 
     IO.puts("\n#{label1}:")
-    IO.puts("  Depth: #{meta1.depth}  |  Nodes: #{meta1.node_count}  |  Variables: #{
-      MapSet.size(meta1.variables)
-    }")
+
+    IO.puts(
+      "  Depth: #{meta1.depth}  |  Nodes: #{meta1.node_count}  |  Variables: #{MapSet.size(meta1.variables)}"
+    )
 
     IO.puts("\n#{label2}:")
-    IO.puts("  Depth: #{meta2.depth}  |  Nodes: #{meta2.node_count}  |  Variables: #{
-      MapSet.size(meta2.variables)
-    }")
+
+    IO.puts(
+      "  Depth: #{meta2.depth}  |  Nodes: #{meta2.node_count}  |  Variables: #{MapSet.size(meta2.variables)}"
+    )
 
     vars1 = meta1.variables
     vars2 = meta2.variables
@@ -323,6 +333,7 @@ IO.puts("\n\n")
 IO.puts("═" <> String.duplicate("═", 60))
 IO.puts("  Summary")
 IO.puts("═" <> String.duplicate("═", 60))
+
 IO.puts("""
 
 These visualizations demonstrate:
