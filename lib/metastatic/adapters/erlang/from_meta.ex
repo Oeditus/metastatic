@@ -180,6 +180,41 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
+  # Inline Match (=) - M2.1 Core Layer
+  # Reconstruct Erlang pattern matching syntax
+
+  def transform({:inline_match, pattern, value}, metadata) do
+    line = Map.get(metadata, :line, 0)
+    pattern_metadata = Map.get(metadata, :pattern_metadata, %{})
+    expr_metadata = Map.get(metadata, :expr_metadata, %{})
+
+    with {:ok, pattern_erl} <- transform_pattern_to_erlang(pattern, pattern_metadata),
+         {:ok, value_erl} <- transform(value, expr_metadata) do
+      {:ok, {:match, line, pattern_erl, value_erl}}
+    end
+  end
+
+  # Tuples - Used in patterns and values
+
+  def transform({:tuple, elements}, metadata) when is_list(elements) do
+    line = Map.get(metadata, :line, 0)
+
+    with {:ok, elements_erl} <- transform_list(elements, metadata) do
+      {:ok, {:tuple, line, elements_erl}}
+    end
+  end
+
+  # Cons pattern - Used in list patterns [H | T]
+
+  def transform({:cons_pattern, head, tail}, metadata) do
+    line = Map.get(metadata, :line, 0)
+
+    with {:ok, head_erl} <- transform(head, metadata),
+         {:ok, tail_erl} <- transform(tail, metadata) do
+      {:ok, {:cons, line, head_erl, tail_erl}}
+    end
+  end
+
   # Pattern Matching - M2.2 Extended Layer
 
   def transform({:pattern_match, scrutinee, arms}, metadata) do
@@ -265,6 +300,17 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
   end
 
   defp transform_pattern(pattern, metadata) do
+    transform(pattern, metadata)
+  end
+
+  defp transform_pattern_to_erlang(:_, metadata) do
+    line = Map.get(metadata, :line, 0)
+    {:ok, {:var, line, :_}}
+  end
+
+  defp transform_pattern_to_erlang(pattern, metadata) do
+    # Pattern transformation is the same as regular transformation
+    # since we handle tuples and cons patterns in the main transform/2
     transform(pattern, metadata)
   end
 end

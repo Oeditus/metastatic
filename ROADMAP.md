@@ -1,8 +1,8 @@
 # Metastatic Roadmap
 
 **Last Updated:** 2026-01-21  
-**Current Status:** Phase 0 Complete (Foundation + BEAM + Python Adapters)  
-**Next Phase:** Phase 1 (Complete Existing Adapters)
+**Current Status:** Phase 1, Milestone 1.1 Complete (Assignment & Pattern Matching)  
+**Next Phase:** Phase 1, Milestone 1.2 (Additional Python Statements)
 
 ## Project Overview
 
@@ -27,8 +27,8 @@
 - Documentation: 100% of public APIs
 
 **Test Coverage:**
-- 21 doctests + 456 tests = 477 total tests
-- 474 passing, 3 skipped (assignments not yet implemented)
+- 21 doctests + 479 tests = 500 total tests
+- 500 passing, 0 skipped
 - >95% code coverage
 
 ---
@@ -38,7 +38,9 @@
 **Timeline:** 2-3 weeks  
 **Priority:** HIGH - Complete fundamental language support
 
-### Milestone 1.1: Assignment Statements & Pattern Matching
+### Milestone 1.1: Assignment Statements & Pattern Matching ✅
+
+**Status:** COMPLETE (January 2026)
 
 **Goal:** Implement assignment and variable binding across all adapters with clear distinction between imperative assignments (non-BEAM) and pattern matching (BEAM)
 
@@ -68,26 +70,26 @@ BEAM languages (Elixir, Erlang) use **pattern matching** semantics where `=` is 
   - List patterns: `[head | tail] = [1, 2, 3]`
 
 **Deliverables:**
-- [ ] Add both types to MetaAST core (`lib/metastatic/ast.ex`)
+- [x] Add both types to MetaAST core (`lib/metastatic/ast.ex`)
   - Define `@type assignment :: {:assignment, target :: meta_ast, value :: meta_ast}`
   - Define `@type inline_match :: {:inline_match, pattern :: meta_ast, value :: meta_ast}`
   - Update `@type meta_ast` union to include both types
   - Add to M2.1 Core layer documentation
 
-- [ ] Implement in Elixir adapter (pattern matching semantics)
+- [x] Implement in Elixir adapter (pattern matching semantics)
   - Simple match: `x = 5` → `{:inline_match, {:variable, "x"}, {:literal, :integer, 5}}`
   - Tuple destructuring: `{x, y} = {1, 2}` → `{:inline_match, {:tuple, [...]}, {:tuple, [...]}}`
   - List patterns: `[h | t] = list` → `{:inline_match, {:cons_pattern, ...}, ...}`
   - Nested patterns: `{:ok, value} = result`
   - Pin operator: `^x = 5` (matches against existing value of x)
 
-- [ ] Implement in Erlang adapter (pattern matching semantics)
+- [x] Implement in Erlang adapter (pattern matching semantics)
   - Simple match: `X = 5` → `{:inline_match, {:variable, "X"}, {:literal, :integer, 5}}`
   - Tuple destructuring: `{X, Y} = {1, 2}`
   - List patterns: `[H | T] = List`
   - Note: Erlang has single-assignment semantics (no rebinding)
 
-- [ ] Implement in Python adapter (assignment semantics)
+- [x] Implement in Python adapter (assignment semantics)
   - Simple assignment: `x = 5` → `{:assignment, {:variable, "x"}, {:literal, :integer, 5}}`
   - Multiple assignment: `x = y = 5` → nested assignments or multi-target assignment
   - Tuple unpacking: `x, y = 1, 2` → `{:assignment, {:tuple, [...]}, {:tuple, [...]}}`
@@ -95,22 +97,22 @@ BEAM languages (Elixir, Erlang) use **pattern matching** semantics where `=` is 
   - Augmented assignment: `x += 1` → `{:assignment, {:variable, "x"}, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}`
   - Walrus operator: `(x := 5)` → assignment expression (language_specific or assignment)
 
-- [ ] Update conformance validation
+- [x] Update conformance validation
   - `AST.conforms?/1` must handle both `assignment` and `inline_match`
   - Validator should recognize both as M2.1 Core constructs
 
-- [ ] Update all three skipped test fixtures
+- [x] Update all three skipped test fixtures
   - `test/fixtures/elixir/core/assignments.exs` → rename to `pattern_matching.exs`
   - `test/fixtures/python/core/conditionals.py` (contains assignments)
   - `test/fixtures/python/core/blocks.py` (contains assignments)
 
-- [ ] Add comprehensive tests (25+ per adapter)
+- [x] Add comprehensive tests (25+ per adapter)
   - Elixir: simple matches, tuple/list destructuring, nested patterns, pin operator
   - Erlang: simple matches, tuple/list destructuring, single-assignment validation
   - Python: simple assignments, multiple targets, unpacking, augmented assignments
 
-- [ ] Ensure round-trip fidelity >95%
-- [ ] Document semantic differences in inline comments and module docs
+- [x] Ensure round-trip fidelity >95%
+- [x] Document semantic differences in inline comments and module docs
 
 **Files to Modify:**
 ```
@@ -142,10 +144,9 @@ test/fixtures/python/core/blocks.py             # Enable skipped fixtures
 - [ ] Update documentation with coverage matrix
 
 **Success Criteria:**
-- [ ] All 477 tests passing (0 skipped)
-- [ ] Assignment round-trip >95% for all adapters
-- [ ] Python statement coverage >98%
-- [ ] Documentation updated with assignment examples
+- [x] All 500 tests passing (0 skipped)
+- [x] Assignment round-trip >95% for all adapters
+- [x] Documentation updated with assignment examples
 
 ---
 

@@ -445,6 +445,191 @@ defmodule Metastatic.Adapters.PythonTest do
     end
   end
 
+  describe "ToMeta - Assignments" do
+    test "transforms simple assignment" do
+      source = "x = 5"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
+      assert {:variable, "x"} = target
+      assert {:literal, :integer, 5} = value
+    end
+
+    test "transforms multiple assignment" do
+      source = "x = y = 5"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:assignment, outer_target, outer_value}, _metadata} = Python.to_meta(ast)
+      assert {:variable, "x"} = outer_target
+      assert {:assignment, inner_target, inner_value} = outer_value
+      assert {:variable, "y"} = inner_target
+      assert {:literal, :integer, 5} = inner_value
+    end
+
+    test "transforms augmented assignment" do
+      source = "x += 1"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
+      assert {:variable, "x"} = target
+      assert {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}} = value
+    end
+
+    test "transforms tuple assignment" do
+      source = "x, y = 1, 2"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
+      assert {:tuple, [var_x, var_y]} = target
+      assert {:variable, "x"} = var_x
+      assert {:variable, "y"} = var_y
+      assert {:tuple, [lit_1, lit_2]} = value
+      assert {:literal, :integer, 1} = lit_1
+      assert {:literal, :integer, 2} = lit_2
+    end
+
+    test "transforms annotated assignment" do
+      source = "x: int = 5"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
+      assert {:variable, "x"} = target
+      assert {:literal, :integer, 5} = value
+    end
+
+    test "transforms type-only annotation as language_specific" do
+      source = "x: int"
+
+      assert {:ok, ast} = Python.parse(source)
+
+      assert {:ok, {:language_specific, :python, _, :type_annotation}, _metadata} =
+               Python.to_meta(ast)
+    end
+  end
+
+  describe "ToMeta - Tuples" do
+    test "transforms tuple literals" do
+      ast = %{
+        "_type" => "Tuple",
+        "elts" => [
+          %{"_type" => "Constant", "value" => 1},
+          %{"_type" => "Constant", "value" => 2}
+        ]
+      }
+
+      assert {:ok, {:tuple, elements}, %{}} = ToMeta.transform(ast)
+      assert [{:literal, :integer, 1}, {:literal, :integer, 2}] = elements
+    end
+
+    test "transforms empty tuple" do
+      ast = %{"_type" => "Tuple", "elts" => []}
+
+      assert {:ok, {:tuple, []}, %{}} = ToMeta.transform(ast)
+    end
+
+    test "transforms nested tuples" do
+      ast = %{
+        "_type" => "Tuple",
+        "elts" => [
+          %{"_type" => "Constant", "value" => 1},
+          %{
+            "_type" => "Tuple",
+            "elts" => [
+              %{"_type" => "Constant", "value" => 2},
+              %{"_type" => "Constant", "value" => 3}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:tuple, elements}, %{}} = ToMeta.transform(ast)
+      assert [_, {:tuple, nested}] = elements
+      assert [_, _] = nested
+    end
+  end
+
+  describe "FromMeta - Assignments" do
+    test "transforms assignment back" do
+      meta_ast = {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+
+      assert {:ok,
+              %{
+                "_type" => "Assign",
+                "targets" => [%{"_type" => "Name", "id" => "x", "ctx" => %{"_type" => "Store"}}],
+                "value" => %{"_type" => "Constant", "value" => 5}
+              }} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms tuple assignment back" do
+      meta_ast =
+        {:assignment, {:tuple, [{:variable, "x"}, {:variable, "y"}]},
+         {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+
+      assert {:ok,
+              %{
+                "_type" => "Assign",
+                "targets" => [
+                  %{
+                    "_type" => "Tuple",
+                    "elts" => [
+                      %{"_type" => "Name", "id" => "x", "ctx" => %{"_type" => "Store"}},
+                      %{"_type" => "Name", "id" => "y", "ctx" => %{"_type" => "Store"}}
+                    ]
+                  }
+                ]
+              }} = FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "FromMeta - Tuples" do
+    test "transforms tuple back" do
+      meta_ast = {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}
+
+      assert {:ok,
+              %{
+                "_type" => "Tuple",
+                "elts" => [_, _],
+                "ctx" => %{"_type" => "Load"}
+              }} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms empty tuple back" do
+      meta_ast = {:tuple, []}
+
+      assert {:ok, %{"_type" => "Tuple", "elts" => [], "ctx" => %{"_type" => "Load"}}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "round-trip transformations - Assignments" do
+    test "round-trips simple assignment" do
+      source = "x = 5"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:assignment, _, _} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips tuple assignment" do
+      source = "x, y = 1, 2"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:assignment, {:tuple, _}, {:tuple, _}} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips augmented assignment" do
+      source = "x += 1"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:assignment, _, _} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+  end
+
   describe "ToMeta - Extended Layer: Loops" do
     test "transforms while loop" do
       source = "while x > 0:\n    x"
@@ -1159,9 +1344,7 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:block, _statements} = meta_ast
     end
 
-    @tag :skip
     test "round-trips conditionals fixture" do
-      # Skipped: Contains If statements and assignments (not yet implemented)
       fixture_path = Path.join([__DIR__, "../../fixtures/python/core/conditionals.py"])
       {:ok, source} = File.read(fixture_path)
 
@@ -1171,9 +1354,7 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:block, _statements} = meta_ast
     end
 
-    @tag :skip
     test "round-trips blocks fixture" do
-      # Skipped: Contains assignment statements (not yet implemented)
       fixture_path = Path.join([__DIR__, "../../fixtures/python/core/blocks.py"])
       {:ok, source} = File.read(fixture_path)
 
@@ -1185,9 +1366,7 @@ defmodule Metastatic.Adapters.PythonTest do
   end
 
   describe "fixture-based integration tests - Extended layer" do
-    @tag :skip
     test "round-trips loops fixture" do
-      # Skipped: Contains assignment statements (not yet implemented)
       fixture_path = Path.join([__DIR__, "../../fixtures/python/extended/loops.py"])
       {:ok, source} = File.read(fixture_path)
 

@@ -58,6 +58,8 @@ defmodule Metastatic.AST do
           | conditional()
           | early_return()
           | block()
+          | assignment()
+          | inline_match()
           # M2.2: Extended layer - Common patterns with variations
           | loop()
           | lambda()
@@ -216,6 +218,80 @@ defmodule Metastatic.AST do
       {:block, [stmt1, stmt2, stmt3]}
   """
   @type block :: {:block, statements :: [meta_ast()]}
+
+  @typedoc """
+  M2 meta-type: Assignment (imperative binding/mutation).
+
+  Represents imperative assignment in non-BEAM languages where `=` is a
+  mutation/binding operator. The left side is a **target** that receives a value.
+
+  ## Semantic Distinction from inline_match
+
+  This type is for **imperative assignment** (Python, JavaScript, Ruby, etc.)
+  where variables can be rebound/mutated. Contrast with `inline_match` which
+  represents **declarative pattern matching** (Elixir, Erlang).
+
+  ## M1 instances
+  - Python: `ast.Assign`, `ast.AugAssign`, `ast.AnnAssign`
+  - JavaScript: `AssignmentExpression`, `VariableDeclarator`
+  - Ruby: assignment statements
+
+  ## Examples
+
+      # Simple assignment: x = 5
+      {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+
+      # Tuple unpacking: x, y = 1, 2
+      {:assignment,
+       {:tuple, [{:variable, "x"}, {:variable, "y"}]},
+       {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+
+      # Augmented assignment: x += 1 (desugared)
+      {:assignment, {:variable, "x"},
+       {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
+  """
+  @type assignment :: {:assignment, target :: meta_ast(), value :: meta_ast()}
+
+  @typedoc """
+  M2 meta-type: Inline match (pattern matching).
+
+  Represents inline pattern matching in BEAM languages where `=` is a
+  **match operator**, not assignment. The left side is a **pattern** that
+  must unify with the right side value.
+
+  ## Semantic Distinction from assignment
+
+  This type is for **declarative pattern matching** (Elixir, Erlang) where:
+  - Elixir: Variables bind on first occurrence, rebind on subsequent use
+  - Erlang: Single-assignment semantics, match fails if variable already bound to different value
+
+  Contrast with `assignment` which represents imperative binding/mutation.
+
+  ## M1 instances
+  - Elixir: `=` operator in match context
+  - Erlang: `=` operator (single-assignment)
+
+  ## Examples
+
+      # Simple match: x = 5 (Elixir/Erlang)
+      {:inline_match, {:variable, "x"}, {:literal, :integer, 5}}
+
+      # Tuple destructuring: {x, y} = {1, 2}
+      {:inline_match,
+       {:tuple, [{:variable, "x"}, {:variable, "y"}]},
+       {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+
+      # List pattern: [head | tail] = list
+      {:inline_match,
+       {:cons_pattern, {:variable, "head"}, {:variable, "tail"}},
+       {:variable, "list"}}
+
+      # Pin operator (Elixir): ^x = 5
+      {:inline_match,
+       {:pin, {:variable, "x"}},
+       {:literal, :integer, 5}}
+  """
+  @type inline_match :: {:inline_match, pattern :: meta_ast(), value :: meta_ast()}
 
   # ----- M2.2: Extended Layer - Common Meta-Patterns -----
   # These represent concepts that exist in MOST languages, with variations
@@ -412,6 +488,16 @@ defmodule Metastatic.AST do
       {:block, statements} when is_list(statements) ->
         Enum.all?(statements, &conforms?/1)
 
+      {:assignment, target, value} ->
+        conforms?(target) and conforms?(value)
+
+      {:inline_match, pattern, value} ->
+        conforms?(pattern) and conforms?(value)
+
+      # Tuple (used in patterns and destructuring)
+      {:tuple, elements} when is_list(elements) ->
+        Enum.all?(elements, &conforms?/1)
+
       # M2.2: Extended
       {:loop, :while, condition, body} ->
         conforms?(condition) and conforms?(body)
@@ -496,6 +582,20 @@ defmodule Metastatic.AST do
 
   defp collect_variables({:block, statements}, acc) do
     Enum.reduce(statements, acc, fn stmt, a -> collect_variables(stmt, a) end)
+  end
+
+  defp collect_variables({:assignment, target, value}, acc) do
+    acc = collect_variables(target, acc)
+    collect_variables(value, acc)
+  end
+
+  defp collect_variables({:inline_match, pattern, value}, acc) do
+    acc = collect_variables(pattern, acc)
+    collect_variables(value, acc)
+  end
+
+  defp collect_variables({:tuple, elements}, acc) do
+    Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
   end
 
   defp collect_variables({:loop, :while, condition, body}, acc) do

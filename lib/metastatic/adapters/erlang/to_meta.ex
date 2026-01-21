@@ -191,20 +191,26 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     end
   end
 
-  # Match expression (pattern = expr) - keep as assignment for now
-  def transform({:match, _line, pattern, expr}) do
-    with {:ok, pattern_meta, _} <- transform_pattern(pattern),
-         {:ok, expr_meta, _} <- transform(expr) do
-      # Represent as a special form
-      {:ok, {:language_specific, :erlang, {:match, pattern, expr}, :pattern_match},
-       %{pattern: pattern_meta, expression: expr_meta}}
+  # Match expression (pattern = expr) - M2.1 Core Layer
+  # In Erlang, = is pattern matching with single-assignment semantics
+  def transform({:match, line, pattern, expr}) do
+    with {:ok, pattern_meta, pattern_metadata} <- transform_pattern(pattern),
+         {:ok, expr_meta, expr_metadata} <- transform(expr) do
+      # Preserve Erlang metadata for round-trip fidelity
+      metadata = %{
+        line: line,
+        pattern_metadata: pattern_metadata,
+        expr_metadata: expr_metadata
+      }
+
+      {:ok, {:inline_match, pattern_meta, expr_meta}, metadata}
     end
   end
 
-  # Tuples
-  def transform({:tuple, _line, elements}) when is_list(elements) do
+  # Tuples - M2.1 Core Layer
+  def transform({:tuple, line, elements}) when is_list(elements) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:literal, :collection, elements_meta}, %{collection_type: :tuple}}
+      {:ok, {:tuple, elements_meta}, %{line: line}}
     end
   end
 
@@ -288,9 +294,43 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     {:ok, :_, %{}}
   end
 
+  defp transform_pattern({:tuple, line, elements}) when is_list(elements) do
+    # Tuple pattern: {X, Y, Z}
+    with {:ok, elements_meta} <- transform_pattern_list(elements) do
+      {:ok, {:tuple, elements_meta}, %{line: line}}
+    end
+  end
+
+  defp transform_pattern({:cons, line, head, tail}) do
+    # List cons pattern: [H | T]
+    with {:ok, head_meta, _} <- transform_pattern(head),
+         {:ok, tail_meta, _} <- transform_pattern(tail) do
+      {:ok, {:cons_pattern, head_meta, tail_meta}, %{line: line}}
+    end
+  end
+
+  defp transform_pattern({nil, line}) do
+    # Empty list pattern: []
+    {:ok, {:literal, :collection, []}, %{collection_type: :list, line: line}}
+  end
+
   defp transform_pattern(pattern) do
     # Regular patterns are just expressions
     transform(pattern)
+  end
+
+  defp transform_pattern_list(patterns) when is_list(patterns) do
+    patterns
+    |> Enum.reduce_while({:ok, []}, fn pattern, {:ok, acc} ->
+      case transform_pattern(pattern) do
+        {:ok, pattern_meta, _} -> {:cont, {:ok, [pattern_meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, patterns} -> {:ok, Enum.reverse(patterns)}
+      error -> error
+    end
   end
 
   defp transform_body([single]) do

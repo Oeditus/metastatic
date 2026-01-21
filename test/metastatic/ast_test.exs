@@ -108,6 +108,50 @@ defmodule Metastatic.ASTTest do
       assert AST.conforms?(ast)
     end
 
+    test "assignment simple" do
+      ast = {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+      assert AST.conforms?(ast)
+    end
+
+    test "assignment tuple unpacking" do
+      ast =
+        {:assignment, {:tuple, [{:variable, "x"}, {:variable, "y"}]},
+         {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "assignment augmented (desugared)" do
+      # x += 1 desugared to x = x + 1
+      ast =
+        {:assignment, {:variable, "x"},
+         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "inline_match simple" do
+      ast = {:inline_match, {:variable, "x"}, {:literal, :integer, 5}}
+      assert AST.conforms?(ast)
+    end
+
+    test "inline_match tuple destructuring" do
+      ast =
+        {:inline_match, {:tuple, [{:variable, "x"}, {:variable, "y"}]},
+         {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "inline_match nested pattern" do
+      # {:ok, value} = result
+      ast =
+        {:inline_match, {:tuple, [{:literal, :symbol, :ok}, {:variable, "value"}]},
+         {:variable, "result"}}
+
+      assert AST.conforms?(ast)
+    end
+
     test "complex nested expression" do
       # ((x + 5) * y) > 10
       ast =
@@ -328,6 +372,41 @@ defmodule Metastatic.ASTTest do
     test "no variables in literal" do
       ast = {:literal, :integer, 42}
       assert AST.variables(ast) == MapSet.new([])
+    end
+
+    test "assignment with variables" do
+      # x = y + 5
+      ast =
+        {:assignment, {:variable, "x"},
+         {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 5}}}
+
+      assert AST.variables(ast) == MapSet.new(["x", "y"])
+    end
+
+    test "assignment with tuple unpacking" do
+      # x, y = a, b
+      ast =
+        {:assignment, {:tuple, [{:variable, "x"}, {:variable, "y"}]},
+         {:tuple, [{:variable, "a"}, {:variable, "b"}]}}
+
+      assert AST.variables(ast) == MapSet.new(["x", "y", "a", "b"])
+    end
+
+    test "inline_match with variables" do
+      # x = y + 5
+      ast =
+        {:inline_match, {:variable, "x"},
+         {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 5}}}
+
+      assert AST.variables(ast) == MapSet.new(["x", "y"])
+    end
+
+    test "inline_match with pattern" do
+      # {x, y} = result
+      ast =
+        {:inline_match, {:tuple, [{:variable, "x"}, {:variable, "y"}]}, {:variable, "result"}}
+
+      assert AST.variables(ast) == MapSet.new(["x", "y", "result"])
     end
   end
 end

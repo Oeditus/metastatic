@@ -101,6 +101,35 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
+  # Tuple literals - M2.1 Core Layer
+  # Two-element tuple shorthand: {x, y}
+  def transform({left, right}) when not is_atom(left) or not is_atom(right) do
+    # This is a tuple literal, not a special Elixir AST form
+    # Check if both sides are actual values, not AST constructs like {:var, [], nil}
+    case {left, right} do
+      {{atom1, _meta1, _ctx1}, {atom2, _meta2, _ctx2}} when is_atom(atom1) and is_atom(atom2) ->
+        # Both are variables/atoms - treat as tuple pattern/value
+        with {:ok, left_meta, _} <- transform(left),
+             {:ok, right_meta, _} <- transform(right) do
+          {:ok, {:tuple, [left_meta, right_meta]}, %{}}
+        end
+
+      _ ->
+        # Regular tuple literal
+        with {:ok, left_meta, _} <- transform(left),
+             {:ok, right_meta, _} <- transform(right) do
+          {:ok, {:tuple, [left_meta, right_meta]}, %{}}
+        end
+    end
+  end
+
+  # Three or more element tuple: {x, y, z, ...}
+  def transform({:{}, _meta, elements}) when is_list(elements) do
+    with {:ok, elements_meta} <- transform_list(elements) do
+      {:ok, {:tuple, elements_meta}, %{}}
+    end
+  end
+
   # Variables - M2.1 Core Layer
 
   def transform({var, meta, context}) when is_atom(var) and is_atom(context) do
@@ -161,6 +190,22 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
          {:ok, right_meta, _} <- transform(right) do
       {:ok, {:language_specific, :elixir, {:|>, [], [left, right]}, :pipe},
        %{left: left_meta, right: right_meta}}
+    end
+  end
+
+  # Match Operator (=) - M2.1 Core Layer
+  # In Elixir, = is pattern matching, not assignment
+  def transform({:=, meta, [left, right]}) do
+    with {:ok, pattern_meta, pattern_metadata} <- transform_pattern(left),
+         {:ok, value_meta, value_metadata} <- transform(right) do
+      # Preserve Elixir metadata for round-trip fidelity
+      metadata = %{
+        elixir_meta: meta,
+        pattern_metadata: pattern_metadata,
+        value_metadata: value_metadata
+      }
+
+      {:ok, {:inline_match, pattern_meta, value_meta}, metadata}
     end
   end
 
@@ -398,8 +443,87 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp transform_pattern(pattern) do
     # Pattern matching patterns - similar to regular transforms but allow wildcards
     case pattern do
-      {:_, _, _} -> {:ok, :_, %{}}
-      _ -> transform(pattern)
+      # Wildcard pattern
+      {:_, _, _} ->
+        {:ok, :_, %{}}
+
+      # Pin operator: ^variable
+      {:^, meta, [var]} ->
+        with {:ok, var_meta, var_metadata} <- transform(var) do
+          {:ok, {:pin, var_meta}, Map.merge(%{elixir_meta: meta}, var_metadata)}
+        end
+
+      # Tuple pattern: {x, y, z}
+      {:{}, _meta, elements} ->
+        with {:ok, elements_meta} <- transform_pattern_list(elements) do
+          {:ok, {:tuple, elements_meta}, %{}}
+        end
+
+      # Two-element tuple shorthand: {x, y}
+      {left, right} when not is_atom(left) or not is_atom(right) ->
+        with {:ok, left_meta, _} <- transform_pattern(left),
+             {:ok, right_meta, _} <- transform_pattern(right) do
+          {:ok, {:tuple, [left_meta, right_meta]}, %{}}
+        end
+
+      # List pattern: [h | t] or [1, 2, 3]
+      [_ | _] = list ->
+        transform_list_pattern(list)
+
+      [] ->
+        {:ok, {:literal, :collection, []}, %{collection_type: :list}}
+
+      # Variable or literal
+      _ ->
+        transform(pattern)
+    end
+  end
+
+  defp transform_pattern_list(patterns) when is_list(patterns) do
+    patterns
+    |> Enum.reduce_while({:ok, []}, fn pattern, {:ok, acc} ->
+      case transform_pattern(pattern) do
+        {:ok, pattern_meta, _} -> {:cont, {:ok, [pattern_meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, patterns} -> {:ok, Enum.reverse(patterns)}
+      error -> error
+    end
+  end
+
+  defp transform_list_pattern(list) do
+    # Check if it's a cons pattern [head | tail]
+    case list do
+      [head | tail] when is_list(tail) and tail != [] ->
+        # Check if tail is a single variable (cons pattern)
+        case tail do
+          [{var, _, context}] when is_atom(var) and is_atom(context) ->
+            # This is [head | tail] pattern
+            with {:ok, head_meta, _} <- transform_pattern(head),
+                 {:ok, tail_meta, _} <- transform_pattern({var, [], context}) do
+              {:ok, {:cons_pattern, head_meta, tail_meta}, %{}}
+            end
+
+          _ ->
+            # List with multiple elements - transform each
+            with {:ok, elements_meta} <- transform_pattern_list(list) do
+              {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
+            end
+        end
+
+      [single] ->
+        # Single element list
+        with {:ok, element_meta, _} <- transform_pattern(single) do
+          {:ok, {:literal, :collection, [element_meta]}, %{collection_type: :list}}
+        end
+
+      _ ->
+        # Empty or literal list
+        with {:ok, elements_meta} <- transform_pattern_list(list) do
+          {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
+        end
     end
   end
 

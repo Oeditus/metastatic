@@ -169,6 +169,20 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     end
   end
 
+  # Inline Match (=) - M2.1 Core Layer
+  # Reconstruct Elixir pattern matching syntax
+
+  def transform({:inline_match, pattern, value}, metadata) do
+    pattern_metadata = Map.get(metadata, :pattern_metadata, %{})
+    value_metadata = Map.get(metadata, :value_metadata, %{})
+    elixir_meta = Map.get(metadata, :elixir_meta, [])
+
+    with {:ok, pattern_ex} <- transform_pattern_to_elixir(pattern, pattern_metadata),
+         {:ok, value_ex} <- transform(value, value_metadata) do
+      {:ok, {:=, elixir_meta, [pattern_ex, value_ex]}}
+    end
+  end
+
   # Early Returns - M2.1 Core Layer
 
   def transform({:early_return, kind, value}, metadata) do
@@ -254,6 +268,43 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     {:error, "Cannot reify #{other_lang} language-specific construct to Elixir"}
   end
 
+  # Tuples - Used in patterns and values
+
+  def transform({:tuple, elements}, metadata) when is_list(elements) do
+    with {:ok, elements_ex} <- transform_list(elements, metadata) do
+      case elements_ex do
+        [] ->
+          {:ok, {:{}, [], []}}
+
+        [e1, e2] ->
+          # Two-element tuple uses shorthand notation
+          {:ok, {e1, e2}}
+
+        _ ->
+          # Three or more elements use explicit tuple syntax
+          {:ok, {:{}, [], elements_ex}}
+      end
+    end
+  end
+
+  # Pin operator - Used in patterns
+
+  def transform({:pin, var}, metadata) do
+    with {:ok, var_ex} <- transform(var, metadata) do
+      elixir_meta = Map.get(metadata, :elixir_meta, [])
+      {:ok, {:^, elixir_meta, [var_ex]}}
+    end
+  end
+
+  # Cons pattern - Used in list patterns [head | tail]
+
+  def transform({:cons_pattern, head, tail}, metadata) do
+    with {:ok, head_ex} <- transform(head, metadata),
+         {:ok, tail_ex} <- transform(tail, metadata) do
+      {:ok, [head_ex | tail_ex]}
+    end
+  end
+
   # Catch-all for unsupported constructs
 
   def transform(unknown, _metadata) do
@@ -314,6 +365,17 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   defp transform_pattern(pattern, metadata) do
     # Regular pattern is just a transformation
+    transform(pattern, metadata)
+  end
+
+  defp transform_pattern_to_elixir(:_, _metadata) do
+    # Wildcard pattern
+    {:ok, {:_, [], nil}}
+  end
+
+  defp transform_pattern_to_elixir(pattern, metadata) do
+    # Pattern transformation is the same as regular transformation
+    # since we handle tuples, pins, and cons patterns in the main transform/2
     transform(pattern, metadata)
   end
 

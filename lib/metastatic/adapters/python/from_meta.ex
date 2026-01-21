@@ -149,6 +149,23 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     {:ok, %{"_type" => "Continue"}}
   end
 
+  # Assignments - M2.1 Core Layer
+
+  def transform({:assignment, target, value}, metadata) do
+    with {:ok, target_py} <- transform_assignment_target(target, metadata),
+         {:ok, value_py} <- transform(value, metadata) do
+      {:ok, %{"_type" => "Assign", "targets" => [target_py], "value" => value_py}}
+    end
+  end
+
+  # Tuples - M2.1 Core Layer
+
+  def transform({:tuple, elements}, metadata) do
+    with {:ok, elts_py} <- transform_list(elements, metadata) do
+      {:ok, %{"_type" => "Tuple", "elts" => elts_py, "ctx" => %{"_type" => "Load"}}}
+    end
+  end
+
   # Loops - M2.2 Extended Layer
 
   def transform({:loop, :while, condition, body}, metadata) do
@@ -291,6 +308,34 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Helper Functions
+
+  defp transform_assignment_target({:variable, name}, _metadata) when is_binary(name) do
+    {:ok, %{"_type" => "Name", "id" => name, "ctx" => %{"_type" => "Store"}}}
+  end
+
+  defp transform_assignment_target({:tuple, elements}, metadata) do
+    with {:ok, elts_py} <- transform_assignment_targets(elements, metadata) do
+      {:ok, %{"_type" => "Tuple", "elts" => elts_py, "ctx" => %{"_type" => "Store"}}}
+    end
+  end
+
+  defp transform_assignment_target(target, _metadata) do
+    {:error, "Unsupported assignment target: #{inspect(target)}"}
+  end
+
+  defp transform_assignment_targets(items, metadata) when is_list(items) do
+    items
+    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
+      case transform_assignment_target(item, metadata) do
+        {:ok, py} -> {:cont, {:ok, [py | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, items} -> {:ok, Enum.reverse(items)}
+      error -> error
+    end
+  end
 
   defp transform_list(items, metadata) when is_list(items) do
     items

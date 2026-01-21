@@ -265,6 +265,55 @@ defmodule Metastatic.Adapters.ElixirTest do
     end
   end
 
+  describe "ToMeta - inline_match (pattern matching)" do
+    test "transforms simple match: x = 5" do
+      ast = {:=, [], [{:x, [], nil}, 5]}
+
+      assert {:ok, {:inline_match, pattern, value}, metadata} = ToMeta.transform(ast)
+      assert {:variable, "x"} = pattern
+      assert {:literal, :integer, 5} = value
+      assert is_map(metadata)
+    end
+
+    test "transforms tuple destructuring: {x, y} = {1, 2}" do
+      # {x, y} = {1, 2}
+      left = {{:x, [], nil}, {:y, [], nil}}
+      right = {1, 2}
+      ast = {:=, [], [left, right]}
+
+      assert {:ok, {:inline_match, pattern, value}, _metadata} = ToMeta.transform(ast)
+      assert {:tuple, [var_x, var_y]} = pattern
+      assert {:variable, "x"} = var_x
+      assert {:variable, "y"} = var_y
+      assert {:tuple, [lit1, lit2]} = value
+      assert {:literal, :integer, 1} = lit1
+      assert {:literal, :integer, 2} = lit2
+    end
+
+    test "transforms nested pattern: {:ok, value} = result" do
+      # {:ok, value} = result
+      pattern = {:ok, {:value, [], nil}}
+      value = {:result, [], nil}
+      ast = {:=, [], [pattern, value]}
+
+      assert {:ok, {:inline_match, pattern_meta, value_meta}, _metadata} = ToMeta.transform(ast)
+      assert {:tuple, [ok_atom, var_value]} = pattern_meta
+      assert {:literal, :symbol, :ok} = ok_atom
+      assert {:variable, "value"} = var_value
+      assert {:variable, "result"} = value_meta
+    end
+
+    test "transforms pin operator: ^x = 5" do
+      # ^x = 5
+      pin_ast = {:^, [], [{:x, [], nil}]}
+      ast = {:=, [], [pin_ast, 5]}
+
+      assert {:ok, {:inline_match, pattern, value}, _metadata} = ToMeta.transform(ast)
+      assert {:pin, {:variable, "x"}} = pattern
+      assert {:literal, :integer, 5} = value
+    end
+  end
+
   describe "ToMeta - anonymous functions" do
     test "transforms simple anonymous function" do
       ast = {:fn, [], [{:->, [], [[{:x, [], nil}], {:+, [], [{:x, [], nil}, 1]}]}]}
@@ -425,6 +474,44 @@ defmodule Metastatic.Adapters.ElixirTest do
     test "transforms empty block to nil" do
       meta_ast = {:block, []}
       assert {:ok, nil} = FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "FromMeta - inline_match (pattern matching)" do
+    test "transforms simple match back: x = 5" do
+      meta_ast = {:inline_match, {:variable, "x"}, {:literal, :integer, 5}}
+      assert {:ok, {:=, [], [{:x, [], nil}, 5]}} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms tuple destructuring back: {x, y} = {1, 2}" do
+      meta_ast =
+        {:inline_match, {:tuple, [{:variable, "x"}, {:variable, "y"}]},
+         {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+
+      assert {:ok, {:=, [], [pattern, value]}} = FromMeta.transform(meta_ast, %{})
+      assert {{:x, [], nil}, {:y, [], nil}} = pattern
+      assert {1, 2} = value
+    end
+
+    test "transforms nested pattern back: {:ok, value} = result" do
+      meta_ast =
+        {:inline_match, {:tuple, [{:literal, :symbol, :ok}, {:variable, "value"}]},
+         {:variable, "result"}}
+
+      assert {:ok, {:=, [], [pattern, {:result, [], nil}]}} = FromMeta.transform(meta_ast, %{})
+      assert {:ok, {:value, [], nil}} = pattern
+    end
+
+    test "transforms pin operator back: ^x = 5" do
+      meta_ast = {:inline_match, {:pin, {:variable, "x"}}, {:literal, :integer, 5}}
+      assert {:ok, {:=, [], [{:^, [], [{:x, [], nil}]}, 5]}} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "preserves metadata in round-trip" do
+      meta_ast = {:inline_match, {:variable, "x"}, {:literal, :integer, 5}}
+      metadata = %{elixir_meta: [line: 10]}
+
+      assert {:ok, {:=, [line: 10], _}} = FromMeta.transform(meta_ast, metadata)
     end
   end
 

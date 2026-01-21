@@ -229,10 +229,98 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:ok, {:early_return, :continue, nil}, %{}}
   end
 
+  # Assignment - M2.1 Core Layer
+  # In Python, = is assignment (imperative binding/mutation)
+
+  # Simple assignment: x = 5
+  def transform(%{"_type" => "Assign", "targets" => [target], "value" => value}) do
+    with {:ok, target_meta, target_metadata} <- transform(target),
+         {:ok, value_meta, value_metadata} <- transform(value) do
+      metadata = %{
+        target_metadata: target_metadata,
+        value_metadata: value_metadata
+      }
+
+      {:ok, {:assignment, target_meta, value_meta}, metadata}
+    end
+  end
+
+  # Multiple assignment: x = y = 5
+  # Python allows chaining: a = b = c = 5
+  # Transform to nested assignments: a = (b = (c = 5))
+  def transform(%{"_type" => "Assign", "targets" => targets, "value" => value})
+      when length(targets) > 1 do
+    with {:ok, value_meta, value_metadata} <- transform(value) do
+      # Build nested assignments from right to left
+      result =
+        targets
+        |> Enum.reverse()
+        |> Enum.reduce({:ok, value_meta, value_metadata}, fn target, {:ok, current_value, _} ->
+          with {:ok, target_meta, target_metadata} <- transform(target) do
+            metadata = %{
+              target_metadata: target_metadata,
+              value_metadata: %{}
+            }
+
+            {:ok, {:assignment, target_meta, current_value}, metadata}
+          end
+        end)
+
+      result
+    end
+  end
+
+  # Augmented assignment: x += 1, x *= 2, etc.
+  # Desugar to: x = x + 1
+  def transform(%{"_type" => "AugAssign", "target" => target, "op" => op, "value" => value}) do
+    with {:ok, target_meta, target_metadata} <- transform(target),
+         {:ok, {category, operator}} <- transform_binop(op),
+         {:ok, value_meta, _} <- transform(value) do
+      # Desugar: x += 1 becomes x = x + 1
+      desugared_value = {:binary_op, category, operator, target_meta, value_meta}
+
+      metadata = %{
+        target_metadata: target_metadata,
+        value_metadata: %{},
+        augmented_op: operator
+      }
+
+      {:ok, {:assignment, target_meta, desugared_value}, metadata}
+    end
+  end
+
+  # Annotated assignment: x: int = 5 (Python 3.6+)
+  # Ignore the annotation for now
+  def transform(%{"_type" => "AnnAssign", "target" => target, "value" => value})
+      when not is_nil(value) do
+    with {:ok, target_meta, target_metadata} <- transform(target),
+         {:ok, value_meta, value_metadata} <- transform(value) do
+      metadata = %{
+        target_metadata: target_metadata,
+        value_metadata: value_metadata
+      }
+
+      {:ok, {:assignment, target_meta, value_meta}, metadata}
+    end
+  end
+
+  # Annotated assignment without value: x: int (declaration only)
+  def transform(%{"_type" => "AnnAssign", "target" => _target, "value" => nil} = node) do
+    # Type-only annotation, treat as language-specific
+    {:ok, {:language_specific, :python, node, :type_annotation}, %{}}
+  end
+
   # Lists as literal collections
   def transform(%{"_type" => "List", "elts" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
       {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
+    end
+  end
+
+  # Tuples - Used in patterns and values
+  def transform(%{"_type" => "Tuple", "elts" => elements}) do
+    with {:ok, elements_meta} <- transform_list(elements) do
+      {:ok, {:tuple, elements_meta}, %{}}
     end
   end
 

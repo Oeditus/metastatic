@@ -136,6 +136,52 @@ defmodule Metastatic.Adapters.ErlangTest do
     end
   end
 
+  describe "ToMeta - inline_match (pattern matching)" do
+    test "transforms simple match: X = 5" do
+      ast = {:match, 1, {:var, 1, :X}, {:integer, 1, 5}}
+
+      assert {:ok, {:inline_match, pattern, value}, metadata} = ToMeta.transform(ast)
+      assert {:variable, "X"} = pattern
+      assert {:literal, :integer, 5} = value
+      assert %{line: 1} = metadata
+    end
+
+    test "transforms tuple destructuring: {X, Y} = {1, 2}" do
+      # {X, Y} = {1, 2}
+      pattern = {:tuple, 1, [{:var, 1, :X}, {:var, 1, :Y}]}
+      value = {:tuple, 1, [{:integer, 1, 1}, {:integer, 1, 2}]}
+      ast = {:match, 1, pattern, value}
+
+      assert {:ok, {:inline_match, pattern_meta, value_meta}, _metadata} = ToMeta.transform(ast)
+      assert {:tuple, [var_x, var_y]} = pattern_meta
+      assert {:variable, "X"} = var_x
+      assert {:variable, "Y"} = var_y
+      assert {:tuple, [lit1, lit2]} = value_meta
+      assert {:literal, :integer, 1} = lit1
+      assert {:literal, :integer, 2} = lit2
+    end
+
+    test "transforms list cons pattern: [H | T] = List" do
+      # [H | T] = List
+      pattern = {:cons, 1, {:var, 1, :H}, {:var, 1, :T}}
+      value = {:var, 1, :List}
+      ast = {:match, 1, pattern, value}
+
+      assert {:ok, {:inline_match, pattern_meta, value_meta}, _metadata} = ToMeta.transform(ast)
+      assert {:cons_pattern, {:variable, "H"}, {:variable, "T"}} = pattern_meta
+      assert {:variable, "List"} = value_meta
+    end
+
+    test "transforms wildcard pattern: _ = Value" do
+      # _ = Value
+      ast = {:match, 1, {:var, 1, :_}, {:var, 1, :Value}}
+
+      assert {:ok, {:inline_match, pattern, value}, _metadata} = ToMeta.transform(ast)
+      assert :_ = pattern
+      assert {:variable, "Value"} = value
+    end
+  end
+
   describe "FromMeta - literals" do
     test "transforms integer literals back" do
       assert {:ok, {:integer, 0, 42}} = FromMeta.transform({:literal, :integer, 42}, %{})
@@ -177,6 +223,47 @@ defmodule Metastatic.Adapters.ErlangTest do
 
       assert {:ok, {:call, 0, {:atom, 0, :foo}, [{:integer, 0, 1}, {:integer, 0, 2}]}} =
                FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "FromMeta - inline_match (pattern matching)" do
+    test "transforms simple match back: X = 5" do
+      meta_ast = {:inline_match, {:variable, "X"}, {:literal, :integer, 5}}
+
+      assert {:ok, {:match, 0, {:var, 0, :X}, {:integer, 0, 5}}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms tuple destructuring back: {X, Y} = {1, 2}" do
+      meta_ast =
+        {:inline_match, {:tuple, [{:variable, "X"}, {:variable, "Y"}]},
+         {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+
+      assert {:ok, {:match, 0, pattern, value}} = FromMeta.transform(meta_ast, %{})
+      assert {:tuple, 0, [{:var, 0, :X}, {:var, 0, :Y}]} = pattern
+      assert {:tuple, 0, [{:integer, 0, 1}, {:integer, 0, 2}]} = value
+    end
+
+    test "transforms cons pattern back: [H | T] = List" do
+      meta_ast =
+        {:inline_match, {:cons_pattern, {:variable, "H"}, {:variable, "T"}}, {:variable, "List"}}
+
+      assert {:ok, {:match, 0, {:cons, 0, {:var, 0, :H}, {:var, 0, :T}}, {:var, 0, :List}}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms wildcard pattern back: _ = Value" do
+      meta_ast = {:inline_match, :_, {:variable, "Value"}}
+
+      assert {:ok, {:match, 0, {:var, 0, :_}, {:var, 0, :Value}}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "preserves line numbers in round-trip" do
+      meta_ast = {:inline_match, {:variable, "X"}, {:literal, :integer, 5}}
+      metadata = %{line: 42}
+
+      assert {:ok, {:match, 42, _, _}} = FromMeta.transform(meta_ast, metadata)
     end
   end
 
