@@ -2,29 +2,53 @@
 
 **Cross-language code analysis through unified MetaAST representation**
 
-Metastatic is a library that enables sophisticated code analysis, mutation testing, and transformation across multiple programming languages using a three-layer MetaAST (Meta-level Abstract Syntax Tree) intermediate representation.
+Metastatic is a library that provides a unified MetaAST (Meta-level Abstract Syntax Tree) intermediate representation for parsing, transforming, and analyzing code across multiple programming languages using a three-layer meta-model architecture.
 
 ## Vision
 
-Build tools once, apply them everywhere. Write mutation operators, purity analyzers, or complexity metrics in Elixir, and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
+Build tools once, apply them everywhere. Create a universal meta-model for program syntax that enables cross-language code analysis, transformation, and tooling.
+
+**Metastatic provides the foundation** - the MetaAST meta-model and language adapters. Tools that leverage this foundation (mutation testing, purity analysis, complexity metrics) are built separately.
+
+**Note:** Mutation testing functionality will be implemented in the separate [`muex`](https://github.com/Oeditus/muex) library, which will leverage Metastatic's MetaAST as its foundation.
 
 ## Key Features
 
-- **Layered Architecture**: Three-layer MetaAST design balances abstraction with language-specific fidelity
-- **Cross-Language Mutations**: Apply the same mutation operators to any supported language
-- **Purity Analysis**: Detect side effects and pure functions uniformly across languages
-- **Complexity Metrics**: Calculate cyclomatic complexity, cognitive complexity on any codebase
-- **Round-Trip Fidelity**: Transform source → MetaAST → source with >95% accuracy
+- **Layered Architecture**: Three-layer MetaAST design (M2.1 Core, M2.2 Extended, M2.3 Native)
+- **Language Adapters**: Bidirectional M1 ↔ M2 transformations for multiple languages
+- **Round-Trip Fidelity**: Transform source → MetaAST → source with >90% accuracy
+- **Meta-Model Foundation**: MOF-based meta-modeling (M2 level) for universal AST representation
+- **Cross-Language Equivalence**: Semantically equivalent code produces identical MetaAST across languages
+
+## Scope
+
+**What Metastatic Provides:**
+- MetaAST meta-model (M2 level) with three layers
+- Language adapters (Python, Elixir, Erlang, more planned)
+- Parsing, transformation, and unparsing infrastructure
+- Cross-language semantic equivalence validation
+
+**What Metastatic Does NOT Provide:**
+- Mutation testing (see [`muex`](https://github.com/Oeditus/muex) library)
+- Purity analysis (planned for separate library)
+- Complexity metrics (planned for separate library)
+- Code quality auditing (see Oeditus ecosystem)
+
+Metastatic is a **foundation library** that other tools build upon.
 
 ## Current Status
 
-**Phase:** Phase 2 Complete 🎉 - BEAM Ecosystem Adapters with Extended & Native Layers!  
-**Version:** 0.2.0-dev  
-**Completed:** All Phase 1 + Phase 2 (Core, Extended, Native layers)  
-**Tests:** 259 passing (21 doctests + 238 tests), >95% coverage  
-**Next:** Phase 3 - Python Adapter & Cross-Language Tools  
-**Languages Supported:** Elixir ✅ (all 3 layers), Erlang ✅
-**Languages Planned:** Python, JavaScript, TypeScript, Ruby, Go, Rust
+**Phase:** Phase 3 Complete 🎉 - Python Adapter with Full M2 Support!  
+**Version:** 0.3.0-dev  
+**Completed:** Phase 1 (Foundation) + Phase 2 (BEAM Adapters) + Phase 3 (Python Adapter)  
+**Tests:** 395 passing (21 doctests + 374 tests), 99.2% pass rate, 0 failures  
+**Next:** Phase 4 - JavaScript Adapter & Additional Language Support  
+**Languages Supported:**
+- Elixir ✅ (all 3 layers: Core, Extended, Native)
+- Erlang ✅ (all 3 layers: Core, Extended, Native)
+- Python ✅ (all 3 layers: Core, Extended, Native)
+
+**Languages Planned:** JavaScript, TypeScript, Ruby, Go, Rust
 
 ## Quick Start
 
@@ -167,52 +191,87 @@ Language-specific: lifetimes, async models, type systems, metaprogramming
 
 **Total Phase 2: 105 new tests (259 total), +2,200 LOC, comprehensive test fixtures**
 
-### Phase 3: Python Adapter (Weeks 21-28)
-- Python AST parsing via subprocess
-- M1 ↔ M2 transformations
-- Cross-language validation
+### ✅ Phase 3: Python Adapter (Complete!)
+**Milestone 3.1: Parser Integration**
+- ✅ Python AST parsing via subprocess
+- ✅ JSON serialization with robust error handling
+- ✅ 110 Python adapter tests
 
-### Phase 4: Cross-Language Tools (Months 4-6)
-- Mutation engine (operates at M2 level)
-- Purity analyzer
-- Complexity metrics
+**Milestone 3.2: Core Layer (M2.1)**
+- ✅ All Core constructs (literals, variables, operators, conditionals, blocks)
+- ✅ 45 Core layer tests, 100% passing
 
-### Phase 5: JavaScript/TypeScript Adapters (Months 7-8)
-- JavaScript adapter
+**Milestone 3.3: Extended Layer (M2.2)**
+- ✅ Loops, lambdas, collection operations, exception handling
+- ✅ 23 Extended layer tests, 100% passing
+
+**Milestone 3.4: Native Layer (M2.3) & Fixtures**
+- ✅ 21 language_specific patterns
+- ✅ 17 test fixtures with comprehensive documentation
+- ✅ 25 Native layer tests + 18 integration tests + 6 cross-language tests
+- ✅ Performance validation (<100ms per 1000 LOC)
+
+**Total Phase 3: 136 new tests (395 total), +1,335 LOC, zero regressions**
+
+### Phase 4: JavaScript Adapter (Months 4-6)
+- JavaScript adapter with Babel parser integration
+- M1 ↔ M2 bidirectional transformations
+- Cross-language validation (JavaScript ≡ Python ≡ Elixir)
+
+### Phase 5: Additional Languages (Months 7-12)
 - TypeScript adapter
-- Additional cross-language validation
+- Ruby adapter
+- Go adapter
+- Rust adapter (optional)
 
-### Phase 6: Integration & Expansion (Months 9-14)
-- CLI tool
-- Oeditus integration
-- Ruby, Go, Rust adapters
-- Community building
-- Open source release
+### Phase 6: Supplemental Modules (Months 13-18)
+- Supplemental module API for cross-language feature gaps
+- Official supplemental modules (pykka, nact, asyncio)
+- Static analysis and discovery tools
+- Community infrastructure
+
+See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for complete roadmap.
 
 ## Use Cases
 
-### Mutation Testing
-Apply the same mutation strategies across your polyglot codebase:
+### Foundation for Cross-Language Tools
+Metastatic provides the MetaAST foundation that other tools build upon:
 
 ```elixir
-Metastatic.Mutator.mutate_file("src/calculator.py", :python)
-Metastatic.Mutator.mutate_file("src/calculator.js", :javascript)
-# Both use identical mutation logic!
+# Mutation testing (in muex library)
+Muex.mutate_file("src/calculator.py", :python)
+Muex.mutate_file("src/calculator.js", :javascript)
+# Both use Metastatic's MetaAST under the hood!
 ```
 
-### Code Quality Auditing
-Unified analysis for multi-language projects (perfect for Oeditus integration):
+### Cross-Language Code Transformation
+Transform code between languages (for supported constructs):
 
 ```elixir
-Metastatic.analyze_directory("src/")
-# Analyzes Python, JavaScript, Elixir files with same rules
+# Parse Python
+{:ok, doc} = Metastatic.Builder.from_source(python_source, :python)
+
+# Transform to Elixir (with supplemental modules for unsupported constructs)
+{:ok, elixir_source} = Metastatic.Builder.to_source(doc, :elixir)
 ```
 
-### Refactoring Detection
-Find pure functions suitable for property-based testing:
+### Semantic Equivalence Validation
+Verify that code across languages has identical semantics:
 
 ```elixir
-Metastatic.find_pure_functions("src/", min_complexity: 3)
+{:ok, py_doc} = Metastatic.Builder.from_source("x + 5", :python)
+{:ok, ex_doc} = Metastatic.Builder.from_source("x + 5", :elixir)
+
+py_doc.ast == ex_doc.ast  # => true (same MetaAST)
+```
+
+### AST Analysis Infrastructure
+Build language-agnostic analysis tools:
+
+```elixir
+# Extract all variables from any supported language
+{:ok, doc} = Metastatic.Builder.from_source(source, language)
+variables = Metastatic.AST.variables(doc.ast)
 ```
 
 ## Contributing
