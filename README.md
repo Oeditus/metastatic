@@ -168,6 +168,52 @@ analysis.required_supplementals  # => [:pykka, :asyncio]
 
 See **[SUPPLEMENTAL_MODULES.md](SUPPLEMENTAL_MODULES.md)** for comprehensive guide on using and creating supplementals.
 
+### Purity Analysis
+
+Analyze code for side effects and functional purity across all supported languages:
+
+```bash
+# Check if code is pure
+mix metastatic.purity_check my_file.py
+# Output: PURE or IMPURE: [effects]
+
+# Detailed analysis
+mix metastatic.purity_check my_file.ex --format detailed
+
+# JSON output for CI/CD
+mix metastatic.purity_check my_file.erl --format json
+```
+
+```elixir
+alias Metastatic.{Document, Analysis.Purity}
+
+# Pure arithmetic
+ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+doc = Document.new(ast, :python)
+{:ok, result} = Purity.analyze(doc)
+
+result.pure?              # => true
+result.effects            # => []
+result.confidence         # => :high
+
+# Impure with I/O
+ast = {:function_call, "print", [{:literal, :string, "hello"}]}
+doc = Document.new(ast, :python)
+{:ok, result} = Purity.analyze(doc)
+
+result.pure?              # => false
+result.effects            # => [:io]
+result.summary            # => "Function is impure due to I/O operations"
+```
+
+**Detected Effects:**
+- I/O operations (print, file access, network, database)
+- Mutations (assignments in loops)
+- Random operations (random, rand)
+- Time operations (time, date, now)
+- Exception handling (try/catch)
+- Unknown function calls (low confidence)
+
 ## Documentation
 
 - **[RESEARCH.md](RESEARCH.md)** - Comprehensive research analysis and architectural decisions

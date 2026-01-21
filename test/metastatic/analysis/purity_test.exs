@@ -1,0 +1,391 @@
+defmodule Metastatic.Analysis.PurityTest do
+  use ExUnit.Case, async: true
+
+  alias Metastatic.{Document, Analysis.Purity}
+  alias Metastatic.Analysis.Purity.Result
+
+  doctest Metastatic.Analysis.Purity
+
+  describe "analyze/1 - pure constructs" do
+    test "literals are pure" do
+      ast = {:literal, :integer, 42}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+      assert result.effects == []
+      assert result.confidence == :high
+    end
+
+    test "variables are pure" do
+      ast = {:variable, "x"}
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+
+    test "arithmetic operations are pure" do
+      ast =
+        {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+      assert result.summary == "Function is pure"
+    end
+
+    test "comparison operations are pure" do
+      ast =
+        {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 10}}
+
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+
+    test "conditionals with pure branches are pure" do
+      ast =
+        {:conditional, {:variable, "cond"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+
+    test "blocks with pure statements are pure" do
+      ast =
+        {:block,
+         [
+           {:variable, "x"},
+           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}
+         ]}
+
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+
+    test "lambdas with pure bodies are pure" do
+      ast =
+        {:lambda, [{:variable, "x"}],
+         {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+
+    test "pattern matching is pure (BEAM)" do
+      ast =
+        {:inline_match, {:variable, "x"}, {:literal, :integer, 42}}
+
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+  end
+
+  describe "analyze/1 - impure I/O operations" do
+    test "print function is impure" do
+      ast = {:function_call, "print", [{:literal, :string, "hello"}]}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :io in result.effects
+      assert result.confidence == :high
+      assert result.summary =~ "I/O operations"
+    end
+
+    test "IO.puts is impure" do
+      ast = {:function_call, "IO.puts", [{:literal, :string, "hello"}]}
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :io in result.effects
+    end
+
+    test "file operations are impure" do
+      ast = {:function_call, "File.read", [{:literal, :string, "file.txt"}]}
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :io in result.effects
+    end
+
+    test "open function is impure" do
+      ast = {:function_call, "open", [{:literal, :string, "file.txt"}]}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :io in result.effects
+    end
+
+    test "input function is impure" do
+      ast = {:function_call, "input", [{:literal, :string, "Enter value: "}]}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :io in result.effects
+    end
+  end
+
+  describe "analyze/1 - impure mutations" do
+    test "assignment outside loop is not mutation" do
+      ast = {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :mutation in result.effects
+    end
+
+    test "assignment inside while loop is mutation" do
+      ast =
+        {:loop, :while, {:variable, "condition"},
+         {:block,
+          [
+            {:assignment, {:variable, "x"},
+             {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
+          ]}}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :mutation in result.effects
+    end
+
+    test "assignment inside for loop is mutation" do
+      ast =
+        {:loop, :for, {:variable, "i"}, {:variable, "range"},
+         {:block,
+          [
+            {:assignment, {:variable, "sum"},
+             {:binary_op, :arithmetic, :+, {:variable, "sum"}, {:variable, "i"}}}
+          ]}}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :mutation in result.effects
+    end
+  end
+
+  describe "analyze/1 - impure random operations" do
+    test "random function is impure" do
+      ast = {:function_call, "random", []}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :random in result.effects
+    end
+
+    test "randint is impure" do
+      ast =
+        {:function_call, "random.randint", [{:literal, :integer, 1}, {:literal, :integer, 10}]}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :random in result.effects
+    end
+
+    test ":rand.uniform is impure" do
+      ast = {:function_call, ":rand.uniform", []}
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :random in result.effects
+    end
+  end
+
+  describe "analyze/1 - impure time operations" do
+    test "time function is impure" do
+      ast = {:function_call, "time", []}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :time in result.effects
+    end
+
+    test "DateTime.utc_now is impure" do
+      ast = {:function_call, "DateTime.utc_now", []}
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :time in result.effects
+    end
+
+    test "erlang:now is impure" do
+      ast = {:function_call, "erlang:now", []}
+      doc = Document.new(ast, :erlang)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :time in result.effects
+    end
+  end
+
+  describe "analyze/1 - impure network operations" do
+    test "http functions are impure" do
+      ast = {:function_call, "http.get", [{:literal, :string, "http://example.com"}]}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :network in result.effects
+    end
+
+    test "HTTPoison calls are impure" do
+      ast = {:function_call, "HTTPoison.get", [{:literal, :string, "http://example.com"}]}
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :network in result.effects
+    end
+  end
+
+  describe "analyze/1 - impure database operations" do
+    test "query functions are impure" do
+      ast = {:function_call, "query", [{:literal, :string, "SELECT * FROM users"}]}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :database in result.effects
+    end
+
+    test "Repo operations are impure" do
+      ast = {:function_call, "Repo.all", [{:variable, "User"}]}
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :database in result.effects
+    end
+  end
+
+  describe "analyze/1 - exception handling" do
+    test "exception handling is impure" do
+      ast =
+        {:exception_handling, {:function_call, "risky_operation", []}, [{:variable, "error"}],
+         {:literal, :atom, :ok}}
+
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :exception in result.effects
+    end
+  end
+
+  describe "analyze/1 - unknown functions" do
+    test "unknown function calls result in low confidence" do
+      ast = {:function_call, "custom_user_function", [{:variable, "x"}]}
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert result.confidence == :low
+      assert "custom_user_function" in result.unknown_calls
+      assert result.summary =~ "unknown"
+    end
+
+    test "multiple unknown functions are tracked" do
+      ast =
+        {:block,
+         [
+           {:function_call, "func1", []},
+           {:function_call, "func2", []}
+         ]}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert result.confidence == :low
+      assert "func1" in result.unknown_calls
+      assert "func2" in result.unknown_calls
+    end
+  end
+
+  describe "analyze/1 - mixed effects" do
+    test "multiple effect types are detected" do
+      ast =
+        {:block,
+         [
+           {:function_call, "print", [{:literal, :string, "hello"}]},
+           {:function_call, "random", []},
+           {:loop, :while, {:variable, "true"},
+            {:assignment, {:variable, "x"}, {:literal, :integer, 1}}}
+         ]}
+
+      doc = Document.new(ast, :python)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      refute result.pure?
+      assert :io in result.effects
+      assert :random in result.effects
+      assert :mutation in result.effects
+      assert result.confidence == :high
+    end
+  end
+
+  describe "analyze!/1" do
+    test "returns result directly on success" do
+      ast = {:literal, :integer, 42}
+      doc = Document.new(ast, :python)
+
+      result = Purity.analyze!(doc)
+      assert %Result{} = result
+      assert result.pure?
+    end
+  end
+
+  describe "collection operations" do
+    test "map operations are pure if function is pure" do
+      ast =
+        {:collection_op, :map,
+         {:lambda, [{:variable, "x"}],
+          {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
+         {:variable, "list"}}
+
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+
+    test "reduce operations are pure if function is pure" do
+      ast =
+        {:collection_op, :reduce,
+         {:lambda, [{:variable, "acc"}, {:variable, "x"}],
+          {:binary_op, :arithmetic, :+, {:variable, "acc"}, {:variable, "x"}}},
+         {:variable, "list"}, {:literal, :integer, 0}}
+
+      doc = Document.new(ast, :elixir)
+
+      assert {:ok, result} = Purity.analyze(doc)
+      assert result.pure?
+    end
+  end
+end
