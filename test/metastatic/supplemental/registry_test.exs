@@ -2,9 +2,9 @@ defmodule Metastatic.Supplemental.RegistryTest do
   use ExUnit.Case, async: false
 
   alias Metastatic.Supplemental
+  alias Metastatic.Supplemental.Error.ConflictError
   alias Metastatic.Supplemental.Info
   alias Metastatic.Supplemental.Registry
-  alias Metastatic.Supplemental.Error.ConflictError
 
   # Mock supplemental modules for testing
   defmodule MockPythonActorSupplemental do

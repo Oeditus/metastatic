@@ -1,8 +1,9 @@
 defmodule Metastatic.Analysis.PurityTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Document, Analysis.Purity}
+  alias Metastatic.Analysis.Purity
   alias Metastatic.Analysis.Purity.Result
+  alias Metastatic.Document
 
   doctest Metastatic.Analysis.Purity
 

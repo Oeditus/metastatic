@@ -33,8 +33,9 @@ defmodule Mix.Tasks.Metastatic.PurityCheck do
 
   use Mix.Task
 
-  alias Metastatic.{Builder, Analysis.Purity}
+  alias Metastatic.Analysis.Purity
   alias Metastatic.Analysis.Purity.Formatter
+  alias Metastatic.Builder
 
   @impl Mix.Task
   def run(args) do

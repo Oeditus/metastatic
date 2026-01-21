@@ -230,9 +230,8 @@ defmodule Metastatic.Validator do
 
   defp check_constraints(meta, mode, max_depth, max_variables) do
     with :ok <- check_mode(meta, mode),
-         :ok <- check_depth(meta.depth, max_depth),
-         :ok <- check_variables(meta.variables, max_variables) do
-      :ok
+         :ok <- check_depth(meta.depth, max_depth) do
+      check_variables(meta.variables, max_variables)
     end
   end
 

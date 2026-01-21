@@ -116,7 +116,7 @@ defmodule Metastatic.Adapters.Python do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.Adapters.Python.{Subprocess, ToMeta, FromMeta}
+  alias Metastatic.Adapters.Python.{FromMeta, Subprocess, ToMeta}
 
   @impl true
   def parse(source) when is_binary(source) do

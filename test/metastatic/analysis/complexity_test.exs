@@ -1,8 +1,9 @@
 defmodule Metastatic.Analysis.ComplexityTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Document, Analysis.Complexity}
+  alias Metastatic.Analysis.Complexity
   alias Metastatic.Analysis.Complexity.Result
+  alias Metastatic.Document
 
   doctest Metastatic.Analysis.Complexity
 
@@ -60,7 +61,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
 
       assert {:ok, result} = Complexity.analyze(doc)
       assert result.cyclomatic == 12
-      assert length(result.warnings) > 0
+      assert match?([_ | _], result.warnings)
       assert Enum.any?(result.warnings, &String.contains?(&1, "Cyclomatic"))
     end
 
@@ -73,7 +74,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
       # Lower threshold to trigger warning
       assert {:ok, result} = Complexity.analyze(doc, thresholds: %{cyclomatic_warning: 1})
       assert result.cyclomatic == 2
-      assert length(result.warnings) > 0
+      assert match?([_ | _], result.warnings)
     end
   end
 

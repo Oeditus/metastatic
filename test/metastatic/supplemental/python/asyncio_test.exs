@@ -1,8 +1,8 @@
 defmodule Metastatic.Supplemental.Python.AsyncioTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.Supplemental.Python.Asyncio
   alias Metastatic.Supplemental.Info
+  alias Metastatic.Supplemental.Python.Asyncio
 
   doctest Metastatic.Supplemental.Python.Asyncio
 

@@ -202,10 +202,7 @@ defmodule Metastatic.Analysis.Purity.Result do
   end
 
   defp build_summary(effects) do
-    effect_names =
-      effects
-      |> Enum.map(&effect_to_string/1)
-      |> Enum.join(", ")
+    effect_names = Enum.map_join(effects, ", ", &effect_to_string/1)
 
     "Function is impure due to #{effect_names}"
   end

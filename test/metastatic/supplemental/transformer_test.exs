@@ -2,10 +2,10 @@ defmodule Metastatic.Supplemental.TransformerTest do
   use ExUnit.Case, async: false
 
   alias Metastatic.Supplemental
+  alias Metastatic.Supplemental.Error.MissingSupplementalError
   alias Metastatic.Supplemental.Info
   alias Metastatic.Supplemental.Registry
   alias Metastatic.Supplemental.Transformer
-  alias Metastatic.Supplemental.Error.MissingSupplementalError
 
   defmodule MockSupplemental do
     @behaviour Supplemental

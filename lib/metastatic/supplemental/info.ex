@@ -57,12 +57,14 @@ defmodule Metastatic.Supplemental.Info do
       false
   """
   @spec valid?(t()) :: boolean()
-  def valid?(%__MODULE__{} = info) do
-    is_atom(info.name) and info.name != nil and
-      is_atom(info.language) and info.language != nil and
-      is_list(info.constructs) and length(info.constructs) > 0 and
-      is_binary(info.description) and byte_size(info.description) > 0
-  end
+  def valid?(%__MODULE__{
+        name: name,
+        language: language,
+        constructs: [_ | _],
+        description: <<_::utf8, _::binary>>
+      })
+      when is_atom(name) and not is_nil(name) and is_atom(language) and not is_nil(language),
+      do: true
 
   def valid?(_), do: false
 end

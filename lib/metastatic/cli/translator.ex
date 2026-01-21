@@ -168,10 +168,7 @@ defmodule Metastatic.CLI.Translator do
 
   @spec format_errors([{:error, String.t()}]) :: String.t()
   defp format_errors(errors) do
-    error_messages =
-      errors
-      |> Enum.map(fn {:error, msg} -> "  - #{msg}" end)
-      |> Enum.join("\n")
+    error_messages = Enum.map_join(errors, "\n", fn {:error, msg} -> "  - #{msg}" end)
 
     "Translation failed:\n#{error_messages}"
   end

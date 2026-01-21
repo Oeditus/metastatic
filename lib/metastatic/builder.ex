@@ -108,9 +108,8 @@ defmodule Metastatic.Builder do
   @spec from_file(Path.t(), atom() | nil) :: {:ok, Document.t()} | {:error, term()}
   def from_file(file_path, language \\ nil) do
     with {:ok, source} <- File.read(file_path),
-         {:ok, lang} <- detect_or_use_language(file_path, language),
-         {:ok, document} <- from_source(source, lang) do
-      {:ok, document}
+         {:ok, lang} <- detect_or_use_language(file_path, language) do
+      from_source(source, lang)
     end
   end
 
@@ -199,9 +198,8 @@ defmodule Metastatic.Builder do
   """
   @spec round_trip(String.t(), atom()) :: {:ok, String.t()} | {:error, term()}
   def round_trip(source, language) do
-    with {:ok, document} <- from_source(source, language),
-         {:ok, result} <- to_source(document) do
-      {:ok, result}
+    with {:ok, document} <- from_source(source, language) do
+      to_source(document)
     end
   end
 

@@ -1,7 +1,7 @@
 defmodule Metastatic.BuilderTest do
   use ExUnit.Case, async: false
 
-  alias Metastatic.{Builder, Document, Adapter}
+  alias Metastatic.{Adapter, Builder, Document}
 
   # Mock adapter for testing Builder functionality
   defmodule MockPythonAdapter do

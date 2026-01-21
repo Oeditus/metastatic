@@ -1,8 +1,10 @@
 defmodule Metastatic.Adapters.ErlangTest do
   use ExUnit.Case, async: true
 
+  alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+  alias Metastatic.Adapters.Elixir.ToMeta, as: ElixirToMeta
   alias Metastatic.Adapters.Erlang, as: ErlangAdapter
-  alias Metastatic.Adapters.Erlang.{ToMeta, FromMeta}
+  alias Metastatic.Adapters.Erlang.{FromMeta, ToMeta}
 
   doctest Metastatic.Adapters.Erlang
 
@@ -303,8 +305,8 @@ defmodule Metastatic.Adapters.ErlangTest do
   describe "cross-language equivalence" do
     test "same MetaAST from equivalent Elixir and Erlang code" do
       # Elixir: x + 5
-      {:ok, elixir_ast} = Metastatic.Adapters.Elixir.parse("x + 5")
-      {:ok, elixir_meta, _} = Metastatic.Adapters.Elixir.ToMeta.transform(elixir_ast)
+      {:ok, elixir_ast} = ElixirAdapter.parse("x + 5")
+      {:ok, elixir_meta, _} = ElixirToMeta.transform(elixir_ast)
 
       # Erlang: X + 5
       {:ok, erlang_ast} = ErlangAdapter.parse("X + 5.")

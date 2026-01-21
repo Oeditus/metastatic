@@ -99,7 +99,7 @@ defmodule Metastatic.Adapters.Elixir do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.Adapters.Elixir.{ToMeta, FromMeta}
+  alias Metastatic.Adapters.Elixir.{FromMeta, ToMeta}
 
   @impl true
   def parse(source) when is_binary(source) do

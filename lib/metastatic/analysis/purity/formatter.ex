@@ -95,19 +95,15 @@ defmodule Metastatic.Analysis.Purity.Formatter do
   end
 
   defp format_effects_list(effects) do
-    effects
-    |> Enum.map(fn effect ->
+    Enum.map_join(effects, "\n", fn effect ->
       "  - #{effect_name(effect)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_unknown_list(calls) do
-    calls
-    |> Enum.map(fn call ->
+    Enum.map_join(calls, "\n", fn call ->
       "  - #{call}"
     end)
-    |> Enum.join("\n")
   end
 
   defp effect_name(:io), do: "I/O operations"

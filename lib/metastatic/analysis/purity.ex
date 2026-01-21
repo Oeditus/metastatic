@@ -54,8 +54,8 @@ defmodule Metastatic.Analysis.Purity do
       [:io]
   """
 
+  alias Metastatic.Analysis.Purity.{Effects, Result}
   alias Metastatic.Document
-  alias Metastatic.Analysis.Purity.{Result, Effects}
 
   @doc """
   Analyzes a document for purity.

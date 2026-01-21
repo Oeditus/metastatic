@@ -1,3 +1,4 @@
+# credo:disable-for-lines:20
 # Arithmetic operations - M2.1 Core Layer
 
 # Addition

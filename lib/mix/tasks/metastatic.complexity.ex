@@ -39,8 +39,9 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
   use Mix.Task
 
-  alias Metastatic.{Builder, Analysis.Complexity}
+  alias Metastatic.Analysis.Complexity
   alias Metastatic.Analysis.Complexity.Formatter
+  alias Metastatic.Builder
 
   @impl Mix.Task
   def run(args) do
@@ -88,11 +89,7 @@ defmodule Mix.Tasks.Metastatic.Complexity do
             Mix.shell().info(output)
 
             # Exit with appropriate code
-            exit_code =
-              cond do
-                Enum.empty?(result.warnings) -> 0
-                true -> 1
-              end
+            exit_code = if Enum.empty?(result.warnings), do: 0, else: 1
 
             exit({:shutdown, exit_code})
 

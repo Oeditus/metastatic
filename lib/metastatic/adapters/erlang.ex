@@ -94,7 +94,7 @@ defmodule Metastatic.Adapters.Erlang do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.Adapters.Erlang.{ToMeta, FromMeta}
+  alias Metastatic.Adapters.Erlang.{FromMeta, ToMeta}
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -137,14 +137,12 @@ defmodule Metastatic.Adapters.Erlang do
   def unparse(erlang_ast) do
     # Use erl_pp (Erlang pretty printer) to format the AST
     # Wrap in a function form for proper formatting
-    try do
-      # Convert single expression to iolist and then to string
-      iolist = :erl_pp.expr(erlang_ast)
-      result = IO.iodata_to_binary(iolist)
-      {:ok, String.trim(result)}
-    rescue
-      e -> {:error, "Unparse failed: #{Exception.message(e)}"}
-    end
+    # Convert single expression to iolist and then to string
+    iolist = :erl_pp.expr(erlang_ast)
+    result = IO.iodata_to_binary(iolist)
+    {:ok, String.trim(result)}
+  rescue
+    e -> {:error, "Unparse failed: #{Exception.message(e)}"}
   end
 
   @impl true

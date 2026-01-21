@@ -6,8 +6,8 @@ defmodule Metastatic.Supplemental.Transformer do
   transformations on constructs that don't have native language support.
   """
 
-  alias Metastatic.Supplemental.Registry
   alias Metastatic.Supplemental.Error.MissingSupplementalError
+  alias Metastatic.Supplemental.Registry
 
   @doc """
   Attempts to transform a MetaAST construct using a registered supplemental.

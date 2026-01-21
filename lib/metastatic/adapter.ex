@@ -270,9 +270,8 @@ defmodule Metastatic.Adapter do
   def round_trip(adapter, source) do
     with {:ok, native_ast} <- adapter.parse(source),
          {:ok, meta_ast, metadata} <- adapter.to_meta(native_ast),
-         {:ok, native_ast2} <- adapter.from_meta(meta_ast, metadata),
-         {:ok, source2} <- adapter.unparse(native_ast2) do
-      {:ok, source2}
+         {:ok, native_ast2} <- adapter.from_meta(meta_ast, metadata) do
+      adapter.unparse(native_ast2)
     end
   end
 
@@ -317,9 +316,8 @@ defmodule Metastatic.Adapter do
   """
   @spec reify(module(), Document.t()) :: {:ok, source} | {:error, term()}
   def reify(adapter, %Document{ast: meta_ast, metadata: metadata}) do
-    with {:ok, native_ast} <- adapter.from_meta(meta_ast, metadata),
-         {:ok, source} <- adapter.unparse(native_ast) do
-      {:ok, source}
+    with {:ok, native_ast} <- adapter.from_meta(meta_ast, metadata) do
+      adapter.unparse(native_ast)
     end
   end
 
@@ -416,7 +414,6 @@ defmodule Metastatic.Adapter do
     atom
     |> Atom.to_string()
     |> String.split("_")
-    |> Enum.map(&String.capitalize/1)
-    |> Enum.join()
+    |> Enum.map_join(&String.capitalize/1)
   end
 end

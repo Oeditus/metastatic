@@ -2,7 +2,7 @@ defmodule Metastatic.Adapters.ElixirTest do
   use ExUnit.Case, async: true
 
   alias Metastatic.Adapters.Elixir, as: ElixirAdapter
-  alias Metastatic.Adapters.Elixir.{ToMeta, FromMeta}
+  alias Metastatic.Adapters.Elixir.{FromMeta, ToMeta}
 
   doctest Metastatic.Adapters.Elixir
 

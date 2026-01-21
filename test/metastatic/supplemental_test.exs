@@ -2,14 +2,15 @@ defmodule Metastatic.SupplementalTest do
   use ExUnit.Case, async: true
 
   alias Metastatic.Supplemental
-  alias Metastatic.Supplemental.Info
 
   alias Metastatic.Supplemental.Error.{
-    MissingSupplementalError,
+    ConflictError,
     IncompatibleSupplementalError,
-    UnsupportedConstructError,
-    ConflictError
+    MissingSupplementalError,
+    UnsupportedConstructError
   }
+
+  alias Metastatic.Supplemental.Info
 
   # Mock supplemental module for testing
   defmodule MockSupplemental do

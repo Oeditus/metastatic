@@ -395,8 +395,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Native Layer - M2.3: Python-Specific Constructs
 
   # Function definitions with decorators
-  def transform(%{"_type" => "FunctionDef", "decorator_list" => decorators} = node)
-      when is_list(decorators) and length(decorators) > 0 do
+  def transform(%{"_type" => "FunctionDef", "decorator_list" => [_ | _] = _decorators} = node) do
     {:ok, {:language_specific, :python, node, :function_with_decorators}, %{}}
   end
 

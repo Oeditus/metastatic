@@ -383,7 +383,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp transform_or_nil(value), do: transform(value)
 
   defp module_to_string({:__aliases__, _, parts}) do
-    parts |> Enum.map(&Atom.to_string/1) |> Enum.join(".")
+    Enum.map_join(parts, ".", &Atom.to_string/1)
   end
 
   defp module_to_string(atom) when is_atom(atom) do

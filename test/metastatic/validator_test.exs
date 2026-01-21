@@ -1,7 +1,7 @@
 defmodule Metastatic.ValidatorTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Validator, Document}
+  alias Metastatic.{Document, Validator}
 
   doctest Metastatic.Validator
 

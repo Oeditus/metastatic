@@ -43,7 +43,7 @@ defmodule Metastatic.Test.AdapterHelper do
 
   import ExUnit.Assertions
 
-  alias Metastatic.{AST, Adapter, Document, Validator}
+  alias Metastatic.{Adapter, AST, Document, Validator}
 
   # Public API
 

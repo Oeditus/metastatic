@@ -56,17 +56,17 @@ defmodule Metastatic.Analysis.Complexity do
       2
   """
 
-  alias Metastatic.Document
-
   alias Metastatic.Analysis.Complexity.{
-    Result,
-    Cyclomatic,
     Cognitive,
-    Nesting,
+    Cyclomatic,
+    FunctionMetrics,
     Halstead,
     LoC,
-    FunctionMetrics
+    Nesting,
+    Result
   }
+
+  alias Metastatic.Document
 
   @doc """
   Analyzes a document for complexity.

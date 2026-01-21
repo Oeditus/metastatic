@@ -2,7 +2,7 @@ defmodule Metastatic.Adapters.PythonTest do
   use ExUnit.Case, async: true
 
   alias Metastatic.Adapters.Python
-  alias Metastatic.Adapters.Python.{ToMeta, FromMeta}
+  alias Metastatic.Adapters.Python.{FromMeta, ToMeta}
 
   describe "parse/1" do
     test "parses simple expression" do
