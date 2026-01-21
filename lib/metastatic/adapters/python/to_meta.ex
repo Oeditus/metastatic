@@ -304,6 +304,128 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
+  # Native Layer - M2.3: Python-Specific Constructs
+
+  # Function definitions with decorators
+  def transform(%{"_type" => "FunctionDef", "decorator_list" => decorators} = node)
+      when is_list(decorators) and length(decorators) > 0 do
+    {:ok, {:language_specific, :python, node, :function_with_decorators}, %{}}
+  end
+
+  # Generator functions (FunctionDef containing Yield/YieldFrom)
+  def transform(%{"_type" => "FunctionDef", "body" => body} = node) do
+    if contains_yield?(body) do
+      {:ok, {:language_specific, :python, node, :function_with_generator}, %{}}
+    else
+      # Regular function - not implemented yet, falls through to catch-all
+      {:error, "Unsupported Python AST construct: #{inspect(node)}"}
+    end
+  end
+
+  # Async function definitions
+  def transform(%{"_type" => "AsyncFunctionDef"} = node) do
+    {:ok, {:language_specific, :python, node, :async_function}, %{}}
+  end
+
+  # Class definitions
+  def transform(%{"_type" => "ClassDef"} = node) do
+    {:ok, {:language_specific, :python, node, :class}, %{}}
+  end
+
+  # Context managers (with statement)
+  def transform(%{"_type" => "With"} = node) do
+    {:ok, {:language_specific, :python, node, :context_manager}, %{}}
+  end
+
+  # Async context managers (async with)
+  def transform(%{"_type" => "AsyncWith"} = node) do
+    {:ok, {:language_specific, :python, node, :async_context_manager}, %{}}
+  end
+
+  # Generators (yield)
+  def transform(%{"_type" => "Yield"} = node) do
+    {:ok, {:language_specific, :python, node, :yield}, %{}}
+  end
+
+  # Yield from (Python 3.3+)
+  def transform(%{"_type" => "YieldFrom"} = node) do
+    {:ok, {:language_specific, :python, node, :yield_from}, %{}}
+  end
+
+  # Await expressions
+  def transform(%{"_type" => "Await"} = node) do
+    {:ok, {:language_specific, :python, node, :await}, %{}}
+  end
+
+  # Async for loops
+  def transform(%{"_type" => "AsyncFor"} = node) do
+    {:ok, {:language_specific, :python, node, :async_for}, %{}}
+  end
+
+  # Import statements
+  def transform(%{"_type" => "Import"} = node) do
+    {:ok, {:language_specific, :python, node, :import}, %{}}
+  end
+
+  # Import from statements
+  def transform(%{"_type" => "ImportFrom"} = node) do
+    {:ok, {:language_specific, :python, node, :import_from}, %{}}
+  end
+
+  # Dict comprehensions
+  def transform(%{"_type" => "DictComp"} = node) do
+    {:ok, {:language_specific, :python, node, :dict_comprehension}, %{}}
+  end
+
+  # Set comprehensions
+  def transform(%{"_type" => "SetComp"} = node) do
+    {:ok, {:language_specific, :python, node, :set_comprehension}, %{}}
+  end
+
+  # Generator expressions
+  def transform(%{"_type" => "GeneratorExp"} = node) do
+    {:ok, {:language_specific, :python, node, :generator_expression}, %{}}
+  end
+
+  # Match statements (Python 3.10+)
+  def transform(%{"_type" => "Match"} = node) do
+    {:ok, {:language_specific, :python, node, :pattern_match}, %{}}
+  end
+
+  # Walrus operator (Python 3.8+)
+  def transform(%{"_type" => "NamedExpr"} = node) do
+    {:ok, {:language_specific, :python, node, :named_expr}, %{}}
+  end
+
+  # Global/nonlocal declarations
+  def transform(%{"_type" => "Global"} = node) do
+    {:ok, {:language_specific, :python, node, :global}, %{}}
+  end
+
+  def transform(%{"_type" => "Nonlocal"} = node) do
+    {:ok, {:language_specific, :python, node, :nonlocal}, %{}}
+  end
+
+  # Assert statements
+  def transform(%{"_type" => "Assert"} = node) do
+    {:ok, {:language_specific, :python, node, :assert}, %{}}
+  end
+
+  # Raise statements
+  def transform(%{"_type" => "Raise"} = node) do
+    {:ok, {:language_specific, :python, node, :raise}, %{}}
+  end
+
+  # Delete statements
+  def transform(%{"_type" => "Delete"} = node) do
+    {:ok, {:language_specific, :python, node, :delete}, %{}}
+  end
+
+  # Pass statement
+  def transform(%{"_type" => "Pass"} = node) do
+    {:ok, {:language_specific, :python, node, :pass}, %{}}
+  end
+
   # Catch-all for unsupported constructs
   def transform(unsupported) do
     {:error, "Unsupported Python AST construct: #{inspect(unsupported)}"}
@@ -376,6 +498,27 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp transform_unary_op(%{"_type" => "USub"}), do: {:ok, {:arithmetic, :-}}
   defp transform_unary_op(%{"_type" => "UAdd"}), do: {:ok, {:arithmetic, :+}}
   defp transform_unary_op(op), do: {:error, "Unsupported unary operator: #{inspect(op)}"}
+
+  # Check if body contains Yield or YieldFrom expressions
+  defp contains_yield?(body) when is_list(body) do
+    Enum.any?(body, &contains_yield_node?/1)
+  end
+
+  defp contains_yield?(node), do: contains_yield_node?(node)
+
+  defp contains_yield_node?(%{"_type" => "Yield"}), do: true
+  defp contains_yield_node?(%{"_type" => "YieldFrom"}), do: true
+
+  defp contains_yield_node?(%{} = node) when is_map(node) do
+    # Recursively check all values in the node
+    Enum.any?(Map.values(node), fn
+      value when is_list(value) -> contains_yield?(value)
+      value when is_map(value) -> contains_yield_node?(value)
+      _ -> false
+    end)
+  end
+
+  defp contains_yield_node?(_), do: false
 
   defp extract_function_name(%{"_type" => "Name", "id" => name}), do: {:ok, name}
 

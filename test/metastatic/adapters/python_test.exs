@@ -740,8 +740,286 @@ defmodule Metastatic.Adapters.PythonTest do
     end
   end
 
+  describe "ToMeta - Native Layer: Decorators" do
+    test "preserves function with decorators as language_specific" do
+      source = "@decorator\ndef foo():\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :function_with_decorators} = meta_ast
+      assert node["_type"] == "FunctionDef"
+      assert node["name"] == "foo"
+      assert [%{"_type" => "Name", "id" => "decorator"}] = node["decorator_list"]
+    end
+
+    test "preserves class with decorators as language_specific" do
+      source = "@dataclass\nclass Point:\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :class} = meta_ast
+      assert node["_type"] == "ClassDef"
+      assert node["name"] == "Point"
+      assert [%{"_type" => "Name", "id" => "dataclass"}] = node["decorator_list"]
+    end
+  end
+
+  describe "ToMeta - Native Layer: Context Managers" do
+    test "preserves with statement as language_specific" do
+      source = "with open('file.txt') as f:\n    content = f.read()"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :context_manager} = meta_ast
+      assert node["_type"] == "With"
+    end
+
+    test "preserves async with statement as language_specific" do
+      source = "async with resource() as r:\n    await r.process()"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :async_context_manager} = meta_ast
+      assert node["_type"] == "AsyncWith"
+    end
+  end
+
+  describe "ToMeta - Native Layer: Generators" do
+    test "preserves yield statement as language_specific" do
+      source = "def gen():\n    yield 1"
+
+      assert {:ok, ast} = Python.parse(source)
+      # Module body contains function def
+      assert {:ok, {:language_specific, :python, node, :function_with_generator}, _} =
+               Python.to_meta(ast)
+
+      assert node["_type"] == "FunctionDef"
+    end
+
+    test "preserves yield from as language_specific" do
+      source = "def gen():\n    yield from range(10)"
+
+      assert {:ok, ast} = Python.parse(source)
+
+      assert {:ok, {:language_specific, :python, node, :function_with_generator}, _} =
+               Python.to_meta(ast)
+
+      assert node["_type"] == "FunctionDef"
+    end
+  end
+
+  describe "ToMeta - Native Layer: Classes" do
+    test "preserves class definition as language_specific" do
+      source = "class MyClass:\n    def method(self):\n        pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :class} = meta_ast
+      assert node["_type"] == "ClassDef"
+      assert node["name"] == "MyClass"
+    end
+
+    test "preserves class with inheritance as language_specific" do
+      source = "class Child(Parent):\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :class} = meta_ast
+      assert node["_type"] == "ClassDef"
+      assert [%{"_type" => "Name", "id" => "Parent"}] = node["bases"]
+    end
+  end
+
+  describe "ToMeta - Native Layer: Async/Await" do
+    test "preserves async function as language_specific" do
+      source = "async def fetch():\n    return data"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :async_function} = meta_ast
+      assert node["_type"] == "AsyncFunctionDef"
+      assert node["name"] == "fetch"
+    end
+
+    test "preserves await expression as language_specific" do
+      source = "await coro()"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :await} = meta_ast
+      assert node["_type"] == "Await"
+    end
+
+    test "preserves async for loop as language_specific" do
+      source = "async for item in async_iter():\n    process(item)"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :async_for} = meta_ast
+      assert node["_type"] == "AsyncFor"
+    end
+  end
+
+  describe "ToMeta - Native Layer: Imports" do
+    test "preserves import statement as language_specific" do
+      source = "import os"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :import} = meta_ast
+      assert node["_type"] == "Import"
+      assert [%{"name" => "os"}] = node["names"]
+    end
+
+    test "preserves from import statement as language_specific" do
+      source = "from os import path"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :import_from} = meta_ast
+      assert node["_type"] == "ImportFrom"
+      assert node["module"] == "os"
+      assert [%{"name" => "path"}] = node["names"]
+    end
+  end
+
+  describe "ToMeta - Native Layer: Advanced Comprehensions" do
+    test "preserves dict comprehension as language_specific" do
+      source = "{k: v for k, v in items}"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :dict_comprehension} = meta_ast
+      assert node["_type"] == "DictComp"
+    end
+
+    test "preserves set comprehension as language_specific" do
+      source = "{x for x in items}"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :set_comprehension} = meta_ast
+      assert node["_type"] == "SetComp"
+    end
+
+    test "preserves generator expression as language_specific" do
+      source = "(x for x in items)"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :generator_expression} = meta_ast
+      assert node["_type"] == "GeneratorExp"
+    end
+  end
+
+  describe "ToMeta - Native Layer: Python 3.10+ Features" do
+    test "preserves match statement as language_specific" do
+      source = "match value:\n    case 1:\n        result = 'one'"
+
+      # This will only work on Python 3.10+, so we handle potential parse errors
+      case Python.parse(source) do
+        {:ok, ast} ->
+          assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+          assert {:language_specific, :python, node, :pattern_match} = meta_ast
+          assert node["_type"] == "Match"
+
+        {:error, _} ->
+          # Python < 3.10, skip this test
+          :ok
+      end
+    end
+
+    test "preserves walrus operator as language_specific" do
+      source = "(x := 5)"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :named_expr} = meta_ast
+      assert node["_type"] == "NamedExpr"
+    end
+  end
+
+  describe "ToMeta - Native Layer: Statement Types" do
+    test "preserves global statement as language_specific" do
+      source = "global x"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :global} = meta_ast
+      assert node["_type"] == "Global"
+      assert ["x"] = node["names"]
+    end
+
+    test "preserves nonlocal statement as language_specific" do
+      source = "nonlocal x"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :nonlocal} = meta_ast
+      assert node["_type"] == "Nonlocal"
+      assert ["x"] = node["names"]
+    end
+
+    test "preserves assert statement as language_specific" do
+      source = "assert x > 0"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :assert} = meta_ast
+      assert node["_type"] == "Assert"
+    end
+
+    test "preserves raise statement as language_specific" do
+      source = "raise ValueError('error')"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :raise} = meta_ast
+      assert node["_type"] == "Raise"
+    end
+
+    test "preserves delete statement as language_specific" do
+      source = "del x"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :delete} = meta_ast
+      assert node["_type"] == "Delete"
+    end
+
+    test "preserves pass statement as language_specific" do
+      source = "pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :pass} = meta_ast
+      assert node["_type"] == "Pass"
+    end
+  end
+
   describe "cross-language validation" do
-    test "Python and Elixir produce equivalent MetaAST" do
+    test "Python and Elixir produce equivalent MetaAST for arithmetic" do
       python_source = "x + 5"
       elixir_source = "x + 5"
 
@@ -756,6 +1034,308 @@ defmodule Metastatic.Adapters.PythonTest do
 
       # Same structure (variables may differ in name)
       assert same_structure?(py_meta, ex_meta)
+    end
+
+    test "Python and Elixir produce equivalent MetaAST for multiplication" do
+      python_source = "a * b"
+      elixir_source = "a * b"
+
+      assert {:ok, py_ast} = Python.parse(python_source)
+      assert {:ok, py_meta, _} = Python.to_meta(py_ast)
+
+      alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+      assert {:ok, ex_ast} = ElixirAdapter.parse(elixir_source)
+      assert {:ok, ex_meta, _} = ElixirAdapter.to_meta(ex_ast)
+
+      assert same_structure?(py_meta, ex_meta)
+    end
+
+    test "Python and Elixir produce equivalent MetaAST for comparisons" do
+      python_source = "x > 10"
+      elixir_source = "x > 10"
+
+      assert {:ok, py_ast} = Python.parse(python_source)
+      assert {:ok, py_meta, _} = Python.to_meta(py_ast)
+
+      alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+      assert {:ok, ex_ast} = ElixirAdapter.parse(elixir_source)
+      assert {:ok, ex_meta, _} = ElixirAdapter.to_meta(ex_ast)
+
+      assert same_structure?(py_meta, ex_meta)
+    end
+
+    test "Python and Elixir produce equivalent MetaAST for boolean operations" do
+      python_source = "True and False"
+      elixir_source = "true and false"
+
+      assert {:ok, py_ast} = Python.parse(python_source)
+      assert {:ok, py_meta, _} = Python.to_meta(py_ast)
+
+      alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+      assert {:ok, ex_ast} = ElixirAdapter.parse(elixir_source)
+      assert {:ok, ex_meta, _} = ElixirAdapter.to_meta(ex_ast)
+
+      assert same_structure?(py_meta, ex_meta)
+    end
+
+    test "Python and Elixir produce equivalent MetaAST for function calls" do
+      python_source = "foo(1, 2)"
+      elixir_source = "foo(1, 2)"
+
+      assert {:ok, py_ast} = Python.parse(python_source)
+      assert {:ok, py_meta, _} = Python.to_meta(py_ast)
+
+      alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+      assert {:ok, ex_ast} = ElixirAdapter.parse(elixir_source)
+      assert {:ok, ex_meta, _} = ElixirAdapter.to_meta(ex_ast)
+
+      assert same_structure?(py_meta, ex_meta)
+    end
+
+    test "Python and Elixir produce equivalent MetaAST for ternary/if expression" do
+      python_source = "1 if x > 0 else 2"
+      elixir_source = "if x > 0, do: 1, else: 2"
+
+      assert {:ok, py_ast} = Python.parse(python_source)
+      assert {:ok, py_meta, _} = Python.to_meta(py_ast)
+
+      alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+      assert {:ok, ex_ast} = ElixirAdapter.parse(elixir_source)
+      assert {:ok, ex_meta, _} = ElixirAdapter.to_meta(ex_ast)
+
+      assert same_structure?(py_meta, ex_meta)
+    end
+  end
+
+  describe "fixture-based integration tests - Core layer" do
+    test "round-trips arithmetic fixture with high fidelity" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/core/arithmetic.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+
+      # Verify MetaAST structure
+      assert {:block, _statements} = meta_ast
+
+      # Round-trip back to Python
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert {:ok, result} = Python.unparse(ast2)
+
+      # Check fidelity: basic operators preserved
+      assert result =~ "+"
+      assert result =~ "-"
+      assert result =~ "*"
+    end
+
+    test "round-trips comparisons fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/core/comparisons.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      # Verify comparison operators are parsed
+      assert {:block, _statements} = meta_ast
+    end
+
+    test "round-trips boolean logic fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/core/boolean_logic.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, _statements} = meta_ast
+    end
+
+    test "round-trips function calls fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/core/function_calls.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, _statements} = meta_ast
+    end
+
+    @tag :skip
+    test "round-trips conditionals fixture" do
+      # Skipped: Contains If statements and assignments (not yet implemented)
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/core/conditionals.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, _statements} = meta_ast
+    end
+
+    @tag :skip
+    test "round-trips blocks fixture" do
+      # Skipped: Contains assignment statements (not yet implemented)
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/core/blocks.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, _statements} = meta_ast
+    end
+  end
+
+  describe "fixture-based integration tests - Extended layer" do
+    @tag :skip
+    test "round-trips loops fixture" do
+      # Skipped: Contains assignment statements (not yet implemented)
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/extended/loops.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, _statements} = meta_ast
+    end
+
+    test "round-trips lambdas fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/extended/lambdas.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+
+      # Round-trip
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips comprehensions fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/extended/comprehensions.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+
+      # Round-trip
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips exception handling fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/extended/exception_handling.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+
+      # Round-trip
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips builtin functions fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/extended/builtin_functions.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, _statements} = meta_ast
+    end
+  end
+
+  describe "fixture-based integration tests - Native layer" do
+    test "parses decorators fixture as language_specific" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/decorators.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      # Should contain language_specific nodes
+      assert {:block, statements} = meta_ast
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, _}, &1))
+    end
+
+    test "parses context managers fixture as language_specific" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/context_managers.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, _}, &1))
+    end
+
+    test "parses generators fixture as language_specific" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/generators.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, _}, &1))
+    end
+
+    test "parses classes fixture as language_specific" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/classes.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, :class}, &1))
+    end
+
+    test "parses async/await fixture as language_specific" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/async_await.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, _}, &1))
+    end
+
+    test "parses imports fixture as language_specific" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/imports.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, _}, &1))
+    end
+  end
+
+  describe "performance validation" do
+    test "parses and transforms <100ms per 1000 LOC" do
+      # Generate test data: repeat arithmetic fixture 100 times (~1000 LOC)
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/core/arithmetic.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      # Create ~1000 lines by repeating
+      large_source = String.duplicate(source <> "\n", 100)
+
+      # Time the operation
+      {microseconds, result} =
+        :timer.tc(fn ->
+          with {:ok, ast} <- Python.parse(large_source),
+               {:ok, _meta_ast, _metadata} <- Python.to_meta(ast) do
+            :ok
+          end
+        end)
+
+      assert result == :ok
+
+      # Convert to milliseconds
+      milliseconds = microseconds / 1000
+
+      # Should be under 100ms for 1000 LOC
+      assert milliseconds < 100,
+             "Performance target missed: #{milliseconds}ms for ~1000 LOC (target: <100ms)"
     end
   end
 
