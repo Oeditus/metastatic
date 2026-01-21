@@ -613,7 +613,7 @@ test/
 
 ---
 
-## Phase 2: Language Adapters - BEAM Ecosystem (Months 2-3)
+## Phase 2: Language Adapters - BEAM Ecosystem (✅ COMPLETE)
 
 ### Strategic Rationale: Elixir First
 
@@ -628,13 +628,15 @@ We're starting with Elixir (then Erlang) rather than Python for several key reas
 
 Once the BEAM ecosystem is proven (Weeks 13-20), Python adapter (Weeks 21-28) will benefit from battle-tested M2 design.
 
-### Milestone 2.1: Elixir Adapter - Foundation (Weeks 13-16)
+### Milestone 2.1: Elixir Adapter - Foundation (✅ COMPLETE)
+
+**Status:** Delivered January 2026
 
 **Deliverables:**
-- [ ] Elixir AST → MetaAST transformer (M1 → M2)
-- [ ] MetaAST → Elixir AST transformer (M2 → M1)
-- [ ] Parse/unparse using native `Code` module
-- [ ] Register adapter in Adapter.Registry
+- [x] Elixir AST → MetaAST transformer (M1 → M2)
+- [x] MetaAST → Elixir AST transformer (M2 → M1)
+- [x] Parse/unparse using native `Code` module
+- [x] Register adapter in Adapter.Registry
 
 **Files to Create:**
 ```
@@ -794,13 +796,15 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 end
 ```
 
-### Milestone 2.2: Elixir Adapter - Core Constructs (Weeks 17-18)
+### Milestone 2.2: Elixir Adapter - Core & Extended Constructs (✅ COMPLETE)
+
+**Status:** Delivered January 2026
 
 **Deliverables:**
-- [ ] Handle all M2.1 (Core) constructs: literals, variables, binary_op, unary_op, function_call, conditional, block, early_return
-- [ ] Handle M2.2 (Extended) constructs: lambda, collection_op (Enum.map/filter/reduce)
-- [ ] 30+ test fixtures covering Elixir patterns
-- [ ] Round-trip accuracy >95%
+- [x] Handle all M2.1 (Core) constructs: literals, variables, binary_op, unary_op, function_call, conditional, block, early_return
+- [x] Handle M2.2 (Extended) constructs: lambda, collection_op (Enum.map/filter/reduce), pattern matching, comprehensions
+- [x] 30+ test fixtures covering Elixir patterns
+- [x] Round-trip accuracy >95%
 
 **Test Fixtures:**
 ```
@@ -827,14 +831,17 @@ test/fixtures/elixir/
     └── macros.exs             # quote/unquote (language_specific)
 ```
 
-### Milestone 2.3: Erlang Adapter (Weeks 19-20)
+### Milestone 2.3: Erlang Adapter (✅ COMPLETE)
+
+**Status:** Delivered January 2026
 
 **Deliverables:**
-- [ ] Erlang AST → MetaAST transformer
-- [ ] MetaAST → Erlang AST transformer  
-- [ ] Parse using `:erl_scan` + `:erl_parse`
-- [ ] Unparse using `:erl_prettypr`
-- [ ] 20+ Erlang test fixtures
+- [x] Erlang AST → MetaAST transformer
+- [x] MetaAST → Erlang AST transformer  
+- [x] Parse using `:erl_scan` + `:erl_parse`
+- [x] Unparse using `:erl_pp` (not `:erl_prettypr`)
+- [x] 33 comprehensive Erlang tests
+- [x] Cross-language validation (Erlang ≡ Elixir at M2 level)
 
 **Files to Create:**
 ```
@@ -1106,125 +1113,64 @@ test/fixtures/python/
 
 ---
 
-## Phase 4: Cross-Language Tools (Months 4-6)
+## Phase 4: JavaScript Adapter (Months 4-6)
 
-### Milestone 4.1: Mutation Engine (Weeks 29-32)
+**Note:** Mutation testing, purity analysis, and complexity metrics are **OUT OF SCOPE** for Metastatic. These tools will be built as separate libraries that leverage Metastatic's MetaAST foundation.
+
+- **Mutation Testing**: See [`muex`](https://github.com/Oeditus/muex) library
+- **Purity Analysis**: Planned for separate library
+- **Complexity Metrics**: Planned for separate library
+
+### Milestone 4.1: JavaScript Parser Integration (Weeks 29-32)
 
 **Deliverables:**
-- [ ] Core mutators (arithmetic, comparison, boolean)
-- [ ] Extended mutators (collection ops, conditionals)
-- [ ] Mutation validation per language
-- [ ] Mutation test framework
+- [ ] JavaScript helper script for AST parsing (using Babel or @babel/parser)
+- [ ] JSON serialization of JavaScript AST
+- [ ] Subprocess-based communication
+- [ ] Elixir wrapper with error handling
 
 **Files to Create:**
 ```
-lib/metastatic/
-├── mutator.ex              # Core mutation engine
-├── mutators/
-│   ├── arithmetic.ex       # Arithmetic mutations
-│   ├── comparison.ex       # Comparison mutations
-│   ├── boolean.ex          # Boolean mutations
-│   ├── conditional.ex      # Conditional mutations
-│   └── collection.ex       # Collection mutations
-└── mutation_validator.ex   # Validate mutations
+priv/parsers/javascript/
+├── parser.js              # JavaScript AST → JSON
+├── unparser.js            # JSON → JavaScript source
+└── package.json           # Dependencies: @babel/parser, @babel/generator
+
+lib/metastatic/adapters/
+├── javascript.ex          # JavaScript adapter
+└── javascript/
+    ├── to_meta.ex         # JavaScript AST → MetaAST
+    └── from_meta.ex       # MetaAST → JavaScript AST
 ```
 
-**Implementation:**
-
-```elixir
-# lib/metastatic/mutators/arithmetic.ex
-defmodule Metastatic.Mutators.Arithmetic do
-  @moduledoc """
-  Arithmetic operator mutations.
-  Works for ALL supported languages.
-  """
-  
-  @mutations [
-    {:+, :-},
-    {:-, :+},
-    {:*, :/},
-    {:/, :*},
-    {:%, :*}
-  ]
-  
-  def mutate(ast) do
-    Enum.flat_map(@mutations, fn {from, to} ->
-      mutate_operator(ast, from, to)
-    end)
-  end
-  
-  defp mutate_operator(ast, from, to) do
-    mutations = []
-    
-    transformed = Macro.postwalk(ast, fn
-      {:binary_op, :arithmetic, ^from, left, right} = node ->
-        mutations = [{:binary_op, :arithmetic, to, left, right} | mutations]
-        node
-      
-      node ->
-        node
-    end)
-    
-    mutations
-  end
-end
-```
-
-### Milestone 3.2: Purity Analyzer (Weeks 29-30)
+### Milestone 4.2: JavaScript Core Layer (M2.1) (Weeks 33-34)
 
 **Deliverables:**
-- [ ] Side effect detection
-- [ ] Pure function identification
-- [ ] Known pure function registry
-- [ ] Language-specific side effect patterns
+- [ ] JavaScript AST → MetaAST (M1 → M2) for Core layer
+- [ ] MetaAST → JavaScript AST (M2 → M1) for Core layer
+- [ ] Handle M2.1 core constructs
+- [ ] Handle all JavaScript literal types
+- [ ] Handle all operators (arithmetic, comparison, boolean)
+- [ ] 40+ Core layer tests
 
-**Files to Create:**
-```
-lib/metastatic/
-├── purity_analyzer.ex      # Main analyzer
-└── side_effects/
-    ├── core.ex             # Core side effects
-    ├── python.ex           # Python-specific
-    └── javascript.ex       # JavaScript-specific
-```
-
-### Milestone 3.3: JavaScript Adapter (Weeks 31-36)
+### Milestone 4.3: JavaScript Extended Layer (M2.2) (Weeks 35-36)
 
 **Deliverables:**
-- [ ] Babel parser integration
-- [ ] JavaScript → MetaAST transformer
-- [ ] MetaAST → JavaScript transformer
-- [ ] 50+ JavaScript test fixtures
-- [ ] Cross-language mutation tests
+- [ ] Loops, arrow functions, array methods (map/filter/reduce)
+- [ ] Exception handling (try/catch/finally)
+- [ ] 20+ Extended layer tests
 
-**Validate:**
-- Same mutation applied to Python and JavaScript produces equivalent behavior
-- Purity analyzer works identically on both languages
-- Round-trip accuracy > 95%
-
-### Milestone 3.4: Elixir Adapter (Weeks 37-40)
+### Milestone 4.4: JavaScript Native Layer (M2.3) & Fixtures (Weeks 37-38)
 
 **Deliverables:**
-- [ ] Elixir AST → MetaAST transformer
-- [ ] MetaAST → Elixir AST transformer
-- [ ] Self-hosting tests
-- [ ] Dogfooding: Use Metastatic to analyze itself
-
-**Self-Hosting Validation:**
-```elixir
-# Can Metastatic analyze its own code?
-{:ok, doc} = Metastatic.Builder.from_source(
-  File.read!("lib/metastatic/ast.ex"),
-  :elixir
-)
-
-mutations = Metastatic.Mutator.arithmetic_inverse(doc.ast)
-assert length(mutations) > 0
-```
+- [ ] Native layer support (classes, async/await, destructuring, etc.)
+- [ ] Test fixtures for all three layers
+- [ ] Cross-language validation (JavaScript ≡ Python ≡ Elixir)
+- [ ] Performance validation (<100ms per 1000 LOC)
 
 ---
 
-## Phase 4: Integration & Tooling (Months 7-8)
+## Phase 5: CLI & Integration (Months 7-8)
 
 ### Milestone 4.1: CLI Tool (Weeks 41-44)
 
