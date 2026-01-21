@@ -577,11 +577,7 @@ result = worker.ask({'process': 42})
 
 ## Contributing
 
-Want to add a supplemental? See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Supplemental submission guidelines
-- Code review process
-- Community standards
-- Template generator usage
+Want to add a supplemental?
 
 Use the generator to scaffold a new supplemental:
 
@@ -599,4 +595,3 @@ Planned supplementals:
 - **Go.Channels** - CSP-style communication
 - **Rust.Tokio** - Async runtime
 
-See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for roadmap details.

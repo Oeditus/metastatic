@@ -348,10 +348,6 @@ Metastatic is inspired by research from:
 - **muex** - Multi-language mutation testing analysis
 - **propwise** - Property-based testing candidate identification
 
-## License
-
-See [LICENSE](LICENSE)
-
 ## Credits
 
 Created as part of the Oeditus code quality tooling ecosystem.

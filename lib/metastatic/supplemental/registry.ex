@@ -70,7 +70,7 @@ defmodule Metastatic.Supplemental.Registry do
       iex> Registry.register(ConflictingModule)
       {:error, %ConflictError{}}
   """
-  @spec register(module()) :: :ok | {:error, ConflictError.t()}
+  @spec register(module()) :: :ok | {:error, Exception.t()}
   def register(module) do
     GenServer.call(__MODULE__, {:register, module})
   end

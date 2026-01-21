@@ -65,7 +65,7 @@ defmodule Metastatic.CLI.Inspector do
   Validate a document and return detailed validation metadata.
   """
   @spec validate_with_details(Document.t(), atom()) ::
-          {:ok, Validator.validation_metadata()} | {:error, term()}
+          {:ok, Validator.validation_result()} | {:error, term()}
   def validate_with_details(%Document{} = doc, mode \\ :standard) do
     Validator.validate(doc, mode: mode)
   end

@@ -119,7 +119,12 @@ defmodule Metastatic.MixProject do
       source_ref: "v#{@version}",
       formatters: ["html", "epub"],
       groups_for_modules: groups_for_modules(),
-      nest_modules_by_prefix: [Metastatic.Adapters],
+      nest_modules_by_prefix: [
+        Metastatic.Adapters,
+        Metastatic.Analysis,
+        Metastatic.CLI,
+        Metastatic.Supplemental
+      ],
       authors: ["Aleksei Matiushkin"],
       canonical: "https://hexdocs.pm/#{@app}",
       skip_undefined_reference_warnings_on: []
@@ -144,8 +149,54 @@ defmodule Metastatic.MixProject do
         Metastatic.Builder,
         Metastatic.Validator
       ],
+      CLI: [
+        Metastatic.CLI,
+        Metastatic.CLI.Formatter,
+        Metastatic.CLI.Inspector,
+        Metastatic.CLI.Translator
+      ],
+      Analysis: [
+        Metastatic.Analysis.Complexity,
+        Metastatic.Analysis.Complexity.Cognitive,
+        Metastatic.Analysis.Complexity.Cyclomatic,
+        Metastatic.Analysis.Complexity.Formatter,
+        Metastatic.Analysis.Complexity.FunctionMetrics,
+        Metastatic.Analysis.Complexity.Halstead,
+        Metastatic.Analysis.Complexity.LoC,
+        Metastatic.Analysis.Complexity.Nesting,
+        Metastatic.Analysis.Complexity.Result,
+        Metastatic.Analysis.Purity,
+        Metastatic.Analysis.Purity.Effects,
+        Metastatic.Analysis.Purity.Formatter,
+        Metastatic.Analysis.Purity.Result
+      ],
       "Language Adapters": [
-        Metastatic.Adapter
+        Metastatic.Adapter,
+        Metastatic.Adapter.Registry,
+        Metastatic.Adapters.Elixir,
+        Metastatic.Adapters.Elixir.FromMeta,
+        Metastatic.Adapters.Elixir.ToMeta,
+        Metastatic.Adapters.Erlang,
+        Metastatic.Adapters.Erlang.FromMeta,
+        Metastatic.Adapters.Erlang.ToMeta,
+        Metastatic.Adapters.Python,
+        Metastatic.Adapters.Python.FromMeta,
+        Metastatic.Adapters.Python.Subprocess,
+        Metastatic.Adapters.Python.ToMeta
+      ],
+      Supplemental: [
+        Metastatic.Supplemental,
+        Metastatic.Supplemental.Error,
+        Metastatic.Supplemental.Info,
+        Metastatic.Supplemental.Python.Asyncio,
+        Metastatic.Supplemental.Python.Pykka,
+        Metastatic.Supplemental.Registry,
+        Metastatic.Supplemental.Transformer,
+        Metastatic.Supplemental.Validator
+      ],
+      Internals: [
+        Metastatic.Test.AdapterHelper,
+        Metastatic.Test.FixtureHelper
       ]
     ]
   end

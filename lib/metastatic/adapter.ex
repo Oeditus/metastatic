@@ -94,7 +94,7 @@ defmodule Metastatic.Adapter do
   @typedoc """
   MetaAST representation (M2 level).
   """
-  @type meta_ast :: AST.node()
+  @type meta_ast :: AST.meta_ast()
 
   @typedoc """
   Metadata preserving M1-specific information.
