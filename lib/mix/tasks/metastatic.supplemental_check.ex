@@ -224,9 +224,7 @@ defmodule Mix.Tasks.Metastatic.SupplementalCheck do
   defp format_list([], _prefix), do: "  (none)"
 
   defp format_list(items, prefix) do
-    items
-    |> Enum.map(&"#{prefix}#{&1}")
-    |> Enum.join("\n")
+    Enum.map_join(items, "\n", &"#{prefix}#{&1}")
   end
 
   defp parse_format(nil), do: :text

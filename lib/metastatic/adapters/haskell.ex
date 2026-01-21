@@ -23,7 +23,7 @@ defmodule Metastatic.Adapters.Haskell do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.Adapters.Haskell.{Subprocess, ToMeta, FromMeta}
+  alias Metastatic.Adapters.Haskell.{FromMeta, Subprocess, ToMeta}
 
   @impl true
   def parse(source) when is_binary(source) do

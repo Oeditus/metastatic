@@ -135,9 +135,7 @@ defmodule Mix.Tasks.Metastatic.Gen.Supplemental do
       if constructs == [] do
         generate_transform_scaffold("example_construct")
       else
-        constructs
-        |> Enum.map(&generate_transform_scaffold/1)
-        |> Enum.join("\n\n")
+        Enum.map_join(constructs, "\n\n", &generate_transform_scaffold/1)
       end
 
     """
@@ -212,9 +210,7 @@ defmodule Mix.Tasks.Metastatic.Gen.Supplemental do
       if constructs == [] do
         generate_test_case("example_construct")
       else
-        constructs
-        |> Enum.map(&generate_test_case/1)
-        |> Enum.join("\n\n")
+        Enum.map_join(constructs, "\n\n", &generate_test_case/1)
       end
 
     """

@@ -277,8 +277,6 @@ defmodule Metastatic.Supplemental.CompatibilityMatrix do
   defp format_dependencies(deps) when map_size(deps) == 0, do: "(none)"
 
   defp format_dependencies(deps) do
-    deps
-    |> Enum.map(fn {lib, version} -> "#{lib} #{version}" end)
-    |> Enum.join(", ")
+    Enum.map_join(deps, ", ", fn {lib, version} -> "#{lib} #{version}" end)
   end
 end

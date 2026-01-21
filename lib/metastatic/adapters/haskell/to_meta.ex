@@ -455,10 +455,9 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
         with {:ok, params} <- extract_match_params(patterns),
              {:ok, body_meta, _} <- transform(rhs) do
           # If it has parameters, represent as lambda
-          if length(params) > 0 do
-            {:ok, name, {:lambda, params, body_meta}}
-          else
-            {:ok, name, body_meta}
+          case params do
+            [] -> {:ok, name, body_meta}
+            [_ | _] -> {:ok, name, {:lambda, params, body_meta}}
           end
         else
           _ -> :error
