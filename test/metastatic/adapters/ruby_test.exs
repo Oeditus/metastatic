@@ -358,6 +358,493 @@ defmodule Metastatic.Adapters.RubyTest do
     end
   end
 
+  describe "ToMeta - loops (M2.2 Extended Layer)" do
+    test "transforms while loop" do
+      ast = %{
+        "type" => "while",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["x"]},
+              :<,
+              %{"type" => "int", "children" => [10]}
+            ]
+          },
+          %{"type" => "int", "children" => [1]}
+        ]
+      }
+
+      assert {:ok, {:loop, :while, condition, body}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, :comparison, :<, _, _} = condition
+      assert {:literal, :integer, 1} = body
+    end
+
+    test "transforms until loop" do
+      ast = %{
+        "type" => "until",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["x"]},
+              :>=,
+              %{"type" => "int", "children" => [10]}
+            ]
+          },
+          %{"type" => "int", "children" => [1]}
+        ]
+      }
+
+      assert {:ok, {:loop, :while, condition, body}, %{original_type: :until}} =
+               ToMeta.transform(ast)
+
+      # Until is negated condition
+      assert {:unary_op, :boolean, :not, _} = condition
+      assert {:literal, :integer, 1} = body
+    end
+
+    test "transforms for loop" do
+      ast = %{
+        "type" => "for",
+        "children" => [
+          %{"type" => "lvasgn", "children" => ["i"]},
+          %{"type" => "array", "children" => []},
+          %{"type" => "int", "children" => [1]}
+        ]
+      }
+
+      assert {:ok, {:loop, :for_each, iterator, collection, body}, %{}} =
+               ToMeta.transform(ast)
+
+      assert iterator == "i"
+      # Note: transform returns {:ok, meta_ast, metadata}, not metadata in tuple
+      assert match?({:literal, :collection, []}, collection)
+      assert {:literal, :integer, 1} = body
+    end
+  end
+
+  describe "ToMeta - iterators (M2.2 Extended Layer)" do
+    test "transforms .each iterator" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "array", "children" => []},
+              "each"
+            ]
+          },
+          %{"type" => "args", "children" => [%{"type" => "arg", "children" => ["x"]}]},
+          %{"type" => "int", "children" => [1]}
+        ]
+      }
+
+      assert {:ok, {:collection_op, :each, lambda, collection}, %{}} = ToMeta.transform(ast)
+      assert {:lambda, ["x"], {:literal, :integer, 1}} = lambda
+      assert match?({:literal, :collection, []}, collection)
+    end
+
+    test "transforms .map iterator" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "array", "children" => []},
+              "map"
+            ]
+          },
+          %{"type" => "args", "children" => [%{"type" => "arg", "children" => ["x"]}]},
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["x"]},
+              :*,
+              %{"type" => "int", "children" => [2]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:collection_op, :map, lambda, collection}, %{}} = ToMeta.transform(ast)
+      assert {:lambda, ["x"], _body} = lambda
+      assert match?({:literal, :collection, []}, collection)
+    end
+
+    test "transforms .select iterator" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "array", "children" => []},
+              "select"
+            ]
+          },
+          %{"type" => "args", "children" => [%{"type" => "arg", "children" => ["x"]}]},
+          %{"type" => "true", "children" => []}
+        ]
+      }
+
+      assert {:ok, {:collection_op, :select, lambda, collection}, %{}} = ToMeta.transform(ast)
+      assert {:lambda, ["x"], {:literal, :boolean, true}} = lambda
+      assert match?({:literal, :collection, []}, collection)
+    end
+
+    test "transforms .reduce iterator with initial value" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "array", "children" => []},
+              "reduce",
+              %{"type" => "int", "children" => [0]}
+            ]
+          },
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "arg", "children" => ["sum"]},
+              %{"type" => "arg", "children" => ["x"]}
+            ]
+          },
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["sum"]},
+              :+,
+              %{"type" => "lvar", "children" => ["x"]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:collection_op, :reduce, lambda, collection, initial}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:lambda, ["sum", "x"], _body} = lambda
+      assert match?({:literal, :collection, []}, collection)
+      assert {:literal, :integer, 0} = initial
+    end
+  end
+
+  describe "ToMeta - lambdas (M2.2 Extended Layer)" do
+    test "transforms lambda with single parameter" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{"type" => "send", "children" => [nil, "lambda"]},
+          %{"type" => "args", "children" => [%{"type" => "arg", "children" => ["x"]}]},
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["x"]},
+              :+,
+              %{"type" => "int", "children" => [1]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:lambda, ["x"], body}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, :arithmetic, :+, _, _} = body
+    end
+
+    test "transforms lambda with multiple parameters" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{"type" => "send", "children" => [nil, "lambda"]},
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "arg", "children" => ["x"]},
+              %{"type" => "arg", "children" => ["y"]}
+            ]
+          },
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["x"]},
+              :+,
+              %{"type" => "lvar", "children" => ["y"]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:lambda, ["x", "y"], body}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, :arithmetic, :+, _, _} = body
+    end
+  end
+
+  describe "ToMeta - pattern matching (M2.2 Extended Layer)" do
+    test "transforms case/when statement" do
+      ast = %{
+        "type" => "case",
+        "children" => [
+          %{"type" => "lvar", "children" => ["x"]},
+          %{
+            "type" => "when",
+            "children" => [
+              %{"type" => "int", "children" => [1]},
+              %{"type" => "sym", "children" => [:one]}
+            ]
+          },
+          %{
+            "type" => "when",
+            "children" => [
+              %{"type" => "int", "children" => [2]},
+              %{"type" => "sym", "children" => [:two]}
+            ]
+          },
+          %{"type" => "sym", "children" => [:other]}
+        ]
+      }
+
+      assert {:ok, {:pattern_match, scrutinee, branches, else_branch}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:variable, "x"} = scrutinee
+      assert [_, _] = branches
+      assert {:literal, :symbol, :other} = else_branch
+    end
+
+    test "transforms case/when without else" do
+      ast = %{
+        "type" => "case",
+        "children" => [
+          %{"type" => "lvar", "children" => ["x"]},
+          %{
+            "type" => "when",
+            "children" => [
+              %{"type" => "int", "children" => [1]},
+              %{"type" => "sym", "children" => [:one]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:pattern_match, _scrutinee, branches, nil}, %{}} = ToMeta.transform(ast)
+      assert [_] = branches
+    end
+  end
+
+  describe "ToMeta - exception handling (M2.2 Extended Layer)" do
+    test "transforms begin/rescue block" do
+      ast = %{
+        "type" => "kwbegin",
+        "children" => [
+          %{
+            "type" => "rescue",
+            "children" => [
+              %{"type" => "send", "children" => [nil, "risky_operation"]},
+              %{
+                "type" => "resbody",
+                "children" => [
+                  %{
+                    "type" => "array",
+                    "children" => [
+                      %{"type" => "const", "children" => [nil, "StandardError"]}
+                    ]
+                  },
+                  %{"type" => "lvasgn", "children" => ["e"]},
+                  %{"type" => "send", "children" => [nil, "handle_error"]}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:exception_handling, try_body, handlers, nil}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:function_call, "risky_operation", []} = try_body
+      assert [_] = handlers
+    end
+
+    test "transforms begin/rescue/ensure block" do
+      ast = %{
+        "type" => "kwbegin",
+        "children" => [
+          %{
+            "type" => "ensure",
+            "children" => [
+              %{
+                "type" => "rescue",
+                "children" => [
+                  %{"type" => "send", "children" => [nil, "risky_operation"]},
+                  %{
+                    "type" => "resbody",
+                    "children" => [
+                      %{"type" => "array", "children" => []},
+                      nil,
+                      %{"type" => "send", "children" => [nil, "handle_error"]}
+                    ]
+                  }
+                ]
+              },
+              %{"type" => "send", "children" => [nil, "cleanup"]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:exception_handling, _try_body, _handlers, nil}, %{ensure: ensure_body}} =
+               ToMeta.transform(ast)
+
+      assert {:function_call, "cleanup", []} = ensure_body
+    end
+
+    test "transforms begin/ensure without rescue" do
+      ast = %{
+        "type" => "kwbegin",
+        "children" => [
+          %{
+            "type" => "ensure",
+            "children" => [
+              %{"type" => "send", "children" => [nil, "operation"]},
+              %{"type" => "send", "children" => [nil, "cleanup"]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:exception_handling, try_body, [], nil}, %{ensure: ensure_body}} =
+               ToMeta.transform(ast)
+
+      assert {:function_call, "operation", []} = try_body
+      assert {:function_call, "cleanup", []} = ensure_body
+    end
+  end
+
+  describe "ToMeta - Ruby-specific constructs (M2.3 Native Layer)" do
+    test "transforms class definition" do
+      ast = %{
+        "type" => "class",
+        "children" => [
+          %{"type" => "const", "children" => [nil, "Foo"]},
+          nil,
+          %{"type" => "int", "children" => [42]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, _ast, :class_definition}, metadata} =
+               ToMeta.transform(ast)
+
+      assert metadata.name == "Foo"
+      assert metadata.superclass == nil
+      assert metadata.body == {:literal, :integer, 42}
+    end
+
+    test "transforms class definition with superclass" do
+      ast = %{
+        "type" => "class",
+        "children" => [
+          %{"type" => "const", "children" => [nil, "Child"]},
+          %{"type" => "const", "children" => [nil, "Parent"]},
+          nil
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, _ast, :class_definition}, metadata} =
+               ToMeta.transform(ast)
+
+      assert metadata.name == "Child"
+      assert {:literal, :constant, "Parent"} = metadata.superclass
+    end
+
+    test "transforms module definition" do
+      ast = %{
+        "type" => "module",
+        "children" => [
+          %{"type" => "const", "children" => [nil, "Foo"]},
+          %{"type" => "int", "children" => [42]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, _ast, :module_definition}, metadata} =
+               ToMeta.transform(ast)
+
+      assert metadata.name == "Foo"
+      assert metadata.body == {:literal, :integer, 42}
+    end
+
+    test "transforms method definition without params" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "bar",
+          %{"type" => "args", "children" => []},
+          %{"type" => "int", "children" => [42]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, _ast, :method_definition}, metadata} =
+               ToMeta.transform(ast)
+
+      assert metadata.name == "bar"
+      assert metadata.params == []
+      assert metadata.body == {:literal, :integer, 42}
+    end
+
+    test "transforms method definition with params" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "add",
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "arg", "children" => ["x"]},
+              %{"type" => "arg", "children" => ["y"]}
+            ]
+          },
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["x"]},
+              :+,
+              %{"type" => "lvar", "children" => ["y"]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, _ast, :method_definition}, metadata} =
+               ToMeta.transform(ast)
+
+      assert metadata.name == "add"
+      assert metadata.params == ["x", "y"]
+      assert {:binary_op, :arithmetic, :+, _, _} = metadata.body
+    end
+
+    test "transforms constant assignment" do
+      ast = %{
+        "type" => "casgn",
+        "children" => [
+          nil,
+          "BAR",
+          %{"type" => "int", "children" => [42]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, _ast, :constant_assignment}, metadata} =
+               ToMeta.transform(ast)
+
+      assert metadata.name == "BAR"
+      assert metadata.namespace == nil
+      assert metadata.value == {:literal, :integer, 42}
+    end
+  end
+
   describe "integration - parse and transform" do
     test "parses and transforms simple assignment" do
       {:ok, ast} = Ruby.parse("x = 42")

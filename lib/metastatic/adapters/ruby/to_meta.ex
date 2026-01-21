@@ -104,6 +104,25 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
+  # Constant (e.g., StandardError, Array, Hash)
+  def transform(%{"type" => "const", "children" => [namespace, name]}) do
+    const_name = if is_atom(name), do: Atom.to_string(name), else: name
+
+    qualified_name =
+      if is_nil(namespace) do
+        const_name
+      else
+        with {:ok, namespace_meta, _} <- transform(namespace) do
+          "#{format_const(namespace_meta)}::#{const_name}"
+        end
+      end
+
+    case qualified_name do
+      {:ok, _, _} = result -> result
+      name when is_binary(name) -> {:ok, {:literal, :constant, name}, %{}}
+    end
+  end
+
   # Hash literal
   def transform(%{"type" => "hash", "children" => pairs}) do
     with {:ok, pairs_meta} <- transform_hash_pairs(pairs) do
@@ -272,6 +291,12 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
+  # Local variable binding (without value, e.g., in rescue clauses)
+  def transform(%{"type" => "lvasgn", "children" => [name]}) do
+    var_name = if is_atom(name), do: Atom.to_string(name), else: name
+    {:ok, {:variable, var_name}, %{scope: :local, binding: true}}
+  end
+
   # Instance variable assignment
   def transform(%{"type" => "ivasgn", "children" => [name, value]}) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
@@ -287,6 +312,170 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "begin", "children" => statements}) when is_list(statements) do
     with {:ok, statements_meta} <- transform_list(statements) do
       {:ok, {:block, statements_meta}, %{}}
+    end
+  end
+
+  # Loops - M2.2 Extended Layer
+
+  # While loop: while condition do body end
+  def transform(%{"type" => "while", "children" => [condition, body]}) do
+    with {:ok, cond_meta, _} <- transform(condition),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      {:ok, {:loop, :while, cond_meta, body_meta}, %{}}
+    end
+  end
+
+  # Until loop: until condition do body end
+  def transform(%{"type" => "until", "children" => [condition, body]}) do
+    with {:ok, cond_meta, _} <- transform(condition),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      # Until is equivalent to "while not condition"
+      negated_cond = {:unary_op, :boolean, :not, cond_meta}
+      {:ok, {:loop, :while, negated_cond, body_meta}, %{original_type: :until}}
+    end
+  end
+
+  # For loop: for var in collection do body end
+  def transform(%{"type" => "for", "children" => [var_asgn, collection, body]}) do
+    with {:ok, var_meta, _} <- transform_iterator_variable(var_asgn),
+         {:ok, collection_meta, _} <- transform(collection),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      {:ok, {:loop, :for_each, var_meta, collection_meta, body_meta}, %{}}
+    end
+  end
+
+  # Blocks with parameters and iterators - M2.2 Extended Layer
+
+  # Block with receiver (iterator methods: each, map, select, reduce, etc.)
+  # Structure: block [send [collection, method, ...args], args [param...], body]
+  def transform(%{"type" => "block", "children" => [send_node, args_node, body]}) do
+    case send_node do
+      # Lambda: lambda { |x| body } or ->(x) { body }
+      %{"type" => "send", "children" => [nil, "lambda"]} ->
+        transform_lambda(args_node, body)
+
+      # Iterator methods: [1,2,3].each { |x| ... }
+      %{"type" => "send", "children" => [collection, method | method_args]} ->
+        transform_iterator_method(collection, method, method_args, args_node, body)
+
+      _ ->
+        {:error, "Unsupported block construct: #{inspect(send_node)}"}
+    end
+  end
+
+  # Pattern Matching - M2.2 Extended Layer
+
+  # Case/when statement
+  def transform(%{"type" => "case", "children" => children}) do
+    [scrutinee | branches] = children
+    {else_branch, when_branches} = extract_else_branch(branches)
+
+    with {:ok, scrutinee_meta, _} <- transform(scrutinee),
+         {:ok, branches_meta} <- transform_when_branches(when_branches),
+         {:ok, else_meta, _} <- transform_or_nil(else_branch) do
+      {:ok, {:pattern_match, scrutinee_meta, branches_meta, else_meta}, %{}}
+    end
+  end
+
+  # Exception Handling - M2.2 Extended Layer
+
+  # Begin/rescue/ensure block
+  def transform(%{"type" => "kwbegin", "children" => [ensure_or_rescue]}) do
+    transform(ensure_or_rescue)
+  end
+
+  # Ensure block (with or without rescue)
+  def transform(%{"type" => "ensure", "children" => [try_body, ensure_body]}) do
+    case try_body do
+      %{"type" => "rescue"} ->
+        # Has both rescue and ensure
+        with {:ok, rescue_meta, rescue_metadata} <- transform(try_body),
+             {:ok, ensure_meta, _} <- transform(ensure_body) do
+          # Merge rescue handlers with ensure
+          metadata = Map.put(rescue_metadata, :ensure, ensure_meta)
+          {:ok, rescue_meta, metadata}
+        end
+
+      _ ->
+        # Only ensure, no rescue
+        with {:ok, try_meta, _} <- transform(try_body),
+             {:ok, ensure_meta, _} <- transform(ensure_body) do
+          {:ok, {:exception_handling, try_meta, [], nil}, %{ensure: ensure_meta}}
+        end
+    end
+  end
+
+  # Rescue block
+  def transform(%{"type" => "rescue", "children" => children}) do
+    [try_body | rescue_bodies] = children
+    rescue_handlers = Enum.filter(rescue_bodies, &match?(%{"type" => "resbody"}, &1))
+    else_body = Enum.find(rescue_bodies, fn node -> not match?(%{"type" => "resbody"}, node) end)
+
+    with {:ok, try_meta, _} <- transform(try_body),
+         {:ok, handlers_meta} <- transform_rescue_handlers(rescue_handlers),
+         {:ok, else_meta, _} <- transform_or_nil(else_body) do
+      {:ok, {:exception_handling, try_meta, handlers_meta, else_meta}, %{}}
+    end
+  end
+
+  # M2.3 Native Layer - Ruby-specific constructs
+
+  # Class definition
+  def transform(%{"type" => "class", "children" => [name, superclass, body]} = ast) do
+    with {:ok, name_meta, _} <- transform(name),
+         {:ok, superclass_meta, _} <- transform_or_nil(superclass),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      metadata = %{
+        name: extract_constant_name(name_meta),
+        superclass: superclass_meta,
+        body: body_meta
+      }
+
+      {:ok, {:language_specific, :ruby, ast, :class_definition}, metadata}
+    end
+  end
+
+  # Module definition
+  def transform(%{"type" => "module", "children" => [name, body]} = ast) do
+    with {:ok, name_meta, _} <- transform(name),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      metadata = %{
+        name: extract_constant_name(name_meta),
+        body: body_meta
+      }
+
+      {:ok, {:language_specific, :ruby, ast, :module_definition}, metadata}
+    end
+  end
+
+  # Method definition (def)
+  def transform(%{"type" => "def", "children" => [name, args, body]} = ast) do
+    method_name = if is_atom(name), do: Atom.to_string(name), else: name
+
+    with {:ok, params} <- extract_method_params(args),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      metadata = %{
+        name: method_name,
+        params: params,
+        body: body_meta
+      }
+
+      {:ok, {:language_specific, :ruby, ast, :method_definition}, metadata}
+    end
+  end
+
+  # Constant assignment (e.g., BAR = 42)
+  def transform(%{"type" => "casgn", "children" => [namespace, name, value]} = ast) do
+    const_name = if is_atom(name), do: Atom.to_string(name), else: name
+
+    with {:ok, value_meta, _} <- transform(value) do
+      metadata = %{
+        name: const_name,
+        namespace: namespace,
+        value: value_meta
+      }
+
+      {:ok, {:language_specific, :ruby, ast, :constant_assignment}, metadata}
     end
   end
 
@@ -343,6 +532,9 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp format_receiver({:variable, name}), do: name
   defp format_receiver(_), do: "obj"
 
+  defp format_const({:literal, :constant, name}), do: name
+  defp format_const(_), do: "Unknown"
+
   # Operator normalization helpers
   defp normalize_op(op) when is_atom(op), do: op
   defp normalize_op(op) when is_binary(op), do: String.to_atom(op)
@@ -372,4 +564,169 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       {:ok, {:function_call, qualified_name, [arg_meta]}, %{call_type: :instance}}
     end
   end
+
+  # M2.2 Extended Layer Helper Functions
+
+  # Transform iterator variable (from lvasgn in for loops)
+  defp transform_iterator_variable(%{"type" => "lvasgn", "children" => [name]}) do
+    var_name = if is_atom(name), do: Atom.to_string(name), else: name
+    {:ok, var_name, %{}}
+  end
+
+  defp transform_iterator_variable(other) do
+    {:error, "Invalid iterator variable: #{inspect(other)}"}
+  end
+
+  # Transform lambda
+  defp transform_lambda(args_node, body) do
+    with {:ok, params} <- extract_lambda_params(args_node),
+         {:ok, body_meta, _} <- transform(body) do
+      {:ok, {:lambda, params, body_meta}, %{}}
+    end
+  end
+
+  # Extract lambda parameters from args node
+  defp extract_lambda_params(%{"type" => "args", "children" => args}) do
+    params =
+      Enum.map(args, fn
+        %{"type" => "arg", "children" => [name]} when is_binary(name) -> name
+        %{"type" => "arg", "children" => [name]} when is_atom(name) -> Atom.to_string(name)
+        _ -> nil
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    {:ok, params}
+  end
+
+  defp extract_lambda_params(_), do: {:ok, []}
+
+  # Transform iterator methods (map, each, select, reduce)
+  defp transform_iterator_method(collection, method, method_args, args_node, body) do
+    method_atom = normalize_op(method)
+
+    case method_atom do
+      m when m in [:each, :map, :select, :filter, :reject] ->
+        transform_map_like_iterator(collection, m, args_node, body)
+
+      :reduce ->
+        transform_reduce_iterator(collection, method_args, args_node, body)
+
+      _ ->
+        # Not a recognized iterator, treat as generic block
+        {:error, "Unrecognized iterator method: #{method}"}
+    end
+  end
+
+  # Transform map-like iterators (each, map, select, filter)
+  defp transform_map_like_iterator(collection, method, args_node, body) do
+    with {:ok, collection_meta, _} <- transform(collection),
+         {:ok, params} <- extract_lambda_params(args_node),
+         {:ok, body_meta, _} <- transform(body) do
+      lambda = {:lambda, params, body_meta}
+      {:ok, {:collection_op, method, lambda, collection_meta}, %{}}
+    end
+  end
+
+  # Transform reduce iterator
+  defp transform_reduce_iterator(collection, method_args, args_node, body) do
+    with {:ok, collection_meta, _} <- transform(collection),
+         {:ok, initial_meta} <- extract_reduce_initial(method_args),
+         {:ok, params} <- extract_lambda_params(args_node),
+         {:ok, body_meta, _} <- transform(body) do
+      lambda = {:lambda, params, body_meta}
+      {:ok, {:collection_op, :reduce, lambda, collection_meta, initial_meta}, %{}}
+    end
+  end
+
+  # Extract initial value from reduce method args
+  defp extract_reduce_initial([initial | _]) do
+    case transform(initial) do
+      {:ok, meta, _} -> {:ok, meta}
+      error -> error
+    end
+  end
+
+  defp extract_reduce_initial([]), do: {:ok, nil}
+
+  # Pattern matching helpers
+  defp extract_else_branch(branches) do
+    else_branch = Enum.find(branches, fn node -> not match?(%{"type" => "when"}, node) end)
+    when_branches = Enum.filter(branches, &match?(%{"type" => "when"}, &1))
+    {else_branch, when_branches}
+  end
+
+  defp transform_when_branches(when_branches) do
+    when_branches
+    |> Enum.reduce_while({:ok, []}, fn when_node, {:ok, acc} ->
+      case transform_when_branch(when_node) do
+        {:ok, branch_meta} -> {:cont, {:ok, [branch_meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, branches} -> {:ok, Enum.reverse(branches)}
+      error -> error
+    end
+  end
+
+  defp transform_when_branch(%{"type" => "when", "children" => [pattern | rest]}) do
+    # Rest is either [body] or [] if body is nil
+    body = List.first(rest)
+
+    with {:ok, pattern_meta, _} <- transform(pattern),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      {:ok, {pattern_meta, body_meta}}
+    end
+  end
+
+  # Exception handling helpers
+  defp transform_rescue_handlers(handlers) do
+    handlers
+    |> Enum.reduce_while({:ok, []}, fn handler, {:ok, acc} ->
+      case transform_rescue_handler(handler) do
+        {:ok, handler_meta} -> {:cont, {:ok, [handler_meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, handlers} -> {:ok, Enum.reverse(handlers)}
+      error -> error
+    end
+  end
+
+  defp transform_rescue_handler(%{
+         "type" => "resbody",
+         "children" => [exception_types, var_binding, body]
+       }) do
+    with {:ok, types_meta} <- transform_exception_types(exception_types),
+         {:ok, var_meta, _} <- transform_or_nil(var_binding),
+         {:ok, body_meta, _} <- transform(body) do
+      {:ok, {types_meta, var_meta, body_meta}}
+    end
+  end
+
+  defp transform_exception_types(%{"type" => "array", "children" => types}) do
+    transform_list(types)
+  end
+
+  defp transform_exception_types(nil), do: {:ok, []}
+
+  # M2.3 Native Layer Helpers
+
+  defp extract_constant_name({:literal, :constant, name}), do: name
+  defp extract_constant_name(_), do: "Unknown"
+
+  defp extract_method_params(%{"type" => "args", "children" => args}) do
+    params =
+      Enum.map(args, fn
+        %{"type" => "arg", "children" => [name]} when is_binary(name) -> name
+        %{"type" => "arg", "children" => [name]} when is_atom(name) -> Atom.to_string(name)
+        _ -> nil
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    {:ok, params}
+  end
+
+  defp extract_method_params(_), do: {:ok, []}
 end
