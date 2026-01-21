@@ -125,12 +125,28 @@ jobs:
             ${{ runner.os }}-mix-docs-
 
       - name: Install dependencies
-        run: mix deps.get
+        run: MIX_ENV=dev mix deps.get
 
       - name: Generate documentation
-        run: mix docs
+        run: MIX_ENV=dev mix docs
 
       - name: Check documentation coverage
         run: |
           echo "Checking that all public functions have @doc..."
           # This is a placeholder - actual implementation would grep for missing @doc
+
+  quality_gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: [quality, test, docs]
+    if: always()
+    steps:
+      - name: Check all jobs status
+        run: |
+          if [ "${{ needs.quality.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.docs.result }}" != "success" ]; then
+            echo "Quality gate failed"
+            exit 1
+          fi
+          echo "Quality gate passed"
