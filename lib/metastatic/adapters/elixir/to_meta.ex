@@ -379,13 +379,29 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
-  defp transform_case([scrutinee | [clauses]]) do
+  # Standalone case: case expr do ... end
+  defp transform_case([scrutinee, clauses]) do
     # case expression with pattern matching
     case_clauses = Keyword.get(clauses, :do, [])
 
     with {:ok, scrutinee_meta, _} <- transform(scrutinee),
          {:ok, arms} <- transform_case_arms(case_clauses) do
       {:ok, {:pattern_match, scrutinee_meta, arms}, %{}}
+    end
+  end
+
+  # Piped case: expr |> case do ... end
+  # The scrutinee comes from the pipe, so args only contains the clauses
+  defp transform_case([clauses]) do
+    # The scrutinee is implicit from the pipe - we need to get it from context
+    # For now, create a placeholder that indicates this needs pipe handling
+    case_clauses = Keyword.get(clauses, :do, [])
+
+    with {:ok, _arms} <- transform_case_arms(case_clauses) do
+      # Mark this as needing the pipe argument
+      {:ok,
+       {:language_specific, :elixir, {:case, [], [clauses]}, "piped case expression"},
+       %{}}
     end
   end
 

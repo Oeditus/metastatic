@@ -179,7 +179,7 @@ defmodule Mix.Tasks.Metastatic.Analyze do
       Mix.shell().info("  Warnings:")
 
       Enum.each(validation.warnings, fn warning ->
-        Mix.shell().info("    - #{warning}")
+        Mix.shell().info("    - #{format_warning(warning)}")
       end)
     end
 
@@ -207,5 +207,22 @@ defmodule Mix.Tasks.Metastatic.Analyze do
         Mix.shell().info("  #{var}")
       end)
     end
+  end
+
+  @spec format_warning({atom(), any()}) :: String.t()
+  defp format_warning({:native_constructs_present, count}) do
+    "Contains #{count} language-specific construct(s)"
+  end
+
+  defp format_warning({:deep_nesting, depth}) do
+    "Deep nesting detected (depth: #{depth})"
+  end
+
+  defp format_warning({:large_ast, node_count}) do
+    "Large AST detected (#{node_count} nodes)"
+  end
+
+  defp format_warning(other) do
+    inspect(other)
   end
 end
