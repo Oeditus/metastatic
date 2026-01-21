@@ -1,8 +1,8 @@
 # Metastatic Roadmap
 
 **Last Updated:** 2026-01-21  
-**Current Status:** Phase 1, Milestone 1.1 Complete (Assignment & Pattern Matching)  
-**Next Phase:** Phase 1, Milestone 1.2 (Additional Python Statements)
+**Current Status:** Phase 1 Complete (All Python Statements)  
+**Next Phase:** Phase 2 (Supplemental Modules)
 
 ## Project Overview
 
@@ -27,8 +27,8 @@
 - Documentation: 100% of public APIs
 
 **Test Coverage:**
-- 21 doctests + 479 tests = 500 total tests
-- 500 passing, 0 skipped
+- 21 doctests + 498 tests = 519 total tests
+- 519 passing, 0 skipped
 - >95% code coverage
 
 ---
@@ -129,24 +129,39 @@ test/fixtures/python/core/conditionals.py       # Enable skipped fixtures
 test/fixtures/python/core/blocks.py             # Enable skipped fixtures
 ```
 
-### Milestone 1.2: Additional Python Statement Types
+### Milestone 1.2: Additional Python Statement Types ✅
+
+**Status:** COMPLETE (January 2026)
 
 **Goal:** Complete Python adapter with all statement types
 
 **Deliverables:**
-- [ ] Python-specific statements (native layer)
-  - `global` statement → `{:language_specific, :python, node, :global_declaration}`
-  - `nonlocal` statement → `{:language_specific, :python, node, :nonlocal_declaration}`
-  - `assert` statement → `{:language_specific, :python, node, :assert_statement}`
-  - `del` statement → `{:language_specific, :python, node, :delete_statement}`
-  - `pass` statement → `{:language_specific, :python, node, :pass_statement}`
-- [ ] Add 15+ tests for Python-specific statements
-- [ ] Update documentation with coverage matrix
+- [x] Python-specific statements (native layer)
+  - `global` statement → `{:language_specific, :python, node, :global}`
+  - `nonlocal` statement → `{:language_specific, :python, node, :nonlocal}`
+  - `assert` statement → `{:language_specific, :python, node, :assert}`
+  - `del` statement → `{:language_specific, :python, node, :delete}`
+  - `pass` statement → `{:language_specific, :python, node, :pass}`
+- [x] Add 19 tests for Python-specific statements
+  - 4 additional ToMeta tests (multiple variables, assert with message)
+  - 5 FromMeta tests (all statement types)
+  - 7 round-trip tests
+  - 3 fixture integration tests
+- [x] Create test fixtures
+  - `test/fixtures/python/native/scope_declarations.py`
+  - `test/fixtures/python/native/assertions.py`
+  - `test/fixtures/python/native/delete_statements.py`
+
+**Test Results:**
+- Python adapter: 150 tests (up from 131)
+- Total: 519 tests (up from 500)
+- All passing, 0 failures, 0 skipped
 
 **Success Criteria:**
-- [x] All 500 tests passing (0 skipped)
+- [x] All 519 tests passing (0 skipped)
 - [x] Assignment round-trip >95% for all adapters
-- [x] Documentation updated with assignment examples
+- [x] Python statement coverage complete
+- [x] Test fixtures created and passing
 
 ---
 

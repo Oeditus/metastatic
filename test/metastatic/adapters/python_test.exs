@@ -1201,6 +1201,158 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:language_specific, :python, node, :pass} = meta_ast
       assert node["_type"] == "Pass"
     end
+
+    test "preserves global statement with multiple variables" do
+      source = "global x, y, z"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :global} = meta_ast
+      assert node["_type"] == "Global"
+      assert ["x", "y", "z"] = node["names"]
+    end
+
+    test "preserves nonlocal statement with multiple variables" do
+      source = "nonlocal x, y"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :nonlocal} = meta_ast
+      assert node["_type"] == "Nonlocal"
+      assert ["x", "y"] = node["names"]
+    end
+
+    test "preserves assert statement with message" do
+      source = "assert x > 0, 'x must be positive'"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :assert} = meta_ast
+      assert node["_type"] == "Assert"
+      assert node["test"] != nil
+      assert node["msg"] != nil
+    end
+
+    test "preserves delete statement with multiple targets" do
+      source = "del x, y, z"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:language_specific, :python, node, :delete} = meta_ast
+      assert node["_type"] == "Delete"
+      assert [_, _, _] = node["targets"]
+    end
+  end
+
+  describe "FromMeta - Native Layer: Statement Types" do
+    test "transforms global statement back" do
+      node = %{"_type" => "Global", "names" => ["x", "y"]}
+      meta_ast = {:language_specific, :python, node, :global}
+
+      assert {:ok, ^node} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms nonlocal statement back" do
+      node = %{"_type" => "Nonlocal", "names" => ["x"]}
+      meta_ast = {:language_specific, :python, node, :nonlocal}
+
+      assert {:ok, ^node} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms assert statement back" do
+      node = %{
+        "_type" => "Assert",
+        "test" => %{"_type" => "Constant", "value" => true},
+        "msg" => nil
+      }
+
+      meta_ast = {:language_specific, :python, node, :assert}
+
+      assert {:ok, ^node} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms delete statement back" do
+      node = %{"_type" => "Delete", "targets" => [%{"_type" => "Name", "id" => "x"}]}
+      meta_ast = {:language_specific, :python, node, :delete}
+
+      assert {:ok, ^node} = FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms pass statement back" do
+      node = %{"_type" => "Pass"}
+      meta_ast = {:language_specific, :python, node, :pass}
+
+      assert {:ok, ^node} = FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "round-trip transformations - Native Layer: Statement Types" do
+    test "round-trips global statement" do
+      source = "global x, y"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:language_specific, :python, _, :global} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips nonlocal statement" do
+      source = "nonlocal x"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:language_specific, :python, _, :nonlocal} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips assert statement" do
+      source = "assert x > 0"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:language_specific, :python, _, :assert} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips assert statement with message" do
+      source = "assert x > 0, 'error'"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:language_specific, :python, _, :assert} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips delete statement" do
+      source = "del x"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:language_specific, :python, _, :delete} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips delete statement with multiple targets" do
+      source = "del x, y, z"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:language_specific, :python, _, :delete} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips pass statement" do
+      source = "pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:language_specific, :python, _, :pass} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
   end
 
   describe "cross-language validation" do
@@ -1486,6 +1638,42 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:block, statements} = meta_ast
       assert Enum.any?(statements, &match?({:language_specific, :python, _, _}, &1))
+    end
+
+    test "parses scope declarations fixture with global and nonlocal" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/scope_declarations.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      # Should contain global and nonlocal declarations
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, :global}, &1))
+    end
+
+    test "parses assertions fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/assertions.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      # Should contain assert statements
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, :assert}, &1))
+    end
+
+    test "parses delete statements fixture" do
+      fixture_path = Path.join([__DIR__, "../../fixtures/python/native/delete_statements.py"])
+      {:ok, source} = File.read(fixture_path)
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, statements} = meta_ast
+      # Should contain delete statements
+      assert Enum.any?(statements, &match?({:language_specific, :python, _, :delete}, &1))
     end
   end
 
