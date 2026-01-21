@@ -32,9 +32,7 @@ defmodule Metastatic.Supplemental.Registry do
 
   use GenServer
 
-  alias Metastatic.Supplemental
-  alias Metastatic.Supplemental.Error.ConflictError
-  alias Metastatic.Supplemental.Info
+  alias Metastatic.Supplemental.{Error.ConflictError, Info}
 
   require Logger
 

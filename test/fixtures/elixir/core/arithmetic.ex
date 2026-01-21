@@ -1,10 +1,9 @@
-# credo:disable-for-lines:20
 # Arithmetic operations - M2.1 Core Layer
 
 # Addition
 x + 5
 
-# Subtraction  
+# Subtraction
 10 - y
 
 # Multiplication
@@ -14,7 +13,9 @@ a * b
 numerator / denominator
 
 # Unary negation
+# credo:disable-for-next-line
 -value
 
 # Unary positive
+# credo:disable-for-next-line
 +number

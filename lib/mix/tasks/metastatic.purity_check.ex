@@ -82,9 +82,9 @@ defmodule Mix.Tasks.Metastatic.PurityCheck do
               exit({:shutdown, 1})
             end
 
-          {:error, reason} ->
-            Mix.shell().error("Analysis error: #{inspect(reason)}")
-            exit({:shutdown, 2})
+            # {:error, reason} ->
+            #   Mix.shell().error("Analysis error: #{inspect(reason)}")
+            #   exit({:shutdown, 2})
         end
 
       {:error, reason} ->

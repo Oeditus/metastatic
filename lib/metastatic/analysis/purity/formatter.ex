@@ -27,9 +27,6 @@ defmodule Metastatic.Analysis.Purity.Formatter do
     "IMPURE: #{summary |> String.replace("Function is impure due to ", "")}"
   end
 
-  @doc """
-  Formats a purity result as JSON.
-  """
   def format(result, :json) do
     Jason.encode!(%{
       pure: result.pure?,
@@ -41,9 +38,6 @@ defmodule Metastatic.Analysis.Purity.Formatter do
     })
   end
 
-  @doc """
-  Formats a purity result with detailed information.
-  """
   def format(result, :detailed) do
     lines = [
       "Purity Analysis Result",

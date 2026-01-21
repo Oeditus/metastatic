@@ -93,9 +93,9 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
             exit({:shutdown, exit_code})
 
-          {:error, reason} ->
-            Mix.shell().error("Analysis error: #{inspect(reason)}")
-            exit({:shutdown, 2})
+            # {:error, reason} ->
+            #   Mix.shell().error("Analysis error: #{inspect(reason)}")
+            #   exit({:shutdown, 2})
         end
 
       {:error, reason} ->
