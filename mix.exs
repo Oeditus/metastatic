@@ -63,7 +63,9 @@ defmodule Metastatic.MixProject do
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test, runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:benchee, "~> 1.3", only: [:dev, :test], runtime: false},
+      {:benchee_html, "~> 1.0", only: [:dev, :test], runtime: false}
     ]
   end
 

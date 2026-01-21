@@ -67,7 +67,11 @@ mix metastatic.validate_equivalence hello.py hello.ex
 mix metastatic.validate_equivalence --verbose file1.py file2.ex
 ```
 
-### Using Language Adapters (Elixir & Erlang)
+### Using Language Adapters
+
+Metastatic currently supports 5 language adapters: Python, Elixir, Erlang, Ruby, and Haskell.
+
+#### Elixir & Erlang
 
 ```elixir
 alias Metastatic.Adapters.{Elixir, Erlang}
@@ -98,6 +102,81 @@ erlang_source = "X + 5."
 
 # Both produce semantically equivalent MetaAST!
 # (only variable naming differs: "x" vs "X")
+```
+
+#### Python
+
+```elixir
+alias Metastatic.Adapters.Python
+
+# Parse Python arithmetic
+{:ok, doc} = Adapter.abstract(Python, "x + 5", :python)
+doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+# Parse Python class
+source = """
+class Calculator:
+    def __init__(self, value=0):
+        self.value = value
+    
+    def add(self, x):
+        self.value += x
+        return self
+"""
+{:ok, doc} = Adapter.abstract(Python, source, :python)
+# doc.ast contains {:language_specific, :python, ...} for class definition
+```
+
+#### Ruby
+
+```elixir
+alias Metastatic.Adapters.Ruby
+
+# Parse Ruby code
+{:ok, doc} = Adapter.abstract(Ruby, "x + 5", :ruby)
+doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+# Parse Ruby class with method chaining
+source = """
+class Calculator
+  attr_reader :value
+  
+  def initialize(initial = 0)
+    @value = initial
+  end
+  
+  def add(x)
+    @value += x
+    self
+  end
+end
+"""
+{:ok, doc} = Adapter.abstract(Ruby, source, :ruby)
+# doc.ast contains {:language_specific, :ruby, ...} for class definition
+```
+
+#### Haskell
+
+```elixir
+alias Metastatic.Adapters.Haskell
+
+# Parse Haskell arithmetic
+{:ok, doc} = Adapter.abstract(Haskell, "x + 5", :haskell)
+doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+# Parse Haskell function with type signature
+source = """
+factorial :: Int -> Int
+factorial 0 = 1
+factorial n = n * factorial (n - 1)
+"""
+{:ok, doc} = Adapter.abstract(Haskell, source, :haskell)
+# doc.ast contains {:language_specific, :haskell, ...} for type signature and function
+
+# Parse data type definition
+source = "data Maybe a = Nothing | Just a"
+{:ok, doc} = Adapter.abstract(Haskell, source, :haskell)
+# doc.ast contains {:language_specific, :haskell, ...} for algebraic data type
 ```
 
 ### Working with MetaAST Directly
