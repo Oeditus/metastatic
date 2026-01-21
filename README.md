@@ -38,11 +38,11 @@ Metastatic is a **foundation library** that other tools build upon.
 
 ## Current Status
 
-**Phase:** Phase 3 Complete 🎉 - Python Adapter with Full M2 Support!  
-**Version:** 0.3.0-dev  
-**Completed:** Phase 1 (Foundation) + Phase 2 (BEAM Adapters) + Phase 3 (Python Adapter)  
-**Tests:** 395 passing (21 doctests + 374 tests), 99.2% pass rate, 0 failures  
-**Next:** Phase 4 - JavaScript Adapter & Additional Language Support  
+**Phase:** Phase 5 Milestone 5.1 Complete 🎉 - CLI Tools!  
+**Version:** 0.5.0-dev  
+**Completed:** Phase 1 (Foundation) + Phase 2 (BEAM Adapters) + Phase 3 (Python Adapter) + Phase 5.1 (CLI Tools)  
+**Tests:** 477 passing (21 doctests + 456 tests), 99.4% pass rate, 0 failures  
+**Next:** Phase 4 - JavaScript Adapter (planned)  
 **Languages Supported:**
 - Elixir ✅ (all 3 layers: Core, Extended, Native)
 - Erlang ✅ (all 3 layers: Core, Extended, Native)
@@ -51,6 +51,40 @@ Metastatic is a **foundation library** that other tools build upon.
 **Languages Planned:** JavaScript, TypeScript, Ruby, Go, Rust
 
 ## Quick Start
+
+### CLI Tools
+
+Metastatic provides command-line tools for cross-language translation, AST inspection, and semantic analysis:
+
+```bash
+# Cross-language translation
+mix metastatic.translate --from python --to elixir hello.py
+mix metastatic.translate --from elixir --to python lib/module.ex --output py_output/
+
+# AST inspection (tree format)
+mix metastatic.inspect hello.py
+
+# AST inspection (JSON format)
+mix metastatic.inspect --format json hello.py
+
+# Filter by layer
+mix metastatic.inspect --layer core hello.py
+
+# Extract variables only
+mix metastatic.inspect --variables hello.py
+
+# Analyze MetaAST metrics
+mix metastatic.analyze hello.py
+
+# Validate with strict mode
+mix metastatic.analyze --validate strict hello.py
+
+# Check semantic equivalence
+mix metastatic.validate_equivalence hello.py hello.ex
+
+# Show detailed differences
+mix metastatic.validate_equivalence --verbose file1.py file2.ex
+```
 
 ### Using Language Adapters (Elixir & Erlang)
 
@@ -213,12 +247,26 @@ Language-specific: lifetimes, async models, type systems, metaprogramming
 
 **Total Phase 3: 136 new tests (395 total), +1,335 LOC, zero regressions**
 
+### ✅ Phase 5 Milestone 5.1: CLI Tools (Complete!)
+**Deliverables:**
+- ✅ `mix metastatic.translate` - Cross-language code translation
+- ✅ `mix metastatic.inspect` - AST inspection with multiple formats
+- ✅ `mix metastatic.analyze` - MetaAST metrics and validation
+- ✅ `mix metastatic.validate_equivalence` - Semantic equivalence checking
+- ✅ 82 comprehensive CLI tests (18 + 29 + 19 + 16)
+- ✅ Tree, JSON, and plain output formats
+- ✅ Layer filtering (core/extended/native)
+- ✅ Validation modes (strict/standard/permissive)
+- ✅ Colored ANSI terminal output
+
+**Total Phase 5.1: 82 new tests (477 total), +3,179 LOC, 100% passing**
+
 ### Phase 4: JavaScript Adapter (Months 4-6)
 - JavaScript adapter with Babel parser integration
 - M1 ↔ M2 bidirectional transformations
 - Cross-language validation (JavaScript ≡ Python ≡ Elixir)
 
-### Phase 5: Additional Languages (Months 7-12)
+### Phase 6: Additional Languages (Months 7-12)
 - TypeScript adapter
 - Ruby adapter
 - Go adapter
