@@ -445,6 +445,301 @@ defmodule Metastatic.Adapters.PythonTest do
     end
   end
 
+  describe "ToMeta - Extended Layer: Loops" do
+    test "transforms while loop" do
+      source = "while x > 0:\n    x"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:loop, :while, condition, body}, _metadata} = Python.to_meta(ast)
+      assert {:binary_op, :comparison, :>, _, _} = condition
+      assert {:variable, "x"} = body
+    end
+
+    test "transforms for loop" do
+      source = "for i in items:\n    i"
+
+      assert {:ok, ast} = Python.parse(source)
+
+      assert {:ok, {:loop, :for_each, iterator, collection, body}, _metadata} =
+               Python.to_meta(ast)
+
+      assert {:variable, "i"} = iterator
+      assert {:variable, "items"} = collection
+      assert {:variable, "i"} = body
+    end
+  end
+
+  describe "ToMeta - Extended Layer: Lambdas" do
+    test "transforms lambda without parameters" do
+      ast = %{
+        "_type" => "Lambda",
+        "args" => %{"args" => []},
+        "body" => %{"_type" => "Constant", "value" => 42}
+      }
+
+      assert {:ok, {:lambda, [], [], body}, %{}} = ToMeta.transform(ast)
+      assert {:literal, :integer, 42} = body
+    end
+
+    test "transforms lambda with single parameter" do
+      ast = %{
+        "_type" => "Lambda",
+        "args" => %{"args" => [%{"arg" => "x"}]},
+        "body" => %{
+          "_type" => "BinOp",
+          "op" => %{"_type" => "Mult"},
+          "left" => %{"_type" => "Name", "id" => "x"},
+          "right" => %{"_type" => "Constant", "value" => 2}
+        }
+      }
+
+      assert {:ok, {:lambda, ["x"], [], body}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, :arithmetic, :*, _, _} = body
+    end
+
+    test "transforms lambda with multiple parameters" do
+      ast = %{
+        "_type" => "Lambda",
+        "args" => %{"args" => [%{"arg" => "x"}, %{"arg" => "y"}]},
+        "body" => %{
+          "_type" => "BinOp",
+          "op" => %{"_type" => "Add"},
+          "left" => %{"_type" => "Name", "id" => "x"},
+          "right" => %{"_type" => "Name", "id" => "y"}
+        }
+      }
+
+      assert {:ok, {:lambda, ["x", "y"], [], body}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, :arithmetic, :+, _, _} = body
+    end
+  end
+
+  describe "ToMeta - Extended Layer: Comprehensions" do
+    test "transforms simple list comprehension to map operation" do
+      ast = %{
+        "_type" => "ListComp",
+        "elt" => %{
+          "_type" => "BinOp",
+          "op" => %{"_type" => "Mult"},
+          "left" => %{"_type" => "Name", "id" => "x"},
+          "right" => %{"_type" => "Constant", "value" => 2}
+        },
+        "generators" => [
+          %{
+            "target" => %{"_type" => "Name", "id" => "x"},
+            "iter" => %{"_type" => "Name", "id" => "numbers"},
+            "ifs" => []
+          }
+        ]
+      }
+
+      assert {:ok, {:collection_op, :map, lambda, collection}, %{}} = ToMeta.transform(ast)
+      assert {:lambda, ["x"], [], body} = lambda
+      assert {:binary_op, :arithmetic, :*, _, _} = body
+      assert {:variable, "numbers"} = collection
+    end
+
+    test "transforms complex comprehension with filter to language_specific" do
+      ast = %{
+        "_type" => "ListComp",
+        "elt" => %{"_type" => "Name", "id" => "x"},
+        "generators" => [
+          %{
+            "target" => %{"_type" => "Name", "id" => "x"},
+            "iter" => %{"_type" => "Name", "id" => "numbers"},
+            "ifs" => [
+              %{
+                "_type" => "Compare",
+                "left" => %{"_type" => "Name", "id" => "x"},
+                "ops" => [%{"_type" => "Gt"}],
+                "comparators" => [%{"_type" => "Constant", "value" => 0}]
+              }
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:language_specific, :python, _, :list_comprehension}, %{}} =
+               ToMeta.transform(ast)
+    end
+  end
+
+  describe "ToMeta - Extended Layer: Exception Handling" do
+    test "transforms try-except block" do
+      source = "try:\n    risky()\nexcept Exception as e:\n    handle(e)"
+
+      assert {:ok, ast} = Python.parse(source)
+
+      assert {:ok, {:exception_handling, try_block, rescue_clauses, finally_block}, _metadata} =
+               Python.to_meta(ast)
+
+      assert {:function_call, "risky", []} = try_block
+      assert [{:error, {:variable, "e"}, _}] = rescue_clauses
+      assert nil == finally_block
+    end
+
+    test "transforms try-finally block" do
+      source = "try:\n    operation\nfinally:\n    cleanup()"
+
+      assert {:ok, ast} = Python.parse(source)
+
+      assert {:ok, {:exception_handling, _try_block, [], finally_block}, _metadata} =
+               Python.to_meta(ast)
+
+      assert {:function_call, "cleanup", []} = finally_block
+    end
+  end
+
+  describe "FromMeta - Extended Layer: Loops" do
+    test "transforms while loop back" do
+      meta_ast =
+        {:loop, :while, {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
+         {:variable, "x"}}
+
+      assert {:ok, %{"_type" => "While", "test" => _, "body" => [_]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms for loop back" do
+      meta_ast = {:loop, :for_each, {:variable, "i"}, {:variable, "items"}, {:variable, "i"}}
+
+      assert {:ok, %{"_type" => "For", "target" => _, "iter" => _, "body" => [_]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "FromMeta - Extended Layer: Lambdas" do
+    test "transforms lambda back" do
+      meta_ast =
+        {:lambda, ["x"], [],
+         {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}}
+
+      assert {:ok, %{"_type" => "Lambda", "args" => %{"args" => [%{"arg" => "x"}]}}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms lambda with multiple parameters back" do
+      meta_ast =
+        {:lambda, ["x", "y"], [],
+         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+
+      assert {:ok,
+              %{
+                "_type" => "Lambda",
+                "args" => %{"args" => [%{"arg" => "x"}, %{"arg" => "y"}]}
+              }} = FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "FromMeta - Extended Layer: Collection Operations" do
+    test "transforms map operation to list comprehension" do
+      meta_ast =
+        {:collection_op, :map,
+         {:lambda, ["x"], [],
+          {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
+         {:variable, "numbers"}}
+
+      assert {:ok, %{"_type" => "ListComp", "elt" => _, "generators" => [_]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms filter operation to function call" do
+      meta_ast =
+        {:collection_op, :filter, {:lambda, ["x"], [], {:variable, "x"}}, {:variable, "items"}}
+
+      assert {:ok, %{"_type" => "Call", "func" => %{"_type" => "Name", "id" => "filter"}}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms reduce operation to functools.reduce call" do
+      meta_ast =
+        {:collection_op, :reduce,
+         {:lambda, ["acc", "x"], [],
+          {:binary_op, :arithmetic, :+, {:variable, "acc"}, {:variable, "x"}}},
+         {:variable, "numbers"}, {:literal, :integer, 0}}
+
+      assert {:ok,
+              %{
+                "_type" => "Call",
+                "func" => %{"_type" => "Attribute", "attr" => "reduce"}
+              }} = FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "FromMeta - Extended Layer: Exception Handling" do
+    test "transforms exception handling back" do
+      meta_ast =
+        {:exception_handling, {:function_call, "risky", []},
+         [{:error, {:variable, "e"}, {:function_call, "handle", [{:variable, "e"}]}}], nil}
+
+      assert {:ok, %{"_type" => "Try", "body" => [_], "handlers" => [_]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms exception handling with finally block" do
+      meta_ast =
+        {:exception_handling, {:function_call, "risky", []}, [], {:function_call, "cleanup", []}}
+
+      assert {:ok, %{"_type" => "Try", "finalbody" => [_]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+  end
+
+  describe "round-trip transformations - Extended Layer" do
+    test "round-trips while loop" do
+      source = "while x > 0:\n    x"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:loop, :while, _, _} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips for loop" do
+      source = "for i in items:\n    i"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:loop, :for_each, _, _, _} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+
+    test "round-trips lambda" do
+      source = "lambda x: x * 2"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:lambda, ["x"], [], _} = meta_ast
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert {:ok, result} = Python.unparse(ast2)
+      # Lambda may have parentheses added
+      assert result =~ "lambda x"
+      assert result =~ "x * 2"
+    end
+
+    test "round-trips simple list comprehension" do
+      source = "[x * 2 for x in numbers]"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:collection_op, :map, {:lambda, _, _, _}, _} = meta_ast
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert {:ok, result} = Python.unparse(ast2)
+      # Should produce comprehension-like output
+      assert result =~ "x"
+      assert result =~ "numbers"
+    end
+
+    test "round-trips try-except block" do
+      source = "try:\n    risky()\nexcept Exception as e:\n    handle(e)"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:exception_handling, _, _, _} = meta_ast
+      assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
+    end
+  end
+
   describe "cross-language validation" do
     test "Python and Elixir produce equivalent MetaAST" do
       python_source = "x + 5"

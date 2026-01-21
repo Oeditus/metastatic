@@ -21,6 +21,14 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   - Blocks: Module, multiple statements → {:block, statements}
   - Early returns: Return, Break, Continue → {:early_return, kind, value}
 
+  ### M2.2 (Extended Layer)
+
+  - Loops: While → {:loop, :while, condition, body}
+  - Loops: For → {:loop, :for_each, iterator, collection, body}
+  - Lambdas: Lambda → {:lambda, params, captures, body}
+  - Collection ops: Simple ListComp → {:collection_op, :map, lambda, collection}
+  - Exception handling: Try → {:exception_handling, try_block, rescue_clauses, finally_block}
+
   ## Metadata Preservation
 
   The transformation preserves Python-specific information:
@@ -190,8 +198,8 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # If statement
   def transform(%{"_type" => "If", "test" => test, "body" => body, "orelse" => orelse}) do
     with {:ok, test_meta, _} <- transform(test),
-         {:ok, body_meta} <- transform_body(body),
-         {:ok, else_meta} <- transform_body_or_nil(orelse) do
+         {:ok, body_meta, _} <- transform_body(body),
+         {:ok, else_meta, _} <- transform_body_or_nil(orelse) do
       {:ok, {:conditional, test_meta, body_meta, else_meta}, %{}}
     end
   end
@@ -225,6 +233,74 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "List", "elts" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
       {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
+    end
+  end
+
+  # Loops - M2.2 Extended Layer
+
+  # While loop
+  def transform(%{"_type" => "While", "test" => test, "body" => body}) do
+    with {:ok, test_meta, _} <- transform(test),
+         {:ok, body_meta, _} <- transform_body(body) do
+      {:ok, {:loop, :while, test_meta, body_meta}, %{}}
+    end
+  end
+
+  # For loop
+  def transform(%{"_type" => "For", "target" => target, "iter" => iter, "body" => body}) do
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, iter_meta, _} <- transform(iter),
+         {:ok, body_meta, _} <- transform_body(body) do
+      {:ok, {:loop, :for_each, target_meta, iter_meta, body_meta}, %{}}
+    end
+  end
+
+  # Lambdas - M2.2 Extended Layer
+
+  def transform(%{"_type" => "Lambda", "args" => args, "body" => body}) do
+    with {:ok, params} <- extract_lambda_params(args),
+         {:ok, body_meta, _} <- transform(body) do
+      # Lambdas don't capture variables explicitly in Python AST
+      {:ok, {:lambda, params, [], body_meta}, %{}}
+    end
+  end
+
+  # Collection Operations - M2.2 Extended Layer
+
+  # Simple list comprehension without filters → map
+  def transform(%{
+        "_type" => "ListComp",
+        "elt" => elt,
+        "generators" => [%{"target" => target, "iter" => iter, "ifs" => []}]
+      }) do
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, iter_meta, _} <- transform(iter),
+         {:ok, elt_meta, _} <- transform(elt) do
+      # Convert to: {:collection_op, :map, {:lambda, [param], [], body}, collection}
+      param_name = extract_variable_name(target_meta)
+      lambda = {:lambda, [param_name], [], elt_meta}
+      {:ok, {:collection_op, :map, lambda, iter_meta}, %{}}
+    end
+  end
+
+  # Complex list comprehension with filters → language_specific
+  def transform(%{"_type" => "ListComp"} = comp) do
+    {:ok, {:language_specific, :python, comp, :list_comprehension}, %{}}
+  end
+
+  # Exception Handling - M2.2 Extended Layer
+
+  def transform(%{
+        "_type" => "Try",
+        "body" => body,
+        "handlers" => handlers,
+        "orelse" => _orelse,
+        "finalbody" => finalbody
+      }) do
+    with {:ok, body_meta, _} <- transform_body(body),
+         {:ok, rescue_clauses} <- transform_exception_handlers(handlers),
+         {:ok, finally_meta, _} <- transform_body_or_nil(finalbody) do
+      {:ok, {:exception_handling, body_meta, rescue_clauses, finally_meta}, %{}}
     end
   end
 
@@ -313,4 +389,77 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp extract_function_name(func) do
     {:error, "Unsupported function reference: #{inspect(func)}"}
   end
+
+  # Lambda parameter extraction
+
+  defp extract_lambda_params(%{"args" => args}) when is_list(args) do
+    params =
+      Enum.map(args, fn
+        %{"arg" => name} -> name
+        %{"id" => name} -> name
+        _ -> "_"
+      end)
+
+    {:ok, params}
+  end
+
+  defp extract_lambda_params(_), do: {:ok, []}
+
+  # Exception handler transformation
+
+  defp transform_exception_handlers(handlers) when is_list(handlers) do
+    handlers
+    |> Enum.reduce_while({:ok, []}, fn handler, {:ok, acc} ->
+      case transform_exception_handler(handler) do
+        {:ok, clause} -> {:cont, {:ok, [clause | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, clauses} -> {:ok, Enum.reverse(clauses)}
+      error -> error
+    end
+  end
+
+  defp transform_exception_handler(%{"type" => type, "name" => name, "body" => body}) do
+    with {:ok, exception_type} <- extract_exception_type(type),
+         {:ok, var_meta, _} <- transform_or_name(name),
+         {:ok, body_meta, _} <- transform_body(body) do
+      {:ok, {exception_type, var_meta, body_meta}}
+    end
+  end
+
+  defp transform_exception_handler(%{"type" => type, "body" => body}) do
+    with {:ok, exception_type} <- extract_exception_type(type),
+         {:ok, body_meta, _} <- transform_body(body) do
+      {:ok, {exception_type, nil, body_meta}}
+    end
+  end
+
+  defp extract_exception_type(nil), do: {:ok, :error}
+
+  defp extract_exception_type(%{"_type" => "Name", "id" => name}) do
+    # Map common Python exceptions to generic types
+    exception_atom =
+      case name do
+        "Exception" -> :error
+        "ValueError" -> :error
+        "TypeError" -> :error
+        "KeyError" -> :error
+        "IndexError" -> :error
+        _ -> String.to_atom(name)
+      end
+
+    {:ok, exception_atom}
+  end
+
+  defp extract_exception_type(_), do: {:ok, :error}
+
+  defp transform_or_name(nil), do: {:ok, nil, %{}}
+  defp transform_or_name(name) when is_binary(name), do: {:ok, {:variable, name}, %{}}
+  defp transform_or_name(node), do: transform(node)
+
+  # Extract variable name from MetaAST node
+  defp extract_variable_name({:variable, name}), do: name
+  defp extract_variable_name(_), do: "_x"
 end

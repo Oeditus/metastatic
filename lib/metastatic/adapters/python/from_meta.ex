@@ -10,6 +10,15 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   The transformation reverses the abstraction performed by `ToMeta`, using
   metadata to restore Python-specific information when needed.
 
+  ### M2.1 (Core Layer) → Python AST
+  - Literals, variables, operators, function calls, conditionals, blocks, early returns
+
+  ### M2.2 (Extended Layer) → Python AST
+  - Loops: {:loop, :while, ...} → While, {:loop, :for_each, ...} → For
+  - Lambdas: {:lambda, params, captures, body} → Lambda
+  - Collection ops: {:collection_op, :map, ...} → ListComp or map() call
+  - Exception handling: {:exception_handling, ...} → Try
+
   ## Round-Trip Fidelity
 
   The transformation aims for high fidelity:
@@ -140,6 +149,131 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     {:ok, %{"_type" => "Continue"}}
   end
 
+  # Loops - M2.2 Extended Layer
+
+  def transform({:loop, :while, condition, body}, metadata) do
+    with {:ok, test_py} <- transform(condition, metadata),
+         {:ok, body_py} <- transform_to_body(body, metadata) do
+      {:ok, %{"_type" => "While", "test" => test_py, "body" => body_py, "orelse" => []}}
+    end
+  end
+
+  def transform({:loop, :for_each, iterator, collection, body}, metadata) do
+    with {:ok, target_py} <- transform(iterator, metadata),
+         {:ok, iter_py} <- transform(collection, metadata),
+         {:ok, body_py} <- transform_to_body(body, metadata) do
+      {:ok,
+       %{
+         "_type" => "For",
+         "target" => target_py,
+         "iter" => iter_py,
+         "body" => body_py,
+         "orelse" => []
+       }}
+    end
+  end
+
+  # Lambdas - M2.2 Extended Layer
+
+  def transform({:lambda, params, _captures, body}, metadata) do
+    with {:ok, body_py} <- transform(body, metadata) do
+      args_node = build_lambda_args(params)
+      {:ok, %{"_type" => "Lambda", "args" => args_node, "body" => body_py}}
+    end
+  end
+
+  # Collection Operations - M2.2 Extended Layer
+
+  # Map operation: transform to list comprehension if lambda is simple
+  def transform({:collection_op, :map, {:lambda, [param], [], body}, collection}, metadata) do
+    with {:ok, elt_py} <- transform(body, metadata),
+         {:ok, iter_py} <- transform(collection, metadata) do
+      target = %{"_type" => "Name", "id" => param, "ctx" => %{"_type" => "Store"}}
+
+      generator = %{
+        "_type" => "comprehension",
+        "target" => target,
+        "iter" => iter_py,
+        "ifs" => [],
+        "is_async" => 0
+      }
+
+      {:ok, %{"_type" => "ListComp", "elt" => elt_py, "generators" => [generator]}}
+    end
+  end
+
+  # Map operation: fallback to map() function call
+  def transform({:collection_op, :map, func, collection}, metadata) do
+    with {:ok, func_py} <- transform(func, metadata),
+         {:ok, collection_py} <- transform(collection, metadata) do
+      map_func = %{"_type" => "Name", "id" => "map", "ctx" => %{"_type" => "Load"}}
+
+      {:ok,
+       %{
+         "_type" => "Call",
+         "func" => map_func,
+         "args" => [func_py, collection_py],
+         "keywords" => []
+       }}
+    end
+  end
+
+  # Filter operation: transform to filter() call
+  def transform({:collection_op, :filter, predicate, collection}, metadata) do
+    with {:ok, pred_py} <- transform(predicate, metadata),
+         {:ok, collection_py} <- transform(collection, metadata) do
+      filter_func = %{"_type" => "Name", "id" => "filter", "ctx" => %{"_type" => "Load"}}
+
+      {:ok,
+       %{
+         "_type" => "Call",
+         "func" => filter_func,
+         "args" => [pred_py, collection_py],
+         "keywords" => []
+       }}
+    end
+  end
+
+  # Reduce operation: transform to functools.reduce() call
+  def transform({:collection_op, :reduce, func, collection, initial}, metadata) do
+    with {:ok, func_py} <- transform(func, metadata),
+         {:ok, collection_py} <- transform(collection, metadata),
+         {:ok, initial_py} <- transform(initial, metadata) do
+      # Build functools.reduce reference
+      reduce_func = %{
+        "_type" => "Attribute",
+        "value" => %{"_type" => "Name", "id" => "functools", "ctx" => %{"_type" => "Load"}},
+        "attr" => "reduce",
+        "ctx" => %{"_type" => "Load"}
+      }
+
+      {:ok,
+       %{
+         "_type" => "Call",
+         "func" => reduce_func,
+         "args" => [func_py, collection_py, initial_py],
+         "keywords" => []
+       }}
+    end
+  end
+
+  # Exception Handling - M2.2 Extended Layer
+
+  def transform({:exception_handling, try_block, rescue_clauses, finally_block}, metadata) do
+    with {:ok, body_py} <- transform_to_body(try_block, metadata),
+         {:ok, handlers_py} <- transform_exception_handlers(rescue_clauses, metadata),
+         {:ok, finally_py} <- transform_to_body_or_empty(finally_block, metadata) do
+      {:ok,
+       %{
+         "_type" => "Try",
+         "body" => body_py,
+         "handlers" => handlers_py,
+         "orelse" => [],
+         "finalbody" => finally_py
+       }}
+    end
+  end
+
   # Language-Specific - M2.3 Native Layer
 
   def transform({:language_specific, :python, native_ast, _hint}, _metadata) do
@@ -261,4 +395,72 @@ defmodule Metastatic.Adapters.Python.FromMeta do
         {:ok, result}
     end
   end
+
+  # Extended layer helpers
+
+  defp transform_to_body({:block, statements}, metadata) do
+    transform_list(statements, metadata)
+  end
+
+  defp transform_to_body(single_expr, metadata) do
+    with {:ok, expr_py} <- transform(single_expr, metadata) do
+      {:ok, [expr_py]}
+    end
+  end
+
+  defp transform_to_body_or_empty(nil, _metadata), do: {:ok, []}
+  defp transform_to_body_or_empty(expr, metadata), do: transform_to_body(expr, metadata)
+
+  defp build_lambda_args(params) when is_list(params) do
+    args =
+      Enum.map(params, fn param ->
+        %{"_type" => "arg", "arg" => param, "annotation" => nil}
+      end)
+
+    %{
+      "_type" => "arguments",
+      "args" => args,
+      "posonlyargs" => [],
+      "kwonlyargs" => [],
+      "kw_defaults" => [],
+      "defaults" => [],
+      "vararg" => nil,
+      "kwarg" => nil
+    }
+  end
+
+  defp transform_exception_handlers(clauses, metadata) when is_list(clauses) do
+    clauses
+    |> Enum.reduce_while({:ok, []}, fn clause, {:ok, acc} ->
+      case transform_exception_handler(clause, metadata) do
+        {:ok, handler} -> {:cont, {:ok, [handler | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, handlers} -> {:ok, Enum.reverse(handlers)}
+      error -> error
+    end
+  end
+
+  defp transform_exception_handler({exception_type, var, body}, metadata) do
+    with {:ok, type_py} <- build_exception_type(exception_type),
+         {:ok, name_py} <- extract_var_name(var),
+         {:ok, body_py} <- transform_to_body(body, metadata) do
+      {:ok, %{"type" => type_py, "name" => name_py, "body" => body_py}}
+    end
+  end
+
+  defp build_exception_type(:error) do
+    {:ok, %{"_type" => "Name", "id" => "Exception", "ctx" => %{"_type" => "Load"}}}
+  end
+
+  defp build_exception_type(atom) when is_atom(atom) do
+    name = atom |> Atom.to_string() |> String.capitalize()
+    {:ok, %{"_type" => "Name", "id" => name, "ctx" => %{"_type" => "Load"}}}
+  end
+
+  defp extract_var_name(nil), do: {:ok, nil}
+  defp extract_var_name({:variable, name}), do: {:ok, name}
+  defp extract_var_name(_), do: {:ok, "e"}
 end
