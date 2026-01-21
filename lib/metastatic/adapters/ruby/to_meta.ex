@@ -145,20 +145,28 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   # In Ruby, most binary operators are implemented as method calls (send nodes)
 
   # Arithmetic operators: +, -, *, /, %, **
-  def transform(%{"type" => "send", "children" => [left, op, right]})
-      when op in [:+, :-, :*, :/, :%, :**, :"<<", :">>"] do
-    with {:ok, left_meta, _} <- transform(left),
-         {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :arithmetic, op, left_meta, right_meta}, %{}}
-    end
-  end
+  # Operators can be either atoms or strings from JSON
+  def transform(%{"type" => "send", "children" => [left, op, right]}) when not is_nil(right) do
+    cond do
+      is_arithmetic_op?(op) ->
+        op_atom = normalize_op(op)
 
-  # Comparison operators: ==, !=, <, >, <=, >=, <=>, ===
-  def transform(%{"type" => "send", "children" => [left, op, right]})
-      when op in [:==, :!=, :<, :>, :<=, :>=, :===, :eql?] or op == :"<=>" do
-    with {:ok, left_meta, _} <- transform(left),
-         {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :comparison, op, left_meta, right_meta}, %{}}
+        with {:ok, left_meta, _} <- transform(left),
+             {:ok, right_meta, _} <- transform(right) do
+          {:ok, {:binary_op, :arithmetic, op_atom, left_meta, right_meta}, %{}}
+        end
+
+      is_comparison_op?(op) ->
+        op_atom = normalize_op(op)
+
+        with {:ok, left_meta, _} <- transform(left),
+             {:ok, right_meta, _} <- transform(right) do
+          {:ok, {:binary_op, :comparison, op_atom, left_meta, right_meta}, %{}}
+        end
+
+      true ->
+        # Regular method call with receiver
+        transform_method_call_with_receiver(left, op, right)
     end
   end
 
@@ -179,33 +187,48 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # Unary Operations - M2.1 Core Layer
 
-  # Unary minus
-  def transform(%{"type" => "send", "children" => [operand, :-, nil]}) do
-    with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :arithmetic, :-, operand_meta}, %{}}
+  # Unary operators - 3 children with nil as third: [operand, op, nil]
+  def transform(%{"type" => "send", "children" => [operand, op, nil]}) do
+    op_atom = normalize_op(op)
+
+    cond do
+      op_atom in [:-, :+] ->
+        with {:ok, operand_meta, _} <- transform(operand) do
+          {:ok, {:unary_op, :arithmetic, op_atom, operand_meta}, %{}}
+        end
+
+      op_atom == :! ->
+        with {:ok, operand_meta, _} <- transform(operand) do
+          {:ok, {:unary_op, :boolean, :not, operand_meta}, %{}}
+        end
+
+      true ->
+        # Not actually a unary operator
+        {:error, "Invalid unary operator: #{op}"}
     end
   end
 
-  # Unary plus
-  def transform(%{"type" => "send", "children" => [operand, :+, nil]}) do
-    with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :arithmetic, :+, operand_meta}, %{}}
-    end
-  end
+  # Method call without arguments: 2 children [receiver, method]
+  def transform(%{"type" => "send", "children" => [receiver, method]}) do
+    method_str = if is_atom(method), do: Atom.to_string(method), else: method
 
-  # Logical NOT: !expr, not expr
-  def transform(%{"type" => "send", "children" => [operand, :!, nil]}) do
-    with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :boolean, :not, operand_meta}, %{}}
+    if is_nil(receiver) do
+      # Local method call without args: hello
+      {:ok, {:function_call, method_str, []}, %{call_type: :local}}
+    else
+      # Method call with receiver but no arguments: obj.method
+      with {:ok, receiver_meta, _} <- transform(receiver) do
+        qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
+        {:ok, {:function_call, qualified_name, []}, %{call_type: :instance}}
+      end
     end
   end
 
   # Method Calls - M2.1 Core Layer
 
   # Method call without receiver (local method call)
-  def transform(%{"type" => "send", "children" => [nil, method_name | args]})
-      when is_atom(method_name) do
-    method_str = Atom.to_string(method_name)
+  def transform(%{"type" => "send", "children" => [nil, method_name | args]}) do
+    method_str = if is_atom(method_name), do: Atom.to_string(method_name), else: method_name
 
     with {:ok, args_meta} <- transform_list(args) do
       {:ok, {:function_call, method_str, args_meta}, %{call_type: :local}}
@@ -319,4 +342,34 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   defp format_receiver({:variable, name}), do: name
   defp format_receiver(_), do: "obj"
+
+  # Operator normalization helpers
+  defp normalize_op(op) when is_atom(op), do: op
+  defp normalize_op(op) when is_binary(op), do: String.to_atom(op)
+
+  defp is_arithmetic_op?(op) when is_atom(op) do
+    op in [:+, :-, :*, :/, :%, :**] or op == :"<<" or op == :">>"
+  end
+
+  defp is_arithmetic_op?(op) when is_binary(op) do
+    op in ["+", "-", "*", "/", "%", "**", "<<", ">>"]
+  end
+
+  defp is_comparison_op?(op) when is_atom(op) do
+    op in [:==, :!=, :<, :>, :<=, :>=, :===, :eql?, :"<=>"]
+  end
+
+  defp is_comparison_op?(op) when is_binary(op) do
+    op in ["==", "!=", "<", ">", "<=", ">=", "===", "eql?", "<=>"]
+  end
+
+  defp transform_method_call_with_receiver(receiver, method_name, arg) do
+    method_str = if is_atom(method_name), do: Atom.to_string(method_name), else: method_name
+
+    with {:ok, receiver_meta, _} <- transform(receiver),
+         {:ok, arg_meta, _} <- transform(arg) do
+      qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
+      {:ok, {:function_call, qualified_name, [arg_meta]}, %{call_type: :instance}}
+    end
+  end
 end

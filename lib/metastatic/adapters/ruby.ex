@@ -73,44 +73,11 @@ defmodule Metastatic.Adapters.Ruby do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.Adapters.Ruby.{FromMeta, ToMeta}
-
-  @parser_script Path.join([
-                   :code.priv_dir(:metastatic),
-                   "parsers",
-                   "ruby",
-                   "parser.rb"
-                 ])
-
-  @unparser_script Path.join([
-                     :code.priv_dir(:metastatic),
-                     "parsers",
-                     "ruby",
-                     "unparser.rb"
-                   ])
+  alias Metastatic.Adapters.Ruby.{FromMeta, Subprocess, ToMeta}
 
   @impl true
   def parse(source) when is_binary(source) do
-    case System.cmd("bundle", ["exec", "ruby", @parser_script],
-           cd: Path.dirname(@parser_script),
-           input: source,
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        case Jason.decode(output) do
-          {:ok, %{"status" => "ok", "ast" => ast}} ->
-            {:ok, ast}
-
-          {:ok, %{"status" => "error", "error" => error}} ->
-            {:error, "Parse error: #{error}"}
-
-          {:error, reason} ->
-            {:error, "JSON decode error: #{inspect(reason)}"}
-        end
-
-      {output, _exit_code} ->
-        {:error, "Ruby parser failed: #{output}"}
-    end
+    Subprocess.parse(source)
   end
 
   @impl true
@@ -125,19 +92,7 @@ defmodule Metastatic.Adapters.Ruby do
 
   @impl true
   def unparse(ruby_ast) do
-    json_input = Jason.encode!(%{ast: ruby_ast})
-
-    case System.cmd("bundle", ["exec", "ruby", @unparser_script],
-           cd: Path.dirname(@unparser_script),
-           input: json_input,
-           stderr_to_stdout: true
-         ) do
-      {source, 0} ->
-        {:ok, source}
-
-      {output, _exit_code} ->
-        {:error, "Ruby unparser failed: #{output}"}
-    end
+    Subprocess.unparse(ruby_ast)
   end
 
   @impl true
