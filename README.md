@@ -214,6 +214,57 @@ result.summary            # => "Function is impure due to I/O operations"
 - Exception handling (try/catch)
 - Unknown function calls (low confidence)
 
+### Complexity Analysis
+
+Analyze code complexity with six comprehensive metrics that work uniformly across all supported languages:
+
+```bash
+# Analyze complexity
+mix metastatic.complexity my_file.py
+
+# JSON output
+mix metastatic.complexity my_file.ex --format json
+
+# Detailed report with recommendations
+mix metastatic.complexity my_file.erl --format detailed
+
+# Custom thresholds
+mix metastatic.complexity my_file.py --max-cyclomatic 15 --max-cognitive 20
+```
+
+```elixir
+alias Metastatic.{Document, Analysis.Complexity}
+
+# Analyze all metrics
+ast = {:conditional, {:variable, "x"}, 
+  {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
+  {:literal, :integer, 3}}
+doc = Document.new(ast, :python)
+{:ok, result} = Complexity.analyze(doc)
+
+result.cyclomatic      # => 3 (McCabe complexity)
+result.cognitive       # => 3 (with nesting penalties)
+result.max_nesting     # => 2
+result.halstead.volume # => 45.6 (program volume)
+result.loc.logical     # => 2
+result.warnings        # => []
+result.summary         # => "Code has low complexity"
+```
+
+**Available Metrics:**
+- **Cyclomatic Complexity** - McCabe metric measuring decision points
+- **Cognitive Complexity** - Measures understandability with nesting penalties
+- **Nesting Depth** - Maximum nesting level
+- **Halstead Metrics** - Volume, difficulty, and effort calculations
+- **Lines of Code** - Physical, logical, and comment line counts
+- **Function Metrics** - Statement count, return points, variable count
+
+**Default Thresholds:**
+- Cyclomatic: 10 (warning), 20 (error)
+- Cognitive: 15 (warning), 30 (error)
+- Nesting: 3 (warning), 5 (error)
+- Logical LoC: 50 (warning), 100 (error)
+
 ## Documentation
 
 - **[RESEARCH.md](RESEARCH.md)** - Comprehensive research analysis and architectural decisions
