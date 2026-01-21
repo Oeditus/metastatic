@@ -95,7 +95,6 @@ defmodule Metastatic.MixProject do
         README.md
         GETTING_STARTED.md
         CHANGELOG.md
-        RESEARCH.md
         THEORETICAL_FOUNDATIONS.md
         SUPPLEMENTAL_MODULES.md
         LICENSE
@@ -131,7 +130,6 @@ defmodule Metastatic.MixProject do
     [
       "README.md",
       "GETTING_STARTED.md": [title: "Getting Started"],
-      "RESEARCH.md": [title: "Architecture & Research"],
       "THEORETICAL_FOUNDATIONS.md": [title: "Theoretical Foundations"],
       "SUPPLEMENTAL_MODULES.md": [title: "Supplemental Modules"],
       "CHANGELOG.md": [title: "Changelog"]

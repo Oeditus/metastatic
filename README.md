@@ -406,6 +406,37 @@ Language-specific: lifetimes, async models, type systems, metaprogramming
 
 See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for complete roadmap.
 
+## Examples
+
+### Shopping Cart Example
+
+A comprehensive real-world example demonstrating metastatic's capabilities using an e-commerce shopping cart:
+
+```bash
+# From project root
+mix compile
+
+# Run interactive demo
+elixir examples/shopping_cart/demo.exs
+
+# Visualize MetaAST tree structures
+elixir examples/shopping_cart/visualize_ast.exs
+```
+
+**What you'll learn:**
+- How MetaAST represents real business logic (pricing, discounts, validation)
+- Cross-language semantic equivalence (same logic in Python, JavaScript, Elixir, etc.)
+- Foundation for universal tools (mutation testing, purity analysis, complexity metrics)
+- Three-layer architecture in practice (Core/Extended/Native)
+
+**Files:**
+- `examples/shopping_cart/README.md` - Comprehensive 500-line guide
+- `examples/shopping_cart/lib/` - Product and Cart modules with rich business logic
+- `examples/shopping_cart/demo.exs` - Interactive MetaAST operations demo
+- `examples/shopping_cart/visualize_ast.exs` - Tree visualization with annotations
+
+See [examples/README.md](examples/README.md) for more details.
+
 ## Use Cases
 
 ### Foundation for Cross-Language Tools
