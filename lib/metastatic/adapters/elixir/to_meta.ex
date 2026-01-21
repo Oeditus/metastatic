@@ -103,19 +103,21 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Tuple literals - M2.1 Core Layer
   # Two-element tuple shorthand: {x, y}
-  def transform({left, right}) when not is_atom(left) or not is_atom(right) do
-    # This is a tuple literal, not a special Elixir AST form
-    # Check if both sides are actual values, not AST constructs like {:var, [], nil}
-    case {left, right} do
-      {{atom1, _meta1, _ctx1}, {atom2, _meta2, _ctx2}} when is_atom(atom1) and is_atom(atom2) ->
-        # Both are variables/atoms - treat as tuple pattern/value
+  # Need to distinguish between actual tuples and Elixir AST nodes
+  def transform({left, right}) do
+    # Check if this is an Elixir AST node (has metadata and context)
+    # AST nodes are 3-tuples: {atom, metadata, context}
+    # So if left is a 2-tuple, it's likely a real tuple
+    case {left, right, is_tuple(left), is_tuple(right)} do
+      # Both are 3-element tuples (likely AST nodes) - this is a tuple of AST nodes
+      {{_, _, _}, {_, _, _}, true, true} ->
         with {:ok, left_meta, _} <- transform(left),
              {:ok, right_meta, _} <- transform(right) do
           {:ok, {:tuple, [left_meta, right_meta]}, %{}}
         end
 
+      # At least one is NOT a 3-tuple, so this is a literal tuple
       _ ->
-        # Regular tuple literal
         with {:ok, left_meta, _} <- transform(left),
              {:ok, right_meta, _} <- transform(right) do
           {:ok, {:tuple, [left_meta, right_meta]}, %{}}
@@ -597,8 +599,20 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     params
     |> Enum.reduce_while({:ok, []}, fn param, {:ok, acc} ->
       case param do
+        # Simple variable: x, acc, etc.
         {name, _, context} when is_atom(name) and is_atom(context) ->
           {:cont, {:ok, [{:param, Atom.to_string(name), nil, nil} | acc]}}
+
+        # Tuple pattern: {x, y}, {fun, arity}, etc.
+        {:{}, _, _elements} = tuple_pattern ->
+          # For tuple patterns, create a param with pattern metadata
+          # The pattern will be preserved but we use a generic name
+          {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: tuple_pattern}} | acc]}}
+
+        # Two-element tuple (special syntax): {x, y}
+        {left, right} when not is_list(left) and not is_list(right) ->
+          # Two-element tuple pattern
+          {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: {left, right}}} | acc]}}
 
         _ ->
           {:halt, {:error, "Unsupported parameter pattern: #{inspect(param)}"}}
