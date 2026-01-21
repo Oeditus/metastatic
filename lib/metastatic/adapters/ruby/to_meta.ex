@@ -92,6 +92,11 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     {:ok, {:literal, :null, nil}, %{}}
   end
 
+  # Self keyword
+  def transform(%{"type" => "self", "children" => []}) do
+    {:ok, {:variable, "self"}, %{scope: :special}}
+  end
+
   # Handle bare nil (used in unary operators)
   def transform(nil) do
     {:ok, nil, %{}}
@@ -479,6 +484,61 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
+  # Yield with arguments
+  def transform(%{"type" => "yield", "children" => args} = ast) do
+    with {:ok, args_meta} <- transform_list(args) do
+      metadata = %{args: args_meta}
+      {:ok, {:language_specific, :ruby, ast, :yield}, metadata}
+    end
+  end
+
+  # Alias (alias new_name old_name)
+  def transform(%{"type" => "alias", "children" => [new_name, old_name]} = ast) do
+    new_sym = extract_symbol_name(new_name)
+    old_sym = extract_symbol_name(old_name)
+
+    metadata = %{new_name: new_sym, old_name: old_sym}
+    {:ok, {:language_specific, :ruby, ast, :alias}, metadata}
+  end
+
+  # String interpolation (dstr)
+  def transform(%{"type" => "dstr", "children" => parts} = ast) do
+    with {:ok, parts_meta} <- transform_string_parts(parts) do
+      metadata = %{parts: parts_meta}
+      {:ok, {:language_specific, :ruby, ast, :string_interpolation}, metadata}
+    end
+  end
+
+  # Regular expression
+  def transform(%{"type" => "regexp", "children" => [pattern | options]} = ast) do
+    with {:ok, pattern_meta, _} <- transform(pattern) do
+      metadata = %{pattern: pattern_meta, options: options}
+      {:ok, {:language_specific, :ruby, ast, :regexp}, metadata}
+    end
+  end
+
+  # Singleton class (class << self)
+  def transform(%{"type" => "sclass", "children" => [object, body]} = ast) do
+    with {:ok, object_meta, _} <- transform(object),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      metadata = %{object: object_meta, body: body_meta}
+      {:ok, {:language_specific, :ruby, ast, :singleton_class}, metadata}
+    end
+  end
+
+  # Super with arguments
+  def transform(%{"type" => "super", "children" => args} = ast) do
+    with {:ok, args_meta} <- transform_list(args) do
+      metadata = %{args: args_meta}
+      {:ok, {:language_specific, :ruby, ast, :super}, metadata}
+    end
+  end
+
+  # Zsuper (super with no arguments, passes all parent arguments)
+  def transform(%{"type" => "zsuper", "children" => []} = ast) do
+    {:ok, {:language_specific, :ruby, ast, :zsuper}, %{}}
+  end
+
   # Catch-all for unsupported constructs
   def transform(unsupported) do
     {:error, "Unsupported Ruby AST construct: #{inspect(unsupported)}"}
@@ -729,4 +789,43 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   end
 
   defp extract_method_params(_), do: {:ok, []}
+
+  defp extract_symbol_name(%{"type" => "sym", "children" => [name]}) when is_atom(name) do
+    Atom.to_string(name)
+  end
+
+  defp extract_symbol_name(%{"type" => "sym", "children" => [name]}) when is_binary(name),
+    do: name
+
+  defp extract_symbol_name(%{"type" => "dsym", "children" => parts}), do: {:dynamic, parts}
+  defp extract_symbol_name(_), do: "unknown"
+
+  defp transform_string_parts(parts) when is_list(parts) do
+    parts
+    |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
+      case part do
+        # String literal part
+        %{"type" => "str", "children" => [str]} ->
+          {:cont, {:ok, [{:literal, str} | acc]}}
+
+        # Interpolated expression
+        %{"type" => "begin", "children" => [expr]} ->
+          case transform(expr) do
+            {:ok, expr_meta, _} -> {:cont, {:ok, [{:interpolation, expr_meta} | acc]}}
+            {:error, _} = err -> {:halt, err}
+          end
+
+        # Direct expression
+        expr ->
+          case transform(expr) do
+            {:ok, expr_meta, _} -> {:cont, {:ok, [{:interpolation, expr_meta} | acc]}}
+            {:error, _} = err -> {:halt, err}
+          end
+      end
+    end)
+    |> case do
+      {:ok, parts_list} -> {:ok, Enum.reverse(parts_list)}
+      error -> error
+    end
+  end
 end

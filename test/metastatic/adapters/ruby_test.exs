@@ -872,4 +872,93 @@ defmodule Metastatic.Adapters.RubyTest do
       assert [".rb"] = Ruby.file_extensions()
     end
   end
+
+  describe "ToMeta - M2.3 Native Layer (additional constructs)" do
+    test "transforms yield with arguments" do
+      ast = %{"type" => "yield", "children" => [%{"type" => "lvar", "children" => ["x"]}]}
+
+      assert {:ok, {:language_specific, :ruby, ^ast, :yield}, metadata} = ToMeta.transform(ast)
+      assert [_] = metadata.args
+    end
+
+    test "transforms alias" do
+      ast = %{
+        "type" => "alias",
+        "children" => [
+          %{"type" => "sym", "children" => ["new_name"]},
+          %{"type" => "sym", "children" => ["old_name"]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, ^ast, :alias}, metadata} = ToMeta.transform(ast)
+      assert metadata.new_name == "new_name"
+      assert metadata.old_name == "old_name"
+    end
+
+    test "transforms string interpolation" do
+      ast = %{
+        "type" => "dstr",
+        "children" => [
+          %{"type" => "str", "children" => ["Hello, "]},
+          %{"type" => "begin", "children" => [%{"type" => "lvar", "children" => ["name"]}]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, ^ast, :string_interpolation}, metadata} =
+               ToMeta.transform(ast)
+
+      assert [_, _] = metadata.parts
+    end
+
+    test "transforms regular expression" do
+      ast = %{
+        "type" => "regexp",
+        "children" => [
+          %{"type" => "str", "children" => ["[a-z]+"]},
+          %{"type" => "regopt", "children" => ["i"]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, ^ast, :regexp}, metadata} = ToMeta.transform(ast)
+      assert metadata.pattern != nil
+    end
+
+    test "transforms singleton class" do
+      ast = %{
+        "type" => "sclass",
+        "children" => [
+          %{"type" => "self", "children" => []},
+          %{
+            "type" => "def",
+            "children" => ["instance_method", %{"type" => "args", "children" => []}, nil]
+          }
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, ^ast, :singleton_class}, metadata} =
+               ToMeta.transform(ast)
+
+      assert metadata.object != nil
+      assert metadata.body != nil
+    end
+
+    test "transforms super with arguments" do
+      ast = %{
+        "type" => "super",
+        "children" => [
+          %{"type" => "lvar", "children" => ["x"]},
+          %{"type" => "lvar", "children" => ["y"]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :ruby, ^ast, :super}, metadata} = ToMeta.transform(ast)
+      assert [_, _] = metadata.args
+    end
+
+    test "transforms zsuper" do
+      ast = %{"type" => "zsuper", "children" => []}
+
+      assert {:ok, {:language_specific, :ruby, ^ast, :zsuper}, %{}} = ToMeta.transform(ast)
+    end
+  end
 end

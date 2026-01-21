@@ -175,6 +175,70 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
+  # M2.3 Native Layer - Module
+
+  def transform(%{"type" => "module", "declarations" => decls}) do
+    with {:ok, decls_meta} <- transform_declarations(decls) do
+      {:ok, {:language_specific, :haskell, %{"declarations" => decls_meta}, :module}, %{}}
+    end
+  end
+
+  # M2.3 Native Layer - Type Signature
+
+  def transform(%{"type" => "type_sig", "names" => names, "signature" => sig}) do
+    {:ok,
+     {:language_specific, :haskell, %{"names" => names, "signature" => sig}, :type_signature},
+     %{}}
+  end
+
+  # M2.3 Native Layer - Data Type Declaration
+
+  def transform(%{
+        "type" => "data_decl",
+        "data_or_new" => kind,
+        "name" => name,
+        "constructors" => cons
+      }) do
+    {:ok,
+     {:language_specific, :haskell, %{"kind" => kind, "name" => name, "constructors" => cons},
+      :data_decl}, %{}}
+  end
+
+  # M2.3 Native Layer - Type Alias
+
+  def transform(%{"type" => "type_alias", "name" => name, "definition" => def_type}) do
+    {:ok,
+     {:language_specific, :haskell, %{"name" => name, "definition" => def_type}, :type_alias},
+     %{}}
+  end
+
+  # M2.3 Native Layer - Type Class Declaration
+
+  def transform(%{"type" => "class_decl", "name" => name, "methods" => methods}) do
+    {:ok, {:language_specific, :haskell, %{"name" => name, "methods" => methods}, :class_decl},
+     %{}}
+  end
+
+  # M2.3 Native Layer - Instance Declaration
+
+  def transform(%{"type" => "instance_decl", "rule" => rule, "methods" => methods}) do
+    {:ok, {:language_specific, :haskell, %{"rule" => rule, "methods" => methods}, :instance_decl},
+     %{}}
+  end
+
+  # M2.3 Native Layer - Function Binding
+
+  def transform(%{"type" => "fun_bind", "matches" => matches}) do
+    # Try to extract function name and transform to a more useful representation
+    case extract_function_from_matches(matches) do
+      {:ok, name, body} ->
+        {:ok, {:assignment, {:variable, name}, body}, %{construct: :function_binding}}
+
+      :error ->
+        {:ok, {:language_specific, :haskell, %{"matches" => matches}, :function_binding}, %{}}
+    end
+  end
+
   # Unsupported constructs
 
   def transform(unsupported) do
@@ -367,5 +431,53 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   defp is_boolean_op?(op) when is_atom(op) do
     op in [:&&, :||, :and, :or]
+  end
+
+  defp transform_declarations(decls) when is_list(decls) do
+    decls
+    |> Enum.reduce_while({:ok, []}, fn decl, {:ok, acc} ->
+      case transform(decl) do
+        {:ok, meta, _} -> {:cont, {:ok, [meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, decls_list} -> {:ok, Enum.reverse(decls_list)}
+      error -> error
+    end
+  end
+
+  defp extract_function_from_matches([match | _]) do
+    # Extract function name and body from first match
+    # Simplified: only handles simple cases
+    case match do
+      %{"name" => name, "patterns" => patterns, "rhs" => rhs} ->
+        with {:ok, params} <- extract_match_params(patterns),
+             {:ok, body_meta, _} <- transform(rhs) do
+          # If it has parameters, represent as lambda
+          if length(params) > 0 do
+            {:ok, name, {:lambda, params, body_meta}}
+          else
+            {:ok, name, body_meta}
+          end
+        else
+          _ -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp extract_function_from_matches(_), do: :error
+
+  defp extract_match_params(patterns) when is_list(patterns) do
+    params =
+      Enum.map(patterns, fn
+        %{"type" => "var_pat", "name" => name} -> name
+        _ -> "_"
+      end)
+
+    {:ok, params}
   end
 end

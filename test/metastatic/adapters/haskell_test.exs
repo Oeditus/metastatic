@@ -477,4 +477,148 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert length(ast["alternatives"]) == 2
     end
   end
+
+  describe "ToMeta - M2.3 Native Layer" do
+    test "transforms type signature" do
+      ast = %{
+        "type" => "type_sig",
+        "names" => ["factorial"],
+        "signature" => %{
+          "type" => "type_fun",
+          "argument" => %{"type" => "type_con", "name" => "Int"},
+          "result" => %{"type" => "type_con", "name" => "Int"}
+        }
+      }
+
+      assert {:ok, {:language_specific, :haskell, data, :type_signature}, %{}} =
+               ToMeta.transform(ast)
+
+      assert data["names"] == ["factorial"]
+      assert data["signature"]["type"] == "type_fun"
+    end
+
+    test "transforms data type declaration" do
+      ast = %{
+        "type" => "data_decl",
+        "data_or_new" => "data",
+        "name" => "Maybe",
+        "constructors" => [
+          %{"name" => "Nothing", "types" => []},
+          %{"name" => "Just", "types" => [%{"type" => "type_var", "name" => "a"}]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, :haskell, data, :data_decl}, %{}} =
+               ToMeta.transform(ast)
+
+      assert data["kind"] == "data"
+      assert data["name"] == "Maybe"
+      assert [_, _] = data["constructors"]
+    end
+
+    test "transforms newtype declaration" do
+      ast = %{
+        "type" => "data_decl",
+        "data_or_new" => "newtype",
+        "name" => "Identity",
+        "constructors" => [%{"name" => "Identity", "types" => []}]
+      }
+
+      assert {:ok, {:language_specific, :haskell, data, :data_decl}, %{}} =
+               ToMeta.transform(ast)
+
+      assert data["kind"] == "newtype"
+    end
+
+    test "transforms type alias" do
+      ast = %{
+        "type" => "type_alias",
+        "name" => "String",
+        "definition" => %{
+          "type" => "type_list",
+          "element" => %{"type" => "type_con", "name" => "Char"}
+        }
+      }
+
+      assert {:ok, {:language_specific, :haskell, data, :type_alias}, %{}} =
+               ToMeta.transform(ast)
+
+      assert data["name"] == "String"
+      assert data["definition"]["type"] == "type_list"
+    end
+
+    test "transforms type class declaration" do
+      ast = %{
+        "type" => "class_decl",
+        "name" => "Eq",
+        "methods" => [
+          %{
+            "type" => "type_sig",
+            "names" => ["=="],
+            "signature" => %{"type" => "type_con", "name" => "Bool"}
+          }
+        ]
+      }
+
+      assert {:ok, {:language_specific, :haskell, data, :class_decl}, %{}} =
+               ToMeta.transform(ast)
+
+      assert data["name"] == "Eq"
+      assert [_] = data["methods"]
+    end
+
+    test "transforms instance declaration" do
+      ast = %{
+        "type" => "instance_decl",
+        "rule" => %{"class" => "Eq"},
+        "methods" => []
+      }
+
+      assert {:ok, {:language_specific, :haskell, data, :instance_decl}, %{}} =
+               ToMeta.transform(ast)
+
+      assert data["rule"]["class"] == "Eq"
+    end
+
+    test "transforms function binding" do
+      ast = %{
+        "type" => "fun_bind",
+        "matches" => [
+          %{
+            "name" => "factorial",
+            "patterns" => [%{"type" => "var_pat", "name" => "n"}],
+            "rhs" => %{"type" => "var", "name" => "n"}
+          }
+        ]
+      }
+
+      assert {:ok, {:assignment, {:variable, "factorial"}, {:lambda, ["n"], {:variable, "n"}}},
+              %{construct: :function_binding}} = ToMeta.transform(ast)
+    end
+
+    test "transforms module with declarations" do
+      ast = %{
+        "type" => "module",
+        "declarations" => [
+          %{"type" => "type_sig", "names" => ["f"], "signature" => %{}},
+          %{
+            "type" => "fun_bind",
+            "matches" => [
+              %{
+                "name" => "f",
+                "patterns" => [],
+                "rhs" => %{
+                  "type" => "literal",
+                  "value" => %{"literalType" => "int", "value" => 42}
+                }
+              }
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:language_specific, :haskell, data, :module}, %{}} = ToMeta.transform(ast)
+      assert [_, _] = data["declarations"]
+    end
+  end
 end

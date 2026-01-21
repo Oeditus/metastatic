@@ -27,9 +27,11 @@ instance Aeson.ToJSON Response where
 main :: IO ()
 main = do
   source <- TIO.getContents
-  case parseExp (T.unpack source) of
-    ParseOk parsedExpr -> do
-      let astJson = exprToJson parsedExpr
+  let sourceStr = T.unpack source
+  -- Try parsing as module first, then as declaration, then as expression
+  case parseModule sourceStr of
+    ParseOk parsedModule -> do
+      let astJson = moduleToJson parsedModule
       BL.putStrLn $
         Aeson.encode $
           Response
@@ -37,16 +39,36 @@ main = do
               ast = Just astJson,
               errorMessage = Nothing
             }
-    ParseFailed loc err -> do
-      hPutStrLn stderr $ "Parse error at " ++ show loc ++ ": " ++ err
-      BL.putStrLn $
-        Aeson.encode $
-          Response
-            { status = "error",
-              ast = Nothing,
-              errorMessage = Just $ "Parse error: " ++ err
-            }
-      exitFailure
+    ParseFailed _ _ -> case parseDecl sourceStr of
+      ParseOk parsedDecl -> do
+        let astJson = declToJsonFull parsedDecl
+        BL.putStrLn $
+          Aeson.encode $
+            Response
+              { status = "ok",
+                ast = Just astJson,
+                errorMessage = Nothing
+              }
+      ParseFailed _ _ -> case parseExp sourceStr of
+        ParseOk parsedExpr -> do
+          let astJson = exprToJson parsedExpr
+          BL.putStrLn $
+            Aeson.encode $
+              Response
+                { status = "ok",
+                  ast = Just astJson,
+                  errorMessage = Nothing
+                }
+        ParseFailed loc err -> do
+          hPutStrLn stderr $ "Parse error at " ++ show loc ++ ": " ++ err
+          BL.putStrLn $
+            Aeson.encode $
+              Response
+                { status = "error",
+                  ast = Nothing,
+                  errorMessage = Just $ "Parse error: " ++ err
+                }
+          exitFailure
 
 -- | Convert Haskell expression to JSON
 exprToJson :: Exp SrcSpanInfo -> Aeson.Value
@@ -211,7 +233,74 @@ bindsToJson :: Binds SrcSpanInfo -> Aeson.Value
 bindsToJson (BDecls _ decls) = Aeson.toJSON $ map declToJson decls
 bindsToJson _ = Aeson.Null
 
--- | Convert declaration to JSON
+-- | Convert module to JSON
+moduleToJson :: Module SrcSpanInfo -> Aeson.Value
+moduleToJson (Module _ _ _ _ decls) = Aeson.object
+  [ "type" Aeson..= ("module" :: String)
+  , "declarations" Aeson..= map declToJsonFull decls
+  ]
+moduleToJson _ = Aeson.object
+  [ "type" Aeson..= ("unsupported_module" :: String)
+  ]
+
+-- | Convert declaration to JSON (full version with type signatures)
+declToJsonFull :: Decl SrcSpanInfo -> Aeson.Value
+declToJsonFull decl = case decl of
+  -- Type signature
+  TypeSig _ names ty -> Aeson.object
+    [ "type" Aeson..= ("type_sig" :: String)
+    , "names" Aeson..= map nameToString names
+    , "signature" Aeson..= typeToJson ty
+    ]
+  
+  -- Data type declaration
+  DataDecl _ dataOrNew _ declHead qualConDecls _ -> Aeson.object
+    [ "type" Aeson..= ("data_decl" :: String)
+    , "data_or_new" Aeson..= dataOrNewToString dataOrNew
+    , "name" Aeson..= declHeadToString declHead
+    , "constructors" Aeson..= map qualConDeclToJson qualConDecls
+    ]
+  
+  -- Type class declaration
+  ClassDecl _ _ declHead _ classDecls -> Aeson.object
+    [ "type" Aeson..= ("class_decl" :: String)
+    , "name" Aeson..= declHeadToString declHead
+    , "methods" Aeson..= maybe [] (map classDeclToJson) classDecls
+    ]
+  
+  -- Instance declaration
+  InstDecl _ _ instRule instDecls -> Aeson.object
+    [ "type" Aeson..= ("instance_decl" :: String)
+    , "rule" Aeson..= instRuleToJson instRule
+    , "methods" Aeson..= maybe [] (map instDeclToJson) instDecls
+    ]
+  
+  -- Function binding
+  FunBind _ matches -> Aeson.object
+    [ "type" Aeson..= ("fun_bind" :: String)
+    , "matches" Aeson..= map matchToJson matches
+    ]
+  
+  -- Pattern binding
+  PatBind _ pat rhs _ -> Aeson.object
+    [ "type" Aeson..= ("pat_bind" :: String)
+    , "pattern" Aeson..= patToJson pat
+    , "rhs" Aeson..= rhsToJson rhs
+    ]
+  
+  -- Type alias
+  TypeDecl _ declHead ty -> Aeson.object
+    [ "type" Aeson..= ("type_alias" :: String)
+    , "name" Aeson..= declHeadToString declHead
+    , "definition" Aeson..= typeToJson ty
+    ]
+  
+  _ -> Aeson.object
+    [ "type" Aeson..= ("unsupported_decl" :: String)
+    , "original" Aeson..= show decl
+    ]
+
+-- | Convert declaration to JSON (simple version for bindings)
 declToJson :: Decl SrcSpanInfo -> Aeson.Value
 declToJson decl = case decl of
   PatBind _ pat rhs _ -> Aeson.object
@@ -259,3 +348,114 @@ stmtToJson stmt = case stmt of
   _ -> Aeson.object
     [ "type" Aeson..= ("unsupported_stmt" :: String)
     ]
+
+-- | Convert type to JSON
+typeToJson :: Type SrcSpanInfo -> Aeson.Value
+typeToJson ty = case ty of
+  TyFun _ arg res -> Aeson.object
+    [ "type" Aeson..= ("type_fun" :: String)
+    , "argument" Aeson..= typeToJson arg
+    , "result" Aeson..= typeToJson res
+    ]
+  TyTuple _ Boxed types -> Aeson.object
+    [ "type" Aeson..= ("type_tuple" :: String)
+    , "elements" Aeson..= map typeToJson types
+    ]
+  TyList _ ty' -> Aeson.object
+    [ "type" Aeson..= ("type_list" :: String)
+    , "element" Aeson..= typeToJson ty'
+    ]
+  TyApp _ t1 t2 -> Aeson.object
+    [ "type" Aeson..= ("type_app" :: String)
+    , "constructor" Aeson..= typeToJson t1
+    , "argument" Aeson..= typeToJson t2
+    ]
+  TyVar _ name -> Aeson.object
+    [ "type" Aeson..= ("type_var" :: String)
+    , "name" Aeson..= nameToString name
+    ]
+  TyCon _ qname -> Aeson.object
+    [ "type" Aeson..= ("type_con" :: String)
+    , "name" Aeson..= qnameToString qname
+    ]
+  _ -> Aeson.object
+    [ "type" Aeson..= ("unsupported_type" :: String)
+    , "original" Aeson..= show ty
+    ]
+
+-- | Convert name to string
+nameToString :: Name l -> String
+nameToString (Ident _ n) = n
+nameToString (Symbol _ s) = s
+
+-- | Convert data or newtype to string
+dataOrNewToString :: DataOrNew l -> String
+dataOrNewToString (DataType _) = "data"
+dataOrNewToString (NewType _) = "newtype"
+
+-- | Convert declaration head to string
+declHeadToString :: DeclHead l -> String
+declHeadToString (DHead _ name) = nameToString name
+declHeadToString (DHInfix _ _ name) = nameToString name
+declHeadToString (DHParen _ dh) = declHeadToString dh
+declHeadToString (DHApp _ dh _) = declHeadToString dh
+
+-- | Convert qualified constructor declaration to JSON
+qualConDeclToJson :: QualConDecl SrcSpanInfo -> Aeson.Value
+qualConDeclToJson (QualConDecl _ _ _ conDecl) = conDeclToJson conDecl
+
+-- | Convert constructor declaration to JSON
+conDeclToJson :: ConDecl SrcSpanInfo -> Aeson.Value
+conDeclToJson (ConDecl _ name types) = Aeson.object
+  [ "name" Aeson..= nameToString name
+  , "types" Aeson..= map typeToJson types
+  ]
+conDeclToJson (RecDecl _ name fields) = Aeson.object
+  [ "name" Aeson..= nameToString name
+  , "fields" Aeson..= map fieldDeclToJson fields
+  ]
+conDeclToJson _ = Aeson.object
+  [ "unsupported" Aeson..= True
+  ]
+
+-- | Convert field declaration to JSON
+fieldDeclToJson :: FieldDecl SrcSpanInfo -> Aeson.Value
+fieldDeclToJson (FieldDecl _ names ty) = Aeson.object
+  [ "names" Aeson..= map nameToString names
+  , "type" Aeson..= typeToJson ty
+  ]
+
+-- | Convert instance rule to JSON
+instRuleToJson :: InstRule SrcSpanInfo -> Aeson.Value
+instRuleToJson (IRule _ _ _ instHead) = instHeadToJson instHead
+instRuleToJson _ = Aeson.Null
+
+-- | Convert instance head to JSON
+instHeadToJson :: InstHead SrcSpanInfo -> Aeson.Value
+instHeadToJson (IHCon _ qname) = Aeson.object
+  [ "class" Aeson..= qnameToString qname
+  ]
+instHeadToJson (IHApp _ ih ty) = Aeson.object
+  [ "head" Aeson..= instHeadToJson ih
+  , "type" Aeson..= typeToJson ty
+  ]
+instHeadToJson _ = Aeson.Null
+
+-- | Convert match to JSON
+matchToJson :: Match SrcSpanInfo -> Aeson.Value
+matchToJson (Match _ name pats rhs _) = Aeson.object
+  [ "name" Aeson..= nameToString name
+  , "patterns" Aeson..= map patToJson pats
+  , "rhs" Aeson..= rhsToJson rhs
+  ]
+matchToJson _ = Aeson.Null
+
+-- | Convert class declaration to JSON
+classDeclToJson :: ClassDecl SrcSpanInfo -> Aeson.Value
+classDeclToJson (ClsDecl _ decl) = declToJsonFull decl
+classDeclToJson _ = Aeson.Null
+
+-- | Convert instance declaration to JSON
+instDeclToJson :: InstDecl SrcSpanInfo -> Aeson.Value
+instDeclToJson (InsDecl _ decl) = declToJsonFull decl
+instDeclToJson _ = Aeson.Null
