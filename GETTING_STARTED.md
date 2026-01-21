@@ -9,10 +9,18 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 - **Git** for version control
 
 ### Current Status
-**Phase 2 Complete!** Both Elixir and Erlang adapters are fully functional with 253 passing tests.
+**Phase 4 Complete!** Purity analysis and complexity metrics are now operational.
 
-- Phase 1: Core Foundation (154 tests)
-- Phase 2: BEAM Ecosystem Adapters - Elixir (66 tests) + Erlang (33 tests)
+- Phase 0: Core Foundation + BEAM/Python Adapters (650 tests)
+- Phase 2: Supplemental Modules (613 tests)
+- Phase 3: Purity Analysis (650 tests)
+- Phase 4: Complexity Metrics (755 tests - 45 doctests + 710 tests)
+
+**Current Capabilities:**
+- Parse and transform code across Python, Elixir, and Erlang
+- Analyze function purity and side effects
+- Measure code complexity (6 metric types)
+- CLI tools for analysis and code inspection
 
 ### Optional (for future adapter development)
 - **Python 3.9+** (Phase 3 - Python adapter)
@@ -30,7 +38,7 @@ cd /home/am/Proyectos/Oeditus/metastatic
 # Install dependencies
 mix deps.get
 
-# Run tests (253 tests, all passing!)
+# Run tests (755 tests, all passing!)
 mix test
 
 # Generate documentation
@@ -46,32 +54,36 @@ mix format --check-formatted
 metastatic/
 ├── lib/
 │   └── metastatic/
-│       ├── ast.ex                  # ✅ Core MetaAST type definitions (551 lines)
-│       ├── document.ex             # ✅ Document wrapper with metadata (197 lines)
-│       ├── builder.ex              # ✅ High-level API (278 lines)
-│       ├── adapter.ex              # ✅ Adapter behaviour (422 lines)
-│       ├── validator.ex            # ✅ Conformance validation (333 lines)
-│       ├── adapters/               # ✅ Phase 2 - BEAM Adapters Complete!
-│       │   ├── elixir.ex           # ✅ (154 lines, 66 tests)
-│       │   ├── elixir/
-│       │   │   ├── to_meta.ex      # ✅ M1→M2 (412 lines)
-│       │   │   └── from_meta.ex    # ✅ M2→M1 (296 lines)
-│       │   ├── erlang.ex           # ✅ (154 lines, 33 tests)
-│       │   ├── erlang/
-│       │   │   ├── to_meta.ex      # ✅ M1→M2 (307 lines)
-│       │   │   └── from_meta.ex    # ✅ M2→M1 (270 lines)
-│       │   ├── python.ex           # 🚧 Phase 3 - Planned
-│       │   └── javascript.ex       # 🚧 Phase 4 - Planned
-│       ├── mutator.ex              # 🚧 Phase 3 - Mutation engine
-│       └── purity_analyzer.ex      # 🚧 Phase 3 - Side effect detection
+│       ├── ast.ex                  # ✅ Core MetaAST type definitions
+│       ├── document.ex             # ✅ Document wrapper with metadata
+│       ├── builder.ex              # ✅ High-level API
+│       ├── adapter.ex              # ✅ Adapter behaviour
+│       ├── validator.ex            # ✅ Conformance validation
+│       ├── adapters/               # ✅ Python, Elixir, Erlang adapters
+│       │   ├── python/             # ✅ Full Python support
+│       │   ├── elixir/             # ✅ Full Elixir support
+│       │   └── erlang/             # ✅ Full Erlang support
+│       ├── supplemental/           # ✅ Phase 2 - Cross-language support
+│       │   ├── registry.ex         # ✅ Supplemental module registry
+│       │   ├── transformer.ex      # ✅ Transformation helper
+│       │   └── python/             # ✅ Pykka (actors), Asyncio
+│       ├── analysis/               # ✅ Phase 3-4 - Code analysis
+│       │   ├── purity.ex           # ✅ Purity analyzer
+│       │   ├── purity/             # ✅ Side effect detection
+│       │   ├── complexity.ex       # ✅ Complexity analyzer
+│       │   └── complexity/         # ✅ 6 metric calculators
+│       └── mix/tasks/              # ✅ CLI tools
+│           ├── metastatic.translate.ex
+│           ├── metastatic.inspect.ex
+│           ├── metastatic.purity_check.ex
+│           └── metastatic.complexity.ex
 ├── test/
-│   └── metastatic/                 # ✅ 253 tests, 100% passing
-│       ├── ast_test.exs            # ✅ Phase 1 (332 lines)
-│       ├── document_test.exs       # ✅ Phase 1 (94 lines)
-│       ├── validator_test.exs      # ✅ Phase 1 (274 lines)
-│       └── adapters/               # ✅ Phase 2
-│           ├── elixir_test.exs     # ✅ (444 lines, 66 tests)
-│           └── erlang_test.exs     # ✅ (242 lines, 33 tests)
+│   └── metastatic/                 # ✅ 755 tests (45 doctests + 710 tests)
+│       ├── ast_test.exs
+│       ├── adapters/               # ✅ Python, Elixir, Erlang
+│       ├── supplemental/           # ✅ Supplemental modules
+│       ├── analysis/               # ✅ Purity + Complexity
+│       └── mix/tasks/              # ✅ CLI tools
 ├── RESEARCH.md                     # ✅ Research and architecture (826 lines)
 ├── THEORETICAL_FOUNDATIONS.md      # ✅ Formal theory (953 lines)
 ├── IMPLEMENTATION_PLAN.md          # ✅ Detailed roadmap (840 lines)
@@ -93,7 +105,7 @@ Before diving in, read these documents in order:
 ### 2. Running Tests
 
 ```bash
-# Run all tests (253 tests, all passing!)
+# Run all tests (755 tests, all passing!)
 mix test
 
 # Run specific test file
