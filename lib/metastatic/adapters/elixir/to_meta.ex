@@ -229,6 +229,39 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
+  # Module Definitions - M2.3 Native Layer
+
+  # defmodule
+  def transform({:defmodule, meta, [name, [do: body]]}) do
+    with {:ok, body_meta, _} <- transform(body) do
+      module_name = module_to_string(name)
+
+      {:ok,
+       {:language_specific, :elixir, {:defmodule, meta, [name, [do: body]]}, :module_definition},
+       %{module_name: module_name, body: body_meta}}
+    end
+  end
+
+  # def / defp (function definitions)
+  def transform({func_type, meta, [signature, [do: body]]})
+      when func_type in [:def, :defp, :defmacro, :defmacrop] do
+    with {:ok, body_meta, _} <- transform(body) do
+      func_name = extract_function_name(signature)
+
+      {:ok,
+       {:language_specific, :elixir, {func_type, meta, [signature, [do: body]]},
+        :function_definition},
+       %{function_name: func_name, function_type: func_type, body: body_meta}}
+    end
+  end
+
+  # Module attributes (@moduledoc, @doc, etc.)
+  def transform({:@, meta, [{attr_name, attr_meta, [value]}]}) do
+    {:ok,
+     {:language_specific, :elixir, {:@, meta, [{attr_name, attr_meta, [value]}]},
+      :module_attribute}, %{attribute: attr_name, value: value}}
+  end
+
   # Function Calls - M2.1 Core Layer
 
   # Remote call (Module.function)
@@ -656,4 +689,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     # with is complex and Elixir-specific - preserve as language_specific
     {:ok, {:language_specific, :elixir, {:with, nil, args}, :with}, %{}}
   end
+
+  # Helper to extract function name from signature
+  defp extract_function_name({name, _, _}) when is_atom(name), do: Atom.to_string(name)
+  defp extract_function_name({name, _, _args}) when is_atom(name), do: Atom.to_string(name)
+  defp extract_function_name(nil), do: "anonymous"
+  defp extract_function_name(_), do: "unknown"
 end

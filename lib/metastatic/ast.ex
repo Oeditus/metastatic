@@ -532,6 +532,11 @@ defmodule Metastatic.AST do
         conforms?(operation)
 
       # M2.3: Native
+      {:language_specific, language, _native_info, hint}
+      when is_atom(language) and is_atom(hint) ->
+        true
+
+      # Legacy 3-tuple format (for backward compatibility)
       {:language_specific, language, native_info}
       when is_atom(language) and is_map(native_info) ->
         true
