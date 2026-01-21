@@ -420,4 +420,59 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert [".hs", ".lhs"] = Haskell.file_extensions()
     end
   end
+
+  describe "FromMeta - M2→M1 reification" do
+    alias Metastatic.Adapters.Haskell.FromMeta
+
+    test "transforms function calls with currying" do
+      meta_ast = {:function_call, "f", [{:variable, "x"}, {:variable, "y"}]}
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "app"
+      assert get_in(ast, ["function", "type"]) == "app"
+    end
+
+    test "transforms lists" do
+      meta_ast =
+        {:literal, :collection, [{:literal, :integer, 1}, {:literal, :integer, 2}],
+         %{collection_type: :list}}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "list"
+      assert length(ast["elements"]) == 2
+    end
+
+    test "transforms tuples" do
+      meta_ast =
+        {:literal, :collection, [{:literal, :integer, 1}, {:literal, :string, "hello"}],
+         %{collection_type: :tuple}}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "tuple"
+    end
+
+    test "transforms let bindings" do
+      meta_ast =
+        {:block, [{:assignment, {:variable, "x"}, {:literal, :integer, 42}}, {:variable, "x"}],
+         %{construct: :let}}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "let"
+      assert is_list(ast["bindings"])
+      assert ast["body"] != nil
+    end
+
+    test "transforms case expressions" do
+      meta_ast =
+        {:pattern_match, {:variable, "x"},
+         [
+           {{:literal, :integer, 1}, {:literal, :string, "one"}},
+           {:_, {:literal, :string, "other"}}
+         ], nil}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "case"
+      assert ast["scrutinee"]["type"] == "var"
+      assert length(ast["alternatives"]) == 2
+    end
+  end
 end
