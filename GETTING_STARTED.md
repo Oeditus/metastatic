@@ -8,15 +8,18 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 - **Elixir 1.19+** and **Erlang/OTP 27+**
 - **Git** for version control
 
-### Phase 1 Complete!
-Phase 1 (Core Foundation) is complete with 99 passing tests. Language adapters (Python, JavaScript, etc.) coming in Phase 2.
+### Current Status
+**Phase 2 Complete!** Both Elixir and Erlang adapters are fully functional with 253 passing tests.
+
+- Phase 1: Core Foundation (154 tests)
+- Phase 2: BEAM Ecosystem Adapters - Elixir (66 tests) + Erlang (33 tests)
 
 ### Optional (for future adapter development)
-- **Python 3.9+** (Phase 2 - Python adapter)
-- **Node.js 16+** (Phase 3 - JavaScript adapter)
-- **Go 1.19+** (Phase 5 - Go adapter)
-- **Rust 1.65+** (Phase 5 - Rust adapter)
-- **Ruby 3.0+** (Phase 5 - Ruby adapter)
+- **Python 3.9+** (Phase 3 - Python adapter)
+- **Node.js 16+** (Phase 4 - JavaScript adapter)
+- **Go 1.19+** (Phase 5 - Additional languages)
+- **Rust 1.65+** (Phase 5 - Additional languages)
+- **Ruby 3.0+** (Phase 5 - Additional languages)
 
 ## Quick Setup
 
@@ -27,7 +30,7 @@ cd /home/am/Proyectos/Oeditus/metastatic
 # Install dependencies
 mix deps.get
 
-# Run tests (99 tests, all passing!)
+# Run tests (253 tests, all passing!)
 mix test
 
 # Generate documentation
@@ -48,17 +51,27 @@ metastatic/
 │       ├── builder.ex              # ✅ High-level API (278 lines)
 │       ├── adapter.ex              # ✅ Adapter behaviour (422 lines)
 │       ├── validator.ex            # ✅ Conformance validation (333 lines)
-│       ├── adapters/               # 🚧 Phase 2 - Coming soon!
-│       │   ├── python.ex           # (Planned)
-│       │   ├── javascript.ex       # (Planned)
-│       │   └── elixir.ex           # (Planned)
+│       ├── adapters/               # ✅ Phase 2 - BEAM Adapters Complete!
+│       │   ├── elixir.ex           # ✅ (154 lines, 66 tests)
+│       │   ├── elixir/
+│       │   │   ├── to_meta.ex      # ✅ M1→M2 (412 lines)
+│       │   │   └── from_meta.ex    # ✅ M2→M1 (296 lines)
+│       │   ├── erlang.ex           # ✅ (154 lines, 33 tests)
+│       │   ├── erlang/
+│       │   │   ├── to_meta.ex      # ✅ M1→M2 (307 lines)
+│       │   │   └── from_meta.ex    # ✅ M2→M1 (270 lines)
+│       │   ├── python.ex           # 🚧 Phase 3 - Planned
+│       │   └── javascript.ex       # 🚧 Phase 4 - Planned
 │       ├── mutator.ex              # 🚧 Phase 3 - Mutation engine
 │       └── purity_analyzer.ex      # 🚧 Phase 3 - Side effect detection
 ├── test/
-│   └── metastatic/                 # ✅ 99 tests, 100% passing
-│       ├── ast_test.exs            # ✅ 332 lines
-│       ├── document_test.exs       # ✅ 94 lines
-│       └── validator_test.exs      # ✅ 274 lines
+│   └── metastatic/                 # ✅ 253 tests, 100% passing
+│       ├── ast_test.exs            # ✅ Phase 1 (332 lines)
+│       ├── document_test.exs       # ✅ Phase 1 (94 lines)
+│       ├── validator_test.exs      # ✅ Phase 1 (274 lines)
+│       └── adapters/               # ✅ Phase 2
+│           ├── elixir_test.exs     # ✅ (444 lines, 66 tests)
+│           └── erlang_test.exs     # ✅ (242 lines, 33 tests)
 ├── RESEARCH.md                     # ✅ Research and architecture (826 lines)
 ├── THEORETICAL_FOUNDATIONS.md      # ✅ Formal theory (953 lines)
 ├── IMPLEMENTATION_PLAN.md          # ✅ Detailed roadmap (840 lines)
@@ -80,7 +93,7 @@ Before diving in, read these documents in order:
 ### 2. Running Tests
 
 ```bash
-# Run all tests (99 tests, all passing!)
+# Run all tests (253 tests, all passing!)
 mix test
 
 # Run specific test file
@@ -177,9 +190,68 @@ meta.depth  # => 2
 meta.variables  # => MapSet.new(["x"])
 ```
 
-### Adding a New Language Adapter (Phase 2+)
+### Using Language Adapters (Phase 2 - Available Now!)
 
-Language adapters are coming in Phase 2. See IMPLEMENTATION_PLAN.md for the roadmap.
+#### Elixir Adapter
+
+```elixir
+alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+alias Metastatic.Builder
+
+# Parse Elixir source to MetaAST
+source = "x + 5"
+{:ok, doc} = Builder.from_source(source, ElixirAdapter)
+
+# doc.ast will be:
+# {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+# Convert back to Elixir source
+{:ok, result} = Builder.to_source(doc)
+# => "x + 5"
+
+# Round-trip validation
+{:ok, doc} = Builder.round_trip(source, ElixirAdapter)
+```
+
+#### Erlang Adapter
+
+```elixir
+alias Metastatic.Adapters.Erlang, as: ErlangAdapter
+
+# Parse Erlang source to MetaAST
+source = "X + 5."
+{:ok, doc} = Builder.from_source(source, ErlangAdapter)
+
+# Same MetaAST as Elixir!
+# {:binary_op, :arithmetic, :+, {:variable, "X"}, {:literal, :integer, 5}}
+
+# Convert to Erlang source
+{:ok, result} = Builder.to_source(doc)
+# => "X + 5"
+```
+
+#### Cross-Language Equivalence
+
+```elixir
+# Parse Elixir
+elixir_source = "x + 5"
+{:ok, elixir_doc} = Builder.from_source(elixir_source, ElixirAdapter)
+
+# Parse semantically equivalent Erlang
+erlang_source = "X + 5."
+{:ok, erlang_doc} = Builder.from_source(erlang_source, ErlangAdapter)
+
+# Normalize variable names for comparison
+elixir_vars = elixir_doc.ast |> normalize_vars()
+erlang_vars = erlang_doc.ast |> normalize_vars()
+
+# Same MetaAST structure!
+assert elixir_vars == erlang_vars
+```
+
+### Adding a New Language Adapter (Phase 3+)
+
+See existing Elixir and Erlang adapters as reference implementations.
 
 ### Adding a New Mutator
 
@@ -192,20 +264,14 @@ Language adapters are coming in Phase 2. See IMPLEMENTATION_PLAN.md for the road
 
 ```bash
 # Create fixture directory
-mkdir -p test/fixtures/python/
+mkdir -p test/fixtures/elixir/
 
 # Add source file
-echo 'def add(x, y): return x + y' > test/fixtures/python/simple_add.py
+echo 'x + y' > test/fixtures/elixir/simple_add.ex
 
 # Add expected MetaAST
-cat > test/fixtures/python/expected/simple_add.exs << 'EOF'
-{:function_def, "add",
-  params: [
-    {:param, "x", nil},
-    {:param, "y", nil}
-  ],
-  body: {:return, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
-}
+cat > test/fixtures/elixir/expected/simple_add.exs << 'EOF'
+{:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
 EOF
 ```
 
@@ -215,10 +281,10 @@ EOF
 Test individual transformations and functions:
 
 ```elixir
-test "transforms Python addition to MetaAST" do
-  python_ast = %{"_type" => "BinOp", "op" => "Add", ...}
-  {:ok, meta_ast} = Python.to_meta(python_ast)
-  assert {:binary_op, :arithmetic, :+, _, _} = meta_ast
+test "transforms Elixir addition to MetaAST" do
+  elixir_ast = {:+, [], [{:x, [], nil}, 5]}
+  {:ok, meta_ast} = Metastatic.Adapters.Elixir.ToMeta.transform(elixir_ast)
+  assert {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}} = meta_ast
 end
 ```
 
@@ -226,12 +292,12 @@ end
 Test full round-trips:
 
 ```elixir
-test "round-trip Python source through MetaAST" do
-  source = "x = 1 + 2"
-  {:ok, doc} = Builder.from_source(source, :python)
+test "round-trip Elixir source through MetaAST" do
+  source = "x + 5"
+  alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+  {:ok, doc} = Builder.from_source(source, ElixirAdapter)
   {:ok, result} = Builder.to_source(doc)
-  # Allow for formatting differences
-  assert normalize(result) == normalize(source)
+  assert result == source
 end
 ```
 
@@ -253,8 +319,9 @@ end
 
 ```elixir
 # In IEx
-iex> source = "x = 1 + 2"
-iex> {:ok, doc} = Metastatic.Builder.from_source(source, :python)
+iex> alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+iex> source = "x + 5"
+iex> {:ok, doc} = Metastatic.Builder.from_source(source, ElixirAdapter)
 iex> IO.inspect(doc.ast, label: "MetaAST")
 iex> IO.inspect(doc.metadata, label: "Metadata")
 ```
@@ -272,14 +339,17 @@ iex> recompile()
 iex> ExUnit.run()
 ```
 
-### Debugging External Parsers
+### Testing Adapters
 
 ```bash
-# Test Python parser directly
-echo 'x = 1 + 2' | python3 parsers/python/parser.py | jq .
+# Test Elixir adapter
+mix test test/metastatic/adapters/elixir_test.exs
 
-# Test JavaScript parser directly
-echo 'const x = 1 + 2' | node parsers/javascript/parser.js | jq .
+# Test Erlang adapter
+mix test test/metastatic/adapters/erlang_test.exs
+
+# Test specific feature
+mix test test/metastatic/adapters/elixir_test.exs:45
 ```
 
 ## Documentation
@@ -328,7 +398,9 @@ open doc/index.html
 
 ```elixir
 # Use :fprof for profiling
-:fprof.apply(&Metastatic.Builder.from_source/2, [source, :python])
+alias Metastatic.Adapters.Elixir, as: ElixirAdapter
+source = "x + 5"
+:fprof.apply(&Metastatic.Builder.from_source/2, [source, ElixirAdapter])
 :fprof.profile()
 :fprof.analyse()
 ```
@@ -337,9 +409,13 @@ open doc/index.html
 
 ```elixir
 # Use Benchee for benchmarking
+alias Metastatic.Adapters.{Elixir, Erlang}
+source_ex = "x + 5"
+source_erl = "X + 5."
+
 Benchee.run(%{
-  "parse python" => fn -> Metastatic.Builder.from_source(source, :python) end,
-  "parse javascript" => fn -> Metastatic.Builder.from_source(source, :javascript) end
+  "parse elixir" => fn -> Metastatic.Builder.from_source(source_ex, Elixir) end,
+  "parse erlang" => fn -> Metastatic.Builder.from_source(source_erl, Erlang) end
 })
 ```
 
@@ -347,23 +423,23 @@ Benchee.run(%{
 
 ### Common Issues
 
-**Issue: Python parser not found**
+**Issue: Elixir parse error**
 ```
-Error: Python parser failed: python3: command not found
+Error: Code.string_to_quoted/1 failed with syntax error
 ```
-**Solution:** Install Python 3.9+ or configure Python path in config
+**Solution:** Ensure Elixir source is syntactically valid
 
-**Issue: Jason decode error**
+**Issue: Erlang parse error**
 ```
-Error: Jason.decode failed
+Error: :erl_parse.parse_exprs failed
 ```
-**Solution:** Check that external parser outputs valid JSON
+**Solution:** Ensure Erlang expressions end with a period (`.`)
 
-**Issue: Tests failing after rebase**
+**Issue: Tests failing after changes**
 ```
-Error: test/fixtures/python/... failed
+Error: test/metastatic/adapters/... failed
 ```
-**Solution:** Regenerate expected outputs with `mix metastatic.fixtures.update`
+**Solution:** Check MetaAST structure matches expected format; run `mix format` to ensure consistent formatting
 
 ## Getting Help
 

@@ -5,7 +5,7 @@
 **Goal:** Build a layered MetaAST library enabling cross-language code analysis, mutation testing, and transformation through a unified **meta-model** (M2 level in MOF hierarchy).
 
 **Timeline:** 8-14 months (3 developers)  
-**First Release:** 4-6 months (Python + JavaScript + Elixir support)
+**First Release:** 4-6 months (Elixir + Erlang + Python support)
 
 ## Etymology and Theoretical Foundation
 
@@ -613,172 +613,380 @@ test/
 
 ---
 
-## Phase 2: Python Adapter (Months 2-4)
+## Phase 2: Language Adapters - BEAM Ecosystem (Months 2-3)
 
-### Milestone 2.1: Parser Integration (Weeks 13-16)
+### Strategic Rationale: Elixir First
+
+We're starting with Elixir (then Erlang) rather than Python for several key reasons:
+
+1. **Zero External Dependencies**: Direct access to `Code.string_to_quoted!/2` and `Macro.to_string/1` - no parser subprocess needed
+2. **Type System Alignment**: Elixir AST is already tuple-based, matching MetaAST structure exactly
+3. **Dogfooding**: Building the first adapter in the same language as the meta-library enables rapid iteration on the `Metastatic.Adapter` behaviour
+4. **Trivial Round-Trip Validation**: Native quote/unquote cycle makes testing straightforward
+5. **Erlang Comes ~80% Free**: Shared BEAM tuple structure means second adapter is minimal delta
+6. **Immediate Practical Value**: Enables muex/propwise cross-language support (original motivation)
+
+Once the BEAM ecosystem is proven (Weeks 13-20), Python adapter (Weeks 21-28) will benefit from battle-tested M2 design.
+
+### Milestone 2.1: Elixir Adapter - Foundation (Weeks 13-16)
 
 **Deliverables:**
-- [ ] Python helper script for AST parsing
-- [ ] Port-based communication
-- [ ] JSON serialization of Python AST
-- [ ] Elixir wrapper for Python calls
+- [ ] Elixir AST → MetaAST transformer (M1 → M2)
+- [ ] MetaAST → Elixir AST transformer (M2 → M1)
+- [ ] Parse/unparse using native `Code` module
+- [ ] Register adapter in Adapter.Registry
 
 **Files to Create:**
 ```
-parsers/python/
-├── parser.py               # Python AST → JSON
-├── unparser.py             # JSON → Python source
-├── requirements.txt        # (empty - uses stdlib only)
-└── bin/
-    └── metastatic-python   # CLI wrapper
-
 lib/metastatic/adapters/
-└── python.ex               # Elixir adapter
+├── elixir.ex               # Elixir adapter implementation
+└── elixir/
+    ├── to_meta.ex          # Elixir AST → MetaAST
+    ├── from_meta.ex        # MetaAST → Elixir AST
+    └── normalization.ex    # AST normalization helpers
+
+test/metastatic/adapters/
+└── elixir_test.exs         # Adapter tests
 ```
 
-**Python Parser:**
+**Adapter Implementation:**
+
+```elixir
+# lib/metastatic/adapters/elixir.ex
+defmodule Metastatic.Adapters.Elixir do
+  @moduledoc """
+  Elixir language adapter for MetaAST.
+  
+  Transforms between Elixir AST (M1) and MetaAST (M2).
+  
+  ## Elixir AST Structure
+  
+  Elixir represents AST as three-element tuples:
+  ```elixir
+  {form, metadata, arguments}
+  ```
+  
+  Examples:
+  - Variable: `{:x, [], nil}`
+  - Addition: `{:+, [], [{:x, [], nil}, 5]}`
+  - Function call: `{:foo, [], [arg1, arg2]}`
+  """
+  
+  @behaviour Metastatic.Adapter
+  
+  alias Metastatic.Adapters.Elixir.{ToMeta, FromMeta}
+  
+  @impl true
+  def parse(source) when is_binary(source) do
+    case Code.string_to_quoted(source) do
+      {:ok, ast} -> {:ok, ast}
+      {:error, {_meta, message, token}} ->
+        {:error, "Syntax error: #{message}#{token}"}
+    end
+  end
+  
+  @impl true
+  def to_meta(elixir_ast) do
+    ToMeta.transform(elixir_ast)
+  end
+  
+  @impl true
+  def from_meta(meta_ast, metadata) do
+    FromMeta.transform(meta_ast, metadata)
+  end
+  
+  @impl true
+  def unparse(elixir_ast) do
+    {:ok, Macro.to_string(elixir_ast)}
+  end
+  
+  @impl true
+  def file_extensions do
+    [".ex", ".exs"]
+  end
+end
+```
+
+**Core Transformations (Elixir → MetaAST):**
+
+```elixir
+# lib/metastatic/adapters/elixir/to_meta.ex
+defmodule Metastatic.Adapters.Elixir.ToMeta do
+  @moduledoc "Transform Elixir AST (M1) to MetaAST (M2)."
+  
+  # Literal integers/floats/strings/atoms
+  def transform(value) when is_integer(value),
+    do: {:ok, {:literal, :integer, value}, %{}}
+  
+  def transform(value) when is_float(value),
+    do: {:ok, {:literal, :float, value}, %{}}
+  
+  def transform(value) when is_binary(value),
+    do: {:ok, {:literal, :string, value}, %{}}
+  
+  def transform(value) when is_boolean(value),
+    do: {:ok, {:literal, :boolean, value}, %{}}
+  
+  def transform(nil),
+    do: {:ok, {:literal, :null, nil}, %{}}
+  
+  # Variable: {:var_name, meta, context}
+  def transform({var, _meta, context}) when is_atom(var) and is_atom(context) do
+    {:ok, {:variable, to_string(var)}, %{}}
+  end
+  
+  # Binary operators: {:+, meta, [left, right]}
+  def transform({op, _meta, [left, right]}) when op in [:+, :-, :*, :/] do
+    with {:ok, left_meta, _} <- transform(left),
+         {:ok, right_meta, _} <- transform(right) do
+      {:ok, {:binary_op, :arithmetic, op, left_meta, right_meta}, %{}}
+    end
+  end
+  
+  # Comparison operators
+  def transform({op, _meta, [left, right]}) when op in [:==, :!=, :<, :>, :<=, :>=] do
+    with {:ok, left_meta, _} <- transform(left),
+         {:ok, right_meta, _} <- transform(right) do
+      {:ok, {:binary_op, :comparison, op, left_meta, right_meta}, %{}}
+    end
+  end
+  
+  # Boolean operators
+  def transform({op, _meta, [left, right]}) when op in [:and, :or] do
+    with {:ok, left_meta, _} <- transform(left),
+         {:ok, right_meta, _} <- transform(right) do
+      {:ok, {:binary_op, :boolean, op, left_meta, right_meta}, %{}}
+    end
+  end
+  
+  # Function calls: {function_name, meta, args}
+  def transform({func, _meta, args}) when is_atom(func) and is_list(args) do
+    with {:ok, args_meta} <- transform_list(args) do
+      {:ok, {:function_call, to_string(func), args_meta}, %{}}
+    end
+  end
+  
+  # If/else: {:if, meta, [condition, [do: then_clause, else: else_clause]]}
+  def transform({:if, _meta, [condition, clauses]}) do
+    then_clause = Keyword.get(clauses, :do)
+    else_clause = Keyword.get(clauses, :else)
+    
+    with {:ok, cond_meta, _} <- transform(condition),
+         {:ok, then_meta, _} <- transform(then_clause),
+         {:ok, else_meta, _} <- if(else_clause, do: transform(else_clause), else: {:ok, nil, %{}}) do
+      {:ok, {:conditional, cond_meta, then_meta, else_meta}, %{}}
+    end
+  end
+  
+  defp transform_list(items) do
+    items
+    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
+      case transform(item) do
+        {:ok, meta, _} -> {:cont, {:ok, [meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, items} -> {:ok, Enum.reverse(items)}
+      error -> error
+    end
+  end
+end
+```
+
+### Milestone 2.2: Elixir Adapter - Core Constructs (Weeks 17-18)
+
+**Deliverables:**
+- [ ] Handle all M2.1 (Core) constructs: literals, variables, binary_op, unary_op, function_call, conditional, block, early_return
+- [ ] Handle M2.2 (Extended) constructs: lambda, collection_op (Enum.map/filter/reduce)
+- [ ] 30+ test fixtures covering Elixir patterns
+- [ ] Round-trip accuracy >95%
+
+**Test Fixtures:**
+```
+test/fixtures/elixir/
+├── core/
+│   ├── literals.exs           # Integers, floats, strings, atoms, booleans
+│   ├── variables.exs          # Variable references
+│   ├── arithmetic.exs         # +, -, *, /, rem, div
+│   ├── comparisons.exs        # ==, !=, <, >, <=, >=, ===, !==
+│   ├── boolean_ops.exs        # and, or, not
+│   ├── function_calls.exs     # foo(), bar(1, 2, 3)
+│   ├── conditionals.exs       # if/else, unless, cond, case
+│   └── blocks.exs             # __block__ with multiple statements
+├── extended/
+│   ├── anonymous_fns.exs      # fn x -> x + 1 end
+│   ├── enum_map.exs           # Enum.map(list, fn x -> x * 2 end)
+│   ├── enum_filter.exs        # Enum.filter(list, predicate)
+│   ├── enum_reduce.exs        # Enum.reduce(list, 0, fn x, acc -> ... end)
+│   ├── comprehensions.exs     # for x <- list, do: x * 2
+│   └── pattern_match.exs      # case, with patterns
+└── native/
+    ├── pipe.exs               # |> operator (Elixir-specific)
+    ├── with.exs               # with clauses
+    └── macros.exs             # quote/unquote (language_specific)
+```
+
+### Milestone 2.3: Erlang Adapter (Weeks 19-20)
+
+**Deliverables:**
+- [ ] Erlang AST → MetaAST transformer
+- [ ] MetaAST → Erlang AST transformer  
+- [ ] Parse using `:erl_scan` + `:erl_parse`
+- [ ] Unparse using `:erl_prettypr`
+- [ ] 20+ Erlang test fixtures
+
+**Files to Create:**
+```
+lib/metastatic/adapters/
+├── erlang.ex               # Erlang adapter
+└── erlang/
+    ├── to_meta.ex          # Erlang AST → MetaAST
+    ├── from_meta.ex        # MetaAST → Erlang AST
+    └── erl_helpers.ex      # Erlang interop utilities
+```
+
+**Erlang Adapter:**
+
+```elixir
+# lib/metastatic/adapters/erlang.ex
+defmodule Metastatic.Adapters.Erlang do
+  @behaviour Metastatic.Adapter
+  
+  @impl true
+  def parse(source) when is_binary(source) do
+    # Erlang parsing pipeline:
+    # 1. Tokenize with :erl_scan
+    # 2. Parse with :erl_parse
+    with {:ok, tokens, _} <- :erl_scan.string(String.to_charlist(source)),
+         {:ok, forms} <- :erl_parse.parse_exprs(tokens) do
+      {:ok, forms}
+    else
+      {:error, {_line, _mod, reason}, _} -> {:error, "Parse error: #{inspect(reason)}"}
+      {:error, reason} -> {:error, inspect(reason)}
+    end
+  end
+  
+  @impl true
+  def unparse(erlang_ast) do
+    # Use erl_prettypr for formatting
+    result = 
+      erlang_ast
+      |> :erl_syntax.form_list()
+      |> :erl_prettypr.format()
+      |> to_string()
+    
+    {:ok, result}
+  end
+  
+  @impl true
+  def file_extensions, do: [".erl", ".hrl"]
+end
+```
+
+**Erlang AST Examples:**
+
+```erlang
+% Source: X + 5
+% AST: {:op, Line, :+, {:var, Line, :X}, {:integer, Line, 5}}
+
+% Source: foo(1, 2)
+% AST: {:call, Line, {:atom, Line, :foo}, [{:integer, Line, 1}, {:integer, Line, 2}]}
+
+% Source: case X of 1 -> ok; _ -> error end
+% AST: {:case, Line, {:var, Line, :X}, 
+%       [{:clause, Line, [{:integer, Line, 1}], [], [{:atom, Line, :ok}]},
+%        {:clause, Line, [{:var, Line, :_}], [], [{:atom, Line, :error}]}]}
+```
+
+---
+
+## Phase 3: Python Adapter (Weeks 21-28)
+
+### Milestone 3.1: Python Parser Integration (Weeks 21-23)
+
+**Deliverables:**
+- [ ] Python helper script for AST parsing  
+- [ ] JSON serialization of Python AST
+- [ ] Subprocess-based communication
+- [ ] Elixir wrapper with error handling
+
+**Files to Create:**
+```
+priv/parsers/python/
+├── parser.py               # Python AST → JSON
+├── unparser.py             # JSON → Python source
+└── requirements.txt        # (empty - stdlib only)
+
+lib/metastatic/adapters/
+├── python.ex               # Python adapter
+└── python/
+    ├── to_meta.ex          # Python AST → MetaAST
+    └── from_meta.ex        # MetaAST → Python AST
+```
+
+**Python Parser Script:**
 
 ```python
-# parsers/python/parser.py
+# priv/parsers/python/parser.py
 import ast
 import json
 import sys
 
 def ast_to_dict(node):
-    """Convert Python AST node to JSON-serializable dict."""
+    """Convert Python AST to JSON-serializable dict."""
     if isinstance(node, ast.AST):
-        result = {
-            '_type': node.__class__.__name__
-        }
+        result = {'_type': node.__class__.__name__}
         for field, value in ast.iter_fields(node):
-            if isinstance(value, list):
-                result[field] = [ast_to_dict(x) for x in value]
-            else:
-                result[field] = ast_to_dict(value)
+            result[field] = ast_to_dict(value) if not isinstance(value, list) else [ast_to_dict(x) for x in value]
         return result
-    elif isinstance(node, list):
-        return [ast_to_dict(x) for x in node]
-    else:
-        return node
-
-def parse(source_code):
-    """Parse Python source to AST dict."""
-    try:
-        tree = ast.parse(source_code)
-        return {'ok': True, 'ast': ast_to_dict(tree)}
-    except SyntaxError as e:
-        return {'ok': False, 'error': str(e)}
+    return node if not isinstance(node, list) else [ast_to_dict(x) for x in node]
 
 if __name__ == '__main__':
     source = sys.stdin.read()
-    result = parse(source)
-    print(json.dumps(result))
+    try:
+        tree = ast.parse(source)
+        print(json.dumps({'ok': True, 'ast': ast_to_dict(tree)}))
+    except SyntaxError as e:
+        print(json.dumps({'ok': False, 'error': str(e)}))
 ```
 
-**Elixir Adapter:**
-
-```elixir
-# lib/metastatic/adapters/python.ex
-defmodule Metastatic.Adapters.Python do
-  @behaviour Metastatic.Adapter
-  
-  @impl true
-  def parse(source) do
-    parser_path = Application.app_dir(:metastatic, "priv/parsers/python/parser.py")
-    
-    case System.cmd("python3", [parser_path], input: source, stderr_to_stdout: true) do
-      {output, 0} ->
-        case Jason.decode(output) do
-          {:ok, %{"ok" => true, "ast" => ast}} -> {:ok, ast}
-          {:ok, %{"ok" => false, "error" => error}} -> {:error, error}
-          {:error, _} = err -> err
-        end
-      
-      {error, _exit_code} ->
-        {:error, "Python parser failed: #{error}"}
-    end
-  end
-  
-  @impl true
-  def to_meta(python_ast) do
-    # Transform Python AST to MetaAST
-    # This is the core translation logic
-    {:ok, meta_ast, metadata} = transform_module(python_ast)
-    {:ok, meta_ast, metadata}
-  end
-  
-  # ... implementation continues
-end
-```
-
-### Milestone 2.2: AST Transformation (Weeks 17-20)
+### Milestone 3.2: Python AST Transformation (Weeks 24-26)
 
 **Deliverables:**
-- [ ] Python → MetaAST transformer
-- [ ] MetaAST → Python transformer
-- [ ] Handle all Layer 1 (Core) constructs
-- [ ] Handle common Layer 2 (Extended) constructs
+- [ ] Python AST → MetaAST (M1 → M2)
+- [ ] MetaAST → Python AST (M2 → M1)
+- [ ] Handle M2.1 core constructs
+- [ ] Handle Python-specific patterns (list comprehensions, decorators)
 
-**Transformation Examples:**
+**Key Transformations:**
+- `ast.BinOp` → `{:binary_op, category, op, left, right}`
+- `ast.Name` → `{:variable, name}`
+- `ast.Constant` → `{:literal, type, value}`
+- `ast.ListComp` → `{:collection_op, :map, lambda, collection}` (with optional filter)
+- `ast.For`/`ast.While` → `{:loop, kind, condition, body}`
 
-```elixir
-# Transform Python BinOp to MetaAST binary_op
-defp transform_expr(%{"_type" => "BinOp", "op" => op, "left" => left, "right" => right}) do
-  {:ok, left_meta} = transform_expr(left)
-  {:ok, right_meta} = transform_expr(right)
-  {:ok, op_category, op_atom} = transform_operator(op)
-  
-  {:ok, {:binary_op, op_category, op_atom, left_meta, right_meta}}
-end
-
-# Transform Python list comprehension to MetaAST filter + map
-defp transform_expr(%{"_type" => "ListComp", "elt" => elt, "generators" => [gen | _]}) do
-  # [elt for target in iter if ifs]
-  # Transforms to: pipe(iter, filter(ifs), map(elt))
-  
-  %{"target" => target, "iter" => iter, "ifs" => ifs} = gen
-  
-  {:ok, iter_meta} = transform_expr(iter)
-  {:ok, target_meta} = transform_expr(target)
-  {:ok, elt_meta} = transform_expr(elt)
-  
-  # Build filter if there are conditions
-  filtered = if ifs != [] do
-    {:ok, condition_meta} = transform_conditions(ifs)
-    {:filter, {:lambda, [target_meta], condition_meta}, iter_meta}
-  else
-    iter_meta
-  end
-  
-  # Build map
-  {:ok, {:map, {:lambda, [target_meta], elt_meta}, filtered}}
-end
-```
-
-### Milestone 2.3: Round-Trip Testing (Weeks 21-24)
+### Milestone 3.3: Python Round-Trip Testing (Weeks 27-28)
 
 **Deliverables:**
-- [ ] 50+ Python test fixtures
-- [ ] Round-trip accuracy > 95%
-- [ ] Performance benchmarks
-- [ ] Edge case handling
+- [ ] 40+ Python test fixtures
+- [ ] Round-trip accuracy >90% (Python's AST lossy for formatting)
+- [ ] Cross-language validation: same MetaAST from semantically equivalent Elixir/Erlang/Python
 
-**Test Cases:**
-- Simple arithmetic
-- Comparisons and booleans
-- List comprehensions
-- Function definitions
+**Test Coverage:**
+- Arithmetic, comparisons, boolean logic
+- List/dict comprehensions
+- Function definitions (def, lambda)
 - Conditionals (if/elif/else)
-- Loops (for, while)
-- Try/except
-- Lambda functions
-- Async/await (Layer 2/3)
+- Loops (for, while, break, continue)
+- Exception handling (try/except/finally)
+- Decorators (as `language_specific`)
 
 ---
 
-## Phase 3: Cross-Language Tools (Months 4-6)
+## Phase 4: Cross-Language Tools (Months 4-6)
 
-### Milestone 3.1: Mutation Engine (Weeks 25-28)
+### Milestone 4.1: Mutation Engine (Weeks 29-32)
 
 **Deliverables:**
 - [ ] Core mutators (arithmetic, comparison, boolean)
