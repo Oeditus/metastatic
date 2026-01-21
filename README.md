@@ -140,12 +140,41 @@ AST.variables(ast)  # => MapSet.new(["x"])
 AST.conforms?(ast)  # => true
 ```
 
+### Supplemental Modules
+
+Supplemental modules extend MetaAST with library-specific integrations, enabling cross-language transformations:
+
+```elixir
+alias Metastatic.Supplemental.Transformer
+
+# Transform actor patterns to Python Pykka library calls
+ast = {:actor_call, {:variable, "worker"}, "process", [data]}
+{:ok, python_ast} = Transformer.transform(ast, :python)
+# Result: {:function_call, "worker.ask", [{:literal, :string, "process"}, data]}
+
+# Check what supplementals are available for a language
+Transformer.supported_constructs(:python)
+# => [:actor_call, :actor_cast, :spawn_actor, :async_await, :async_context, :gather]
+
+# Validate what supplementals a document needs
+alias Metastatic.Supplemental.Validator
+{:ok, analysis} = Validator.validate(doc)
+analysis.required_supplementals  # => [:pykka, :asyncio]
+```
+
+**Available supplementals:**
+- **Python.Pykka** - Actor model support (`:actor_call`, `:actor_cast`, `:spawn_actor`)
+- **Python.Asyncio** - Async/await patterns (`:async_await`, `:async_context`, `:gather`)
+
+See **[SUPPLEMENTAL_MODULES.md](SUPPLEMENTAL_MODULES.md)** for comprehensive guide on using and creating supplementals.
+
 ## Documentation
 
 - **[RESEARCH.md](RESEARCH.md)** - Comprehensive research analysis and architectural decisions
 - **[THEORETICAL_FOUNDATIONS.md](THEORETICAL_FOUNDATIONS.md)** - Formal meta-modeling theory and proofs
 - **[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)** - Detailed 14-month implementation roadmap
 - **[GETTING_STARTED.md](GETTING_STARTED.md)** - Developer onboarding guide
+- **[SUPPLEMENTAL_MODULES.md](SUPPLEMENTAL_MODULES.md)** - Guide to using and creating supplemental modules
 - **API Documentation** - Generate with `mix docs`
 
 ## Architecture

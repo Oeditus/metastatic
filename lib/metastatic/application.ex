@@ -9,7 +9,9 @@ defmodule Metastatic.Application do
   def start(_type, _args) do
     children = [
       # Adapter registry for managing language adapters
-      Metastatic.Adapter.Registry
+      Metastatic.Adapter.Registry,
+      # Supplemental module registry
+      Metastatic.Supplemental.Registry
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
