@@ -22,7 +22,7 @@ Build tools once, apply them everywhere. Create a universal meta-model for progr
 
 **What Metastatic Provides:**
 - MetaAST meta-model (M2 level) with three layers
-- Language adapters (Elixir, Erlang, Python, …)
+- Language adapters (Python, Elixir, Erlang, Ruby, Haskell)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
 
