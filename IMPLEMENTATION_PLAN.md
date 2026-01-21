@@ -376,9 +376,9 @@ end
 ### Milestone 1.2: Adapter Behaviour (Weeks 5-6)
 
 **Deliverables:**
-- [ ] Define MetaAST.Adapter behaviour (M1 ↔ M2 transformations)
-- [ ] Create adapter registry with conformance validation
-- [ ] Implement M1 → M2 → M1 round-trip testing framework
+- [x] Define MetaAST.Adapter behaviour (M1 ↔ M2 transformations)
+- [x] Create adapter registry with conformance validation
+- [x] Implement M1 → M2 → M1 round-trip testing framework
 
 **Meta-Modeling Perspective:**
 
@@ -514,9 +514,9 @@ end
 ### Milestone 1.3: Builder & Document (Weeks 7-8)
 
 **Deliverables:**
-- [ ] Implement MetaAST.Builder
-- [ ] Implement MetaAST.Document
-- [ ] Round-trip testing framework
+- [x] Implement MetaAST.Builder
+- [x] Implement MetaAST.Document
+- [x] Round-trip testing framework
 
 **Files to Create:**
 ```
@@ -585,10 +585,10 @@ end
 ### Milestone 1.4: Test Infrastructure (Weeks 9-12)
 
 **Deliverables:**
-- [ ] Test fixture framework
-- [ ] Round-trip test generator
-- [ ] Benchmark suite
-- [ ] CI/CD setup
+- [x] Test fixture framework
+- [x] Round-trip test generator
+- [x] Benchmark suite
+- [x] CI/CD setup
 
 **Test Structure:**
 ```
@@ -663,10 +663,7 @@ defmodule Metastatic.Adapters.Elixir do
   
   ## Elixir AST Structure
   
-  Elixir represents AST as three-element tuples:
-  ```elixir
-  {form, metadata, arguments}
-  ```
+  Elixir represents AST as three-element tuples: `{form, metadata, arguments}`
   
   Examples:
   - Variable: `{:x, [], nil}`
