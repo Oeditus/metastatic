@@ -1,0 +1,8 @@
+? /opt/Proyectos/Oeditus/metastatic/priv/parsers/haskell/.stack-work/dist/x86_64-linux-tinfo6/ghc-9.14.1/build/parser/autogen/Paths_metastatic_haskell_parser.hs
+: hash: 2fa8ed974e9b92d878c85d6b443014b2506ae9019c29e248fbccd0f9240ab1fc
+/opt/Proyectos/Oeditus/metastatic/priv/parsers/haskell/Parser.hs:
+  hash: 2a0b93805b0ba78236f49152c2e37ac5a8a9a47e160678f82cc81359099c2165
+/opt/Proyectos/Oeditus/metastatic/priv/parsers/haskell/metastatic-haskell-parser.cabal:
+  hash: 726a91744608b5cc23df04b69d23cd0a3ed88144251342f07a1885775e45358c
+/opt/Proyectos/Oeditus/metastatic/priv/parsers/haskell/package.yaml:
+  hash: af23990775a8f944b4754c0ff9a866c5b9b2e22b16b58f1799eac646d658ecb7

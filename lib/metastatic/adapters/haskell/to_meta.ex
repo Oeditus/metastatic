@@ -290,12 +290,66 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp transform_pattern(_), do: {:error, "Unsupported pattern"}
 
   defp transform_qualifiers(quals) when is_list(quals) do
-    transform_list(quals)
+    quals
+    |> Enum.reduce_while({:ok, []}, fn qual, {:ok, acc} ->
+      case transform_qualifier(qual) do
+        {:ok, meta} -> {:cont, {:ok, [meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, quals_list} -> {:ok, Enum.reverse(quals_list)}
+      error -> error
+    end
   end
 
-  defp transform_do_statements(stmts) when is_list(stmts) do
-    transform_list(stmts)
+  defp transform_qualifier(%{"type" => "generator", "pattern" => pat, "expression" => expr}) do
+    with {:ok, pat_meta} <- transform_pattern(pat),
+         {:ok, expr_meta, _} <- transform(expr) do
+      {:ok, {:generator, pat_meta, expr_meta}}
+    end
   end
+
+  defp transform_qualifier(%{"type" => "qualifier", "expression" => expr}) do
+    with {:ok, expr_meta, _} <- transform(expr) do
+      {:ok, {:qualifier, expr_meta}}
+    end
+  end
+
+  defp transform_qualifier(other), do: {:error, "Unsupported qualifier: #{inspect(other)}"}
+
+  defp transform_do_statements(stmts) when is_list(stmts) do
+    stmts
+    |> Enum.reduce_while({:ok, []}, fn stmt, {:ok, acc} ->
+      case transform_statement(stmt) do
+        {:ok, meta} -> {:cont, {:ok, [meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, stmts_list} -> {:ok, Enum.reverse(stmts_list)}
+      error -> error
+    end
+  end
+
+  defp transform_statement(%{"type" => "generator", "pattern" => pat, "expression" => expr}) do
+    with {:ok, pat_meta} <- transform_pattern(pat),
+         {:ok, expr_meta, _} <- transform(expr) do
+      {:ok, {:generator, pat_meta, expr_meta}}
+    end
+  end
+
+  defp transform_statement(%{"type" => "qualifier", "expression" => expr}) do
+    with {:ok, expr_meta, _} <- transform(expr) do
+      {:ok, expr_meta}
+    end
+  end
+
+  defp transform_statement(%{"type" => "let_stmt", "bindings" => bindings}) do
+    transform_bindings(bindings)
+  end
+
+  defp transform_statement(other), do: {:error, "Unsupported statement: #{inspect(other)}"}
 
   defp format_function({:variable, name}), do: name
   defp format_function(_), do: "func"
