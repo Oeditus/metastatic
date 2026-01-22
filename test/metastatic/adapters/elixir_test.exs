@@ -189,7 +189,7 @@ defmodule Metastatic.Adapters.ElixirTest do
          [[1, 2, 3], {:fn, [], [{:->, [], [[{:x, [], nil}], {:x, [], nil}]}]}]}
 
       assert {:ok, {:collection_op, :map, fun, collection}, %{}} = ToMeta.transform(ast)
-      assert {:lambda, _, _} = fun
+      assert {:lambda, _, _, _} = fun
       assert {:literal, :collection, _} = collection
     end
 
@@ -199,7 +199,7 @@ defmodule Metastatic.Adapters.ElixirTest do
          [[1, 2, 3], {:fn, [], [{:->, [], [[{:x, [], nil}], true]}]}]}
 
       assert {:ok, {:collection_op, :filter, fun, _collection}, %{}} = ToMeta.transform(ast)
-      assert {:lambda, _, _} = fun
+      assert {:lambda, _, _, _} = fun
     end
 
     test "transforms Enum.reduce to collection_op" do
@@ -218,7 +218,7 @@ defmodule Metastatic.Adapters.ElixirTest do
       assert {:ok, {:collection_op, :reduce, fun, _collection, initial}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:lambda, _, _} = fun
+      assert {:lambda, _, _, _} = fun
       assert {:literal, :integer, 0} = initial
     end
   end
@@ -317,8 +317,9 @@ defmodule Metastatic.Adapters.ElixirTest do
   describe "ToMeta - anonymous functions" do
     test "transforms simple anonymous function" do
       ast = {:fn, [], [{:->, [], [[{:x, [], nil}], {:+, [], [{:x, [], nil}, 1]}]}]}
-      assert {:ok, {:lambda, params, _body}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:lambda, params, captures, _body}, %{}} = ToMeta.transform(ast)
       assert [{:param, "x", nil, nil}] = params
+      assert [] = captures
     end
   end
 
@@ -331,7 +332,7 @@ defmodule Metastatic.Adapters.ElixirTest do
       assert {:ok, {:collection_op, :map, lambda, collection}, %{original_form: :comprehension}} =
                ToMeta.transform(ast)
 
-      assert {:lambda, [{:param, "x", nil, nil}], _body} = lambda
+      assert {:lambda, [{:param, "x", nil, nil}], _captures, _body} = lambda
       assert {:literal, :collection, _} = collection
     end
   end

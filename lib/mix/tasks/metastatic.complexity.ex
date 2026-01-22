@@ -45,6 +45,8 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
   @impl Mix.Task
   def run(args) do
+    Mix.Task.run("app.start")
+
     {opts, files, _invalid} =
       OptionParser.parse(args,
         strict: [

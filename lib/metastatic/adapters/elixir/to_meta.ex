@@ -595,9 +595,29 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp transform_fn_clauses(clauses) do
     clauses
     |> Enum.reduce_while({:ok, []}, fn {:->, _, [params, body]}, {:ok, acc} ->
-      with {:ok, params_meta} <- transform_fn_params(params),
+      # Extract guard if present
+      {params_list, guard} = extract_guard_from_params(params)
+
+      with {:ok, params_meta} <- transform_fn_params(params_list),
+           {:ok, guard_meta} <- transform_guard(guard),
            {:ok, body_meta, _} <- transform(body) do
-        lambda = {:lambda, params_meta, body_meta}
+        # Create lambda - use match_arm if guard present
+        lambda =
+          if guard_meta do
+            # Lambda clause with guard
+            # Pattern is just the params as a tuple or single param
+            pattern =
+              case params_meta do
+                [single] -> single
+                multiple -> {:tuple, multiple}
+              end
+
+            {:match_arm, pattern, guard_meta, body_meta}
+          else
+            # Simple lambda without guard - use 3-tuple with empty captures
+            {:lambda, params_meta, [], body_meta}
+          end
+
         {:cont, {:ok, [lambda | acc]}}
       else
         error -> {:halt, error}
@@ -609,6 +629,31 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
+  defp extract_guard_from_params(params) do
+    # Check if any parameter has a guard (when clause)
+    # In Elixir AST: fn x when is_integer(x) -> ... end
+    # params is [{:when, _, [param, guard_expr]}] or just [param1, param2, ...]
+    case params do
+      [{:when, _, [params_part, guard_expr]}] ->
+        # Guard present - params_part might be a single var or a list
+        params_list = if is_list(params_part), do: params_part, else: [params_part]
+        {params_list, guard_expr}
+
+      _ ->
+        # No guard
+        {params, nil}
+    end
+  end
+
+  defp transform_guard(nil), do: {:ok, nil}
+
+  defp transform_guard(guard_expr) do
+    case transform(guard_expr) do
+      {:ok, guard_meta, _} -> {:ok, guard_meta}
+      error -> error
+    end
+  end
+
   defp transform_fn_params(params) do
     params
     |> Enum.reduce_while({:ok, []}, fn param, {:ok, acc} ->
@@ -616,6 +661,11 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         # Simple variable: x, acc, etc.
         {name, _, context} when is_atom(name) and is_atom(context) ->
           {:cont, {:ok, [{:param, Atom.to_string(name), nil, nil} | acc]}}
+
+        # Map pattern: %{key: value}, %{"key" => value}, etc.
+        {:%{}, _, _fields} = map_pattern ->
+          # Map patterns in params - preserve as pattern metadata
+          {:cont, {:ok, [{:param, "_map_pattern", nil, %{pattern: map_pattern}} | acc]}}
 
         # Tuple pattern: {x, y}, {fun, arity}, etc.
         {:{}, _, _elements} = tuple_pattern ->
@@ -653,7 +703,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
              {:ok, collection_meta, _} <- transform(collection),
              {:ok, body_meta, _} <- transform(body) do
           # Build lambda for the body
-          lambda = {:lambda, [{:param, var_name, nil, nil}], body_meta}
+          lambda = {:lambda, [{:param, var_name, nil, nil}], [], body_meta}
           {:ok, {:collection_op, :map, lambda, collection_meta}, %{original_form: :comprehension}}
         end
 
