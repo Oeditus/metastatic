@@ -123,7 +123,17 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
   defp walk({:pattern_match, value, branches}, count) do
     count = count + length(branches)
     count = walk(value, count)
-    Enum.reduce(branches, count, fn {_pattern, branch}, c -> walk(branch, c) end)
+
+    Enum.reduce(branches, count, fn
+      {:match_arm, _pattern, _guard, body}, c -> walk(body, c)
+      {_pattern, branch}, c -> walk(branch, c)
+    end)
+  end
+
+  # Match arm (used in pattern matching and guarded functions)
+  defp walk({:match_arm, _pattern, guard, body}, count) do
+    count = if guard, do: walk(guard, count), else: count
+    walk(body, count)
   end
 
   # Block: walk statements
@@ -186,9 +196,17 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
     walk(body, count)
   end
 
-  # Language-specific: don't count (opaque to M2)
-  defp walk({:language_specific, _, _}, count), do: count
+  # Language-specific: traverse embedded body if present
+  defp walk({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
+    # If there's a body in metadata (e.g., module/function definitions), traverse it
+    case Map.get(metadata, :body) do
+      nil -> count
+      body -> walk(body, count)
+    end
+  end
+
   defp walk({:language_specific, _, _, _}, count), do: count
+  defp walk({:language_specific, _, _}, count), do: count
 
   # Literals and variables: no decision points
   defp walk({:literal, _, _}, count), do: count

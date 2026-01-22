@@ -237,10 +237,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   def transform({:defmodule, meta, [name, [do: body]]}) do
     with {:ok, body_meta, _} <- transform(body) do
       module_name = module_to_string(name)
+      metadata = %{module_name: module_name, body: body_meta}
 
+      # Store metadata as 5th element to preserve it through the pipeline
       {:ok,
-       {:language_specific, :elixir, {:defmodule, meta, [name, [do: body]]}, :module_definition},
-       %{module_name: module_name, body: body_meta}}
+       {:language_specific, :elixir, {:defmodule, meta, [name, [do: body]]}, :module_definition,
+        metadata}, metadata}
     end
   end
 
@@ -249,11 +251,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       when func_type in [:def, :defp, :defmacro, :defmacrop] do
     with {:ok, body_meta, _} <- transform(body) do
       func_name = extract_function_name(signature)
+      metadata = %{function_name: func_name, function_type: func_type, body: body_meta}
 
+      # Store metadata as 5th element to preserve it through the pipeline
       {:ok,
        {:language_specific, :elixir, {func_type, meta, [signature, [do: body]]},
-        :function_definition},
-       %{function_name: func_name, function_type: func_type, body: body_meta}}
+        :function_definition, metadata}, metadata}
     end
   end
 

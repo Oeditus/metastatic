@@ -85,6 +85,13 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
     case Builder.from_source(source, lang) do
       {:ok, document} ->
+        # Check if this is a module-level analysis
+        if is_module_file?(document) do
+          Mix.shell().info(
+            "Note: Analyzing module structure. For per-function complexity, analyze individual functions.\n"
+          )
+        end
+
         case Complexity.analyze(document, thresholds: thresholds) do
           {:ok, result} ->
             output = Formatter.format(result, format)
@@ -178,4 +185,7 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
     thresholds
   end
+
+  defp is_module_file?(%{ast: {:language_specific, _, _, :module_definition}}), do: true
+  defp is_module_file?(_), do: false
 end

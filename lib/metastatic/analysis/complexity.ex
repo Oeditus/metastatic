@@ -89,18 +89,22 @@ defmodule Metastatic.Analysis.Complexity do
       0
   """
   @spec analyze(Document.t(), keyword()) :: {:ok, Result.t()}
-  def analyze(%Document{ast: ast} = doc, opts \\ []) do
+  def analyze(%Document{ast: ast, metadata: metadata} = doc, opts \\ []) do
     thresholds = Keyword.get(opts, :thresholds, %{})
     metrics = Keyword.get(opts, :metrics, :all)
 
+    # If the top-level AST is a language-specific module/function definition,
+    # extract the body from metadata for analysis
+    analysis_ast = extract_analyzable_ast(ast, metadata)
+
     result =
       %{}
-      |> calculate_cyclomatic(ast, metrics)
-      |> calculate_cognitive(ast, metrics)
-      |> calculate_nesting(ast, metrics)
-      |> calculate_halstead(ast, metrics)
-      |> calculate_loc(ast, doc, metrics)
-      |> calculate_function_metrics(ast, metrics)
+      |> calculate_cyclomatic(analysis_ast, metrics)
+      |> calculate_cognitive(analysis_ast, metrics)
+      |> calculate_nesting(analysis_ast, metrics)
+      |> calculate_halstead(analysis_ast, metrics)
+      |> calculate_loc(analysis_ast, doc, metrics)
+      |> calculate_function_metrics(analysis_ast, metrics)
       |> Result.new()
       |> Result.apply_thresholds(thresholds)
 
@@ -174,4 +178,21 @@ defmodule Metastatic.Analysis.Complexity do
       Map.put(metrics, :function_metrics, %{})
     end
   end
+
+  # Extract the actual code body from language-specific wrappers
+  # For module definitions, extract the module body from metadata
+  #
+  # NOTE: This currently extracts the top-level module body, which contains
+  # language_specific function definition nodes. The bodies of individual
+  # functions are lost during transformation (stored in transform/1 return
+  # metadata but not preserved in the final Document).
+  #
+  # For accurate per-function complexity analysis, analyze individual functions
+  # directly rather than entire modules.
+  defp extract_analyzable_ast({:language_specific, _lang, _native, hint}, metadata)
+       when hint in [:module_definition, :function_definition] do
+    Map.get(metadata, :body, {:block, []})
+  end
+
+  defp extract_analyzable_ast(ast, _metadata), do: ast
 end

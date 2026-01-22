@@ -101,9 +101,15 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
   defp walk_statements({:pattern_match, _, branches}, count) do
     count = count + 1
 
-    Enum.reduce(branches, count, fn {_, branch}, c ->
-      walk_statements(branch, c)
+    Enum.reduce(branches, count, fn
+      {:match_arm, _pattern, _guard, body}, c -> walk_statements(body, c)
+      {_, branch}, c -> walk_statements(branch, c)
     end)
+  end
+
+  defp walk_statements({:match_arm, _pattern, guard, body}, count) do
+    count = if guard, do: walk_statements(guard, count), else: count
+    walk_statements(body, count)
   end
 
   defp walk_statements({:lambda, _, body}, count) do
@@ -120,8 +126,18 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     walk_statements(body, count)
   end
 
-  defp walk_statements({:language_specific, _, _}, count), do: count + 1
+  # Language-specific: traverse embedded body if present
+  defp walk_statements({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
+    count = count + 1
+
+    case Map.get(metadata, :body) do
+      nil -> count
+      body -> walk_statements(body, count)
+    end
+  end
+
   defp walk_statements({:language_specific, _, _, _}, count), do: count + 1
+  defp walk_statements({:language_specific, _, _}, count), do: count + 1
   defp walk_statements(nil, count), do: count
   defp walk_statements(_, count), do: count
 
@@ -151,9 +167,15 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
   end
 
   defp walk_returns({:pattern_match, _, branches}, count) do
-    Enum.reduce(branches, count, fn {_, branch}, c ->
-      walk_returns(branch, c)
+    Enum.reduce(branches, count, fn
+      {:match_arm, _pattern, _guard, body}, c -> walk_returns(body, c)
+      {_, branch}, c -> walk_returns(branch, c)
     end)
+  end
+
+  defp walk_returns({:match_arm, _pattern, guard, body}, count) do
+    count = if guard, do: walk_returns(guard, count), else: count
+    walk_returns(body, count)
   end
 
   defp walk_returns({:lambda, _, body}, count), do: walk_returns(body, count)
@@ -163,6 +185,17 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
   end
 
   defp walk_returns({:async_operation, _, body}, count), do: walk_returns(body, count)
+
+  # Language-specific: traverse embedded body if present
+  defp walk_returns({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
+    case Map.get(metadata, :body) do
+      nil -> count
+      body -> walk_returns(body, count)
+    end
+  end
+
+  defp walk_returns({:language_specific, _, _, _}, count), do: count
+  defp walk_returns({:language_specific, _, _}, count), do: count
   defp walk_returns(nil, count), do: count
   defp walk_returns(_, count), do: count
 end

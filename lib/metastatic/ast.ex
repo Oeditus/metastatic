@@ -532,6 +532,12 @@ defmodule Metastatic.AST do
         conforms?(operation)
 
       # M2.3: Native
+      # 5-tuple with embedded metadata (preferred format)
+      {:language_specific, language, _native_info, hint, metadata}
+      when is_atom(language) and is_atom(hint) and is_map(metadata) ->
+        true
+
+      # 4-tuple without embedded metadata
       {:language_specific, language, _native_info, hint}
       when is_atom(language) and is_atom(hint) ->
         true
