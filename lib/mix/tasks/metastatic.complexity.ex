@@ -87,9 +87,7 @@ defmodule Mix.Tasks.Metastatic.Complexity do
       {:ok, document} ->
         # Check if this is a module-level analysis
         if is_module_file?(document) do
-          Mix.shell().info(
-            "Note: Analyzing module structure. For per-function complexity, analyze individual functions.\n"
-          )
+          Mix.shell().info("Note: Analyzing entire module (includes all nested functions).\n")
         end
 
         case Complexity.analyze(document, thresholds: thresholds) do
