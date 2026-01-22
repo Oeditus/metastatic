@@ -37,6 +37,7 @@ defmodule Metastatic.Analysis.Complexity.Result do
             halstead: %{},
             loc: %{},
             function_metrics: %{},
+            per_function: [],
             warnings: [],
             summary: ""
 
@@ -66,6 +67,15 @@ defmodule Metastatic.Analysis.Complexity.Result do
           parameter_count: non_neg_integer()
         }
 
+  @type per_function_metrics :: %{
+          name: String.t(),
+          cyclomatic: non_neg_integer(),
+          cognitive: non_neg_integer(),
+          max_nesting: non_neg_integer(),
+          statements: non_neg_integer(),
+          variables: non_neg_integer()
+        }
+
   @type t :: %__MODULE__{
           cyclomatic: non_neg_integer(),
           cognitive: non_neg_integer(),
@@ -73,6 +83,7 @@ defmodule Metastatic.Analysis.Complexity.Result do
           halstead: halstead_metrics(),
           loc: loc_metrics(),
           function_metrics: function_metrics(),
+          per_function: [per_function_metrics()],
           warnings: [String.t()],
           summary: String.t()
         }
@@ -110,6 +121,7 @@ defmodule Metastatic.Analysis.Complexity.Result do
       halstead: Map.get(metrics, :halstead, %{}),
       loc: Map.get(metrics, :loc, %{}),
       function_metrics: Map.get(metrics, :function_metrics, %{}),
+      per_function: Map.get(metrics, :per_function, []),
       warnings: Map.get(metrics, :warnings, []),
       summary: generate_summary(metrics)
     }

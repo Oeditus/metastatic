@@ -41,6 +41,8 @@ defmodule Metastatic.Analysis.Complexity.Formatter do
   # Private implementation
 
   defp format_text(result) do
+    per_function_section = format_per_function(result.per_function)
+
     """
     Complexity Analysis Results:
 
@@ -61,10 +63,23 @@ defmodule Metastatic.Analysis.Complexity.Formatter do
       Statements: #{result.function_metrics[:statement_count] || 0}
       Return Points: #{result.function_metrics[:return_points] || 0}
       Variables: #{result.function_metrics[:variable_count] || 0}
-
+    #{per_function_section}
     Summary: #{result.summary}
     """
     |> String.trim()
+  end
+
+  defp format_per_function([]), do: ""
+
+  defp format_per_function(functions) do
+    formatted =
+      functions
+      |> Enum.map(fn func ->
+        "    #{func.name}: CC=#{func.cyclomatic}, Cog=#{func.cognitive}, Nest=#{func.max_nesting}, Stmts=#{func.statements}, Vars=#{func.variables}"
+      end)
+      |> Enum.join("\n")
+
+    "\n  Per-Function Breakdown:\n" <> formatted <> "\n"
   end
 
   defp format_json(result) do
@@ -75,6 +90,7 @@ defmodule Metastatic.Analysis.Complexity.Formatter do
       halstead: result.halstead,
       loc: result.loc,
       function_metrics: result.function_metrics,
+      per_function: result.per_function,
       warnings: result.warnings,
       summary: result.summary
     }

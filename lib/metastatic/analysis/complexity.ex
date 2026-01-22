@@ -97,6 +97,9 @@ defmodule Metastatic.Analysis.Complexity do
     # extract the body from metadata for analysis
     analysis_ast = extract_analyzable_ast(ast, metadata)
 
+    # Extract per-function metrics if analyzing a module
+    per_function = extract_per_function_metrics(ast, metadata)
+
     result =
       %{}
       |> calculate_cyclomatic(analysis_ast, metrics)
@@ -105,6 +108,7 @@ defmodule Metastatic.Analysis.Complexity do
       |> calculate_halstead(analysis_ast, metrics)
       |> calculate_loc(analysis_ast, doc, metrics)
       |> calculate_function_metrics(analysis_ast, metrics)
+      |> Map.put(:per_function, per_function)
       |> Result.new()
       |> Result.apply_thresholds(thresholds)
 
@@ -195,4 +199,55 @@ defmodule Metastatic.Analysis.Complexity do
   end
 
   defp extract_analyzable_ast(ast, _metadata), do: ast
+
+  # Extract per-function complexity metrics from a module
+  defp extract_per_function_metrics({:language_specific, _, _, hint, metadata}, doc_metadata)
+       when hint == :module_definition and is_map(metadata) do
+    body = Map.get(metadata, :body) || Map.get(doc_metadata, :body)
+    extract_functions_from_body(body)
+  end
+
+  defp extract_per_function_metrics({:language_specific, _, _, hint}, metadata)
+       when hint == :module_definition do
+    body = Map.get(metadata, :body)
+    extract_functions_from_body(body)
+  end
+
+  defp extract_per_function_metrics(_, _), do: []
+
+  defp extract_functions_from_body({:block, statements}) when is_list(statements) do
+    statements
+    |> Enum.filter(fn
+      {:language_specific, _, _, :function_definition, _} -> true
+      {:language_specific, _, _, :function_definition} -> true
+      _ -> false
+    end)
+    |> Enum.map(&analyze_function/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp extract_functions_from_body(_), do: []
+
+  defp analyze_function({:language_specific, _, _, :function_definition, metadata})
+       when is_map(metadata) do
+    function_name = Map.get(metadata, :function_name, "unknown")
+    body = Map.get(metadata, :body)
+
+    if body do
+      variables = Metastatic.AST.variables(body)
+
+      %{
+        name: function_name,
+        cyclomatic: Cyclomatic.calculate(body),
+        cognitive: Cognitive.calculate(body),
+        max_nesting: Nesting.calculate(body),
+        statements: FunctionMetrics.calculate(body).statement_count,
+        variables: MapSet.size(variables)
+      }
+    else
+      nil
+    end
+  end
+
+  defp analyze_function(_), do: nil
 end

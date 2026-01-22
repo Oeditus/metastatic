@@ -640,9 +640,15 @@ defmodule Metastatic.AST do
   defp collect_variables({:pattern_match, scrutinee, arms}, acc) do
     acc = collect_variables(scrutinee, acc)
 
-    Enum.reduce(arms, acc, fn {pattern, body}, a ->
-      a = collect_variables(pattern, a)
-      collect_variables(body, a)
+    Enum.reduce(arms, acc, fn
+      {:match_arm, pattern, guard, body}, a ->
+        a = collect_variables(pattern, a)
+        a = if guard, do: collect_variables(guard, a), else: a
+        collect_variables(body, a)
+
+      {pattern, body}, a ->
+        a = collect_variables(pattern, a)
+        collect_variables(body, a)
     end)
   end
 
@@ -664,6 +670,24 @@ defmodule Metastatic.AST do
 
   defp collect_variables({:early_return, value}, acc) do
     collect_variables(value, acc)
+  end
+
+  # Language-specific: traverse embedded body if present
+  defp collect_variables({:language_specific, _, _, _, metadata}, acc) when is_map(metadata) do
+    case Map.get(metadata, :body) do
+      nil -> acc
+      body -> collect_variables(body, acc)
+    end
+  end
+
+  defp collect_variables({:language_specific, _, _, _}, acc), do: acc
+  defp collect_variables({:language_specific, _, _}, acc), do: acc
+
+  # Match arms with guards
+  defp collect_variables({:match_arm, pattern, guard, body}, acc) do
+    acc = collect_variables(pattern, acc)
+    acc = if guard, do: collect_variables(guard, acc), else: acc
+    collect_variables(body, acc)
   end
 
   defp collect_variables(_, acc), do: acc

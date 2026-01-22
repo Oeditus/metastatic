@@ -145,10 +145,22 @@ defmodule Metastatic.Analysis.Complexity.LoC do
     count = count + 1
     count = walk_expr(value, count)
 
-    Enum.reduce(branches, count, fn {pattern, branch}, c ->
-      c = walk_expr(pattern, c)
-      walk(branch, c)
+    Enum.reduce(branches, count, fn
+      {:match_arm, pattern, guard, body}, c ->
+        c = walk_expr(pattern, c)
+        c = if guard, do: walk_expr(guard, c), else: c
+        walk(body, c)
+
+      {pattern, branch}, c ->
+        c = walk_expr(pattern, c)
+        walk(branch, c)
     end)
+  end
+
+  defp walk({:match_arm, pattern, guard, body}, count) do
+    count = walk_expr(pattern, count)
+    count = if guard, do: walk_expr(guard, count), else: count
+    walk(body, count)
   end
 
   defp walk({:lambda, _params, body}, count) do
@@ -177,8 +189,18 @@ defmodule Metastatic.Analysis.Complexity.LoC do
     walk(body, count)
   end
 
-  defp walk({:language_specific, _, _}, count), do: count + 1
+  # Language-specific: traverse embedded body if present
+  defp walk({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
+    count = count + 1
+
+    case Map.get(metadata, :body) do
+      nil -> count
+      body -> walk(body, count)
+    end
+  end
+
   defp walk({:language_specific, _, _, _}, count), do: count + 1
+  defp walk({:language_specific, _, _}, count), do: count + 1
 
   # Expressions don't count
   defp walk(expr, count), do: walk_expr(expr, count)
