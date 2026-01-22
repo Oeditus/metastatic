@@ -119,11 +119,21 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {_, max} = walk(value, current, max)
 
     {_, max} =
-      Enum.reduce(branches, {current, max}, fn {_pattern, branch}, {_c, m} ->
-        walk(branch, current + 1, m)
+      Enum.reduce(branches, {current, max}, fn
+        {:match_arm, _pattern, _guard, body}, {_c, m} ->
+          walk(body, current + 1, m)
+
+        {_pattern, branch}, {_c, m} ->
+          walk(branch, current + 1, m)
       end)
 
     {current, max}
+  end
+
+  # Match arm: increment depth for body
+  defp walk({:match_arm, _pattern, guard, body}, current, max) do
+    {_, max} = if guard, do: walk(guard, current, max), else: {current, max}
+    walk(body, current + 1, max)
   end
 
   # Block: walk statements at same depth
@@ -212,9 +222,16 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     walk(body, current, max)
   end
 
-  # Language-specific: don't affect depth
-  defp walk({:language_specific, _, _}, current, max), do: {current, max}
+  # Language-specific: traverse embedded body if present
+  defp walk({:language_specific, _, _, _, metadata}, current, max) when is_map(metadata) do
+    case Map.get(metadata, :body) do
+      nil -> {current, max}
+      body -> walk(body, current, max)
+    end
+  end
+
   defp walk({:language_specific, _, _, _}, current, max), do: {current, max}
+  defp walk({:language_specific, _, _}, current, max), do: {current, max}
 
   # Literals and variables: update max if current is higher
   defp walk({:literal, _, _}, current, max), do: {current, Enum.max([current, max])}

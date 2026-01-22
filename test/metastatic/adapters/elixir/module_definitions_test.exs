@@ -16,12 +16,13 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
 
       {:ok, ast} = ElixirAdapter.parse(source)
 
-      assert {:ok, {:language_specific, :elixir, _native_ast, :module_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok,
+              {:language_specific, :elixir, _native_ast, :module_definition, _embedded_metadata},
+              metadata} = ToMeta.transform(ast)
 
       assert metadata.module_name == "MyModule"
       # Body is a single function definition (not wrapped in block for single statements)
-      assert {:language_specific, :elixir, _native, :function_definition} = metadata.body
+      assert {:language_specific, :elixir, _native, :function_definition, _} = metadata.body
     end
 
     test "transforms defmodule with moduledoc and function" do
@@ -37,8 +38,9 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
 
       {:ok, ast} = ElixirAdapter.parse(source)
 
-      assert {:ok, {:language_specific, :elixir, _native_ast, :module_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok,
+              {:language_specific, :elixir, _native_ast, :module_definition, _embedded_metadata},
+              metadata} = ToMeta.transform(ast)
 
       assert metadata.module_name == "TestModule"
       assert {:block, _statements} = metadata.body
@@ -53,8 +55,9 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
 
       {:ok, ast} = ElixirAdapter.parse(source)
 
-      assert {:ok, {:language_specific, :elixir, _native_ast, :module_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok,
+              {:language_specific, :elixir, _native_ast, :module_definition, _embedded_metadata},
+              metadata} = ToMeta.transform(ast)
 
       assert metadata.module_name == "Outer.Inner"
     end
@@ -64,8 +67,9 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
     test "transforms def with do-end block" do
       ast = {:def, [line: 1], [{:hello, [line: 1], nil}, [do: :world]]}
 
-      assert {:ok, {:language_specific, :elixir, _native_ast, :function_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok,
+              {:language_specific, :elixir, _native_ast, :function_definition,
+               _embedded_metadata}, metadata} = ToMeta.transform(ast)
 
       assert metadata.function_name == "hello"
       assert metadata.function_type == :def
@@ -75,8 +79,9 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
     test "transforms defp (private function)" do
       ast = {:defp, [line: 1], [{:helper, [line: 1], nil}, [do: 42]]}
 
-      assert {:ok, {:language_specific, :elixir, _native_ast, :function_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok,
+              {:language_specific, :elixir, _native_ast, :function_definition,
+               _embedded_metadata}, metadata} = ToMeta.transform(ast)
 
       assert metadata.function_name == "helper"
       assert metadata.function_type == :defp
@@ -92,8 +97,9 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
            [do: {:+, [], [{:x, [], nil}, {:y, [], nil}]}]
          ]}
 
-      assert {:ok, {:language_specific, :elixir, _native_ast, :function_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok,
+              {:language_specific, :elixir, _native_ast, :function_definition,
+               _embedded_metadata}, metadata} = ToMeta.transform(ast)
 
       assert metadata.function_name == "add"
       assert {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}} = metadata.body
@@ -118,8 +124,9 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
            ]
          ]}
 
-      assert {:ok, {:language_specific, :elixir, _native_ast, :function_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok,
+              {:language_specific, :elixir, _native_ast, :function_definition,
+               _embedded_metadata}, metadata} = ToMeta.transform(ast)
 
       assert metadata.function_name == "compute"
       assert {:block, [_match, _add]} = metadata.body
@@ -172,7 +179,7 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
       {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
       # Should be able to transform back
-      assert {:language_specific, :elixir, _native, :module_definition} = meta_ast
+      assert {:language_specific, :elixir, _native, :module_definition, _} = meta_ast
       assert metadata.module_name == "Simple"
     end
   end
@@ -203,7 +210,7 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
       {:ok, ast} = ElixirAdapter.parse(source)
       {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      assert {:language_specific, :elixir, _native, :module_definition} = meta_ast
+      assert {:language_specific, :elixir, _native, :module_definition, _} = meta_ast
       assert metadata.module_name == "Metastatic"
 
       # The body should be a block with module attributes and function definition
@@ -224,7 +231,7 @@ defmodule Metastatic.Adapters.Elixir.ModuleDefinitionsTest do
       {:ok, ast} = ElixirAdapter.parse(source)
       {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      assert {:language_specific, :elixir, _native, :module_definition} = meta_ast
+      assert {:language_specific, :elixir, _native, :module_definition, _} = meta_ast
       assert metadata.module_name == "Calculator"
       assert {:block, functions} = metadata.body
       assert [_, _, _] = functions

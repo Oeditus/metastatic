@@ -178,10 +178,22 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
         acc = %{acc | operators: ["case" | acc.operators]}
         acc = walk(value, acc)
 
-        Enum.reduce(branches, acc, fn {pattern, branch}, a ->
-          a = walk(pattern, a)
-          walk(branch, a)
+        Enum.reduce(branches, acc, fn
+          {:match_arm, pattern, guard, body}, a ->
+            a = walk(pattern, a)
+            a = if guard, do: walk(guard, a), else: a
+            walk(body, a)
+
+          {pattern, branch}, a ->
+            a = walk(pattern, a)
+            walk(branch, a)
         end)
+
+      # Match arm
+      {:match_arm, pattern, guard, body} ->
+        acc = walk(pattern, acc)
+        acc = if guard, do: walk(guard, acc), else: acc
+        walk(body, acc)
 
       # Early return
       {:early_return, value} ->
@@ -232,11 +244,19 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
       {:variable, name} ->
         %{acc | operands: [name | acc.operands]}
 
-      # Language-specific: count as single operator
-      {:language_specific, _, _} ->
-        %{acc | operators: ["native" | acc.operators]}
+      # Language-specific: traverse embedded body if present
+      {:language_specific, _, _, _, metadata} when is_map(metadata) ->
+        acc = %{acc | operators: ["native" | acc.operators]}
+
+        case Map.get(metadata, :body) do
+          nil -> acc
+          body -> walk(body, acc)
+        end
 
       {:language_specific, _, _, _} ->
+        %{acc | operators: ["native" | acc.operators]}
+
+      {:language_specific, _, _} ->
         %{acc | operators: ["native" | acc.operators]}
 
       # Nil

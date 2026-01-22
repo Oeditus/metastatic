@@ -129,10 +129,21 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   defp walk({:pattern_match, value, branches}, nesting, acc) do
     acc = walk(value, nesting, acc)
 
-    Enum.reduce(branches, acc, fn {_pattern, branch}, a ->
-      a = a + 1 + nesting
-      walk(branch, nesting + 1, a)
+    Enum.reduce(branches, acc, fn
+      {:match_arm, _pattern, _guard, body}, a ->
+        a = a + 1 + nesting
+        walk(body, nesting + 1, a)
+
+      {_pattern, branch}, a ->
+        a = a + 1 + nesting
+        walk(branch, nesting + 1, a)
     end)
+  end
+
+  # Match arm (used in pattern matching and guarded functions)
+  defp walk({:match_arm, _pattern, guard, body}, nesting, acc) do
+    acc = if guard, do: walk(guard, nesting, acc), else: acc
+    walk(body, nesting + 1, acc)
   end
 
   # Block: walk statements at same nesting level
@@ -194,9 +205,16 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
     walk(body, nesting, acc)
   end
 
-  # Language-specific: don't count
-  defp walk({:language_specific, _, _}, _nesting, acc), do: acc
+  # Language-specific: traverse embedded body if present
+  defp walk({:language_specific, _, _, _, metadata}, nesting, acc) when is_map(metadata) do
+    case Map.get(metadata, :body) do
+      nil -> acc
+      body -> walk(body, nesting, acc)
+    end
+  end
+
   defp walk({:language_specific, _, _, _}, _nesting, acc), do: acc
+  defp walk({:language_specific, _, _}, _nesting, acc), do: acc
 
   # Literals and variables: no complexity
   defp walk({:literal, _, _}, _nesting, acc), do: acc
