@@ -666,20 +666,19 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
+  @python_exceptions %{
+    "Exception" => :error,
+    "ValueError" => :error,
+    "TypeError" => :error,
+    "KeyError" => :error,
+    "IndexError" => :error
+  }
+
   defp extract_exception_type(nil), do: {:ok, :error}
 
   defp extract_exception_type(%{"_type" => "Name", "id" => name}) do
     # Map common Python exceptions to generic types
-    exception_atom =
-      case name do
-        "Exception" -> :error
-        "ValueError" -> :error
-        "TypeError" -> :error
-        "KeyError" -> :error
-        "IndexError" -> :error
-        _ -> String.to_atom(name)
-      end
-
+    exception_atom = Map.get(@python_exceptions, name, String.to_atom(name))
     {:ok, exception_atom}
   end
 

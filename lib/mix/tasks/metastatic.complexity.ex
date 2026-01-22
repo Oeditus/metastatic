@@ -13,6 +13,8 @@ defmodule Mix.Tasks.Metastatic.Complexity do
     * `--max-cyclomatic` - Cyclomatic complexity threshold (default: 10)
     * `--max-cognitive` - Cognitive complexity threshold (default: 15)
     * `--max-nesting` - Nesting depth threshold (default: 3)
+    * `--lines` - Analyze specific line range (e.g., "10-50") - extracted code must be valid
+    * `--function` - Analyze specific function by name (first clause only for multi-clause functions)
 
   ## Examples
 
@@ -27,6 +29,12 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
       # Custom thresholds
       mix metastatic.complexity my_file.erl --max-cyclomatic 15 --max-cognitive 20
+
+      # Analyze specific line range
+      mix metastatic.complexity my_file.py --lines 10-50
+
+      # Analyze specific function (first clause only for multi-clause functions)
+      mix metastatic.complexity my_file.ex --function complex
 
   ## Exit Codes
 
@@ -54,7 +62,9 @@ defmodule Mix.Tasks.Metastatic.Complexity do
           language: :string,
           max_cyclomatic: :integer,
           max_cognitive: :integer,
-          max_nesting: :integer
+          max_nesting: :integer,
+          lines: :string,
+          function: :string
         ],
         aliases: [f: :format, l: :language]
       )
@@ -62,6 +72,7 @@ defmodule Mix.Tasks.Metastatic.Complexity do
     format = parse_format(opts[:format])
     language = parse_language(opts[:language])
     thresholds = build_thresholds(opts)
+    scope = parse_scope(opts)
 
     case files do
       [] ->
@@ -70,11 +81,11 @@ defmodule Mix.Tasks.Metastatic.Complexity do
         exit({:shutdown, 2})
 
       [file | _] ->
-        analyze_file(file, language, format, thresholds)
+        analyze_file(file, language, format, thresholds, scope)
     end
   end
 
-  defp analyze_file(file, language, format, thresholds) do
+  defp analyze_file(file, language, format, thresholds, scope) do
     unless File.exists?(file) do
       Mix.shell().error("Error: File not found: #{file}")
       exit({:shutdown, 2})
@@ -83,15 +94,25 @@ defmodule Mix.Tasks.Metastatic.Complexity do
     source = File.read!(file)
     lang = language || detect_language(file)
 
+    # Extract subset of source if scope is specified
+    {source, scope_info} = extract_scope(source, scope, lang)
+
     case Builder.from_source(source, lang) do
       {:ok, document} ->
-        # Check if this is a module-level analysis
-        if module_file?(document) do
-          Mix.shell().info("Note: Analyzing entire module (includes all nested functions).\n")
-        end
+        # If function scope, extract specific function for analysis
+        {analysis_doc, display_info} =
+          case {scope, scope_info} do
+            {{:function, func_name}, :extract_function} ->
+              extract_and_prepare_function(document, func_name)
 
-        case Complexity.analyze(document, thresholds: thresholds) do
+            _ ->
+              display_scope_info(document, scope, scope_info)
+              {document, nil}
+          end
+
+        case Complexity.analyze(analysis_doc, thresholds: thresholds) do
           {:ok, result} ->
+            if display_info, do: Mix.shell().info(display_info <> "\n")
             output = Formatter.format(result, format)
             Mix.shell().info(output)
 
@@ -185,5 +206,126 @@ defmodule Mix.Tasks.Metastatic.Complexity do
   end
 
   defp module_file?(%{ast: {:language_specific, _, _, :module_definition}}), do: true
+  defp module_file?(%{ast: {:language_specific, _, _, :module_definition, _}}), do: true
   defp module_file?(_), do: false
+
+  defp parse_scope(opts) do
+    cond do
+      opts[:function] -> {:function, opts[:function]}
+      opts[:lines] -> {:lines, parse_line_range(opts[:lines])}
+      true -> :full
+    end
+  end
+
+  defp parse_line_range(str) do
+    case String.split(str, "-") do
+      [start_str, end_str] ->
+        with {start_line, ""} <- Integer.parse(start_str),
+             {end_line, ""} <- Integer.parse(end_str) do
+          {start_line, end_line}
+        else
+          _ ->
+            Mix.shell().error("Invalid line range: #{str}")
+            Mix.shell().info("Expected format: START-END (e.g., 10-50)")
+            exit({:shutdown, 2})
+        end
+
+      _ ->
+        Mix.shell().error("Invalid line range: #{str}")
+        Mix.shell().info("Expected format: START-END (e.g., 10-50)")
+        exit({:shutdown, 2})
+    end
+  end
+
+  defp extract_scope(source, :full, _lang), do: {source, nil}
+
+  defp extract_scope(source, {:lines, {start_line, end_line}}, _lang) do
+    lines = String.split(source, "\n")
+    total_lines = length(lines)
+
+    cond do
+      start_line < 1 or end_line > total_lines ->
+        Mix.shell().error(
+          "Line range #{start_line}-#{end_line} out of bounds (file has #{total_lines} lines)"
+        )
+
+        exit({:shutdown, 2})
+
+      start_line > end_line ->
+        Mix.shell().error("Invalid line range: start (#{start_line}) > end (#{end_line})")
+        exit({:shutdown, 2})
+
+      true ->
+        extracted =
+          lines
+          |> Enum.slice((start_line - 1)..(end_line - 1))
+          |> Enum.join("\n")
+
+        {extracted, "lines #{start_line}-#{end_line}"}
+    end
+  end
+
+  defp extract_scope(source, {:function, _func_name}, _lang) do
+    # For function scope, return full source with special marker
+    # We'll handle extraction after parsing
+    {source, :extract_function}
+  end
+
+  defp extract_and_prepare_function(document, func_name) do
+    body = get_module_body(document.ast, document.metadata)
+
+    case find_function_in_body(body, func_name) do
+      {:ok, func_ast} ->
+        # Create a new document with just the function body
+        func_doc = Metastatic.Document.new(func_ast, document.language)
+        info = "Note: Analyzing function '#{func_name}'"
+        {func_doc, info}
+
+      :not_found ->
+        Mix.shell().error("Function '#{func_name}' not found in source")
+        exit({:shutdown, 2})
+    end
+  end
+
+  defp get_module_body({:language_specific, _, _, :module_definition, metadata}, _doc_metadata)
+       when is_map(metadata) do
+    Map.get(metadata, :body)
+  end
+
+  defp get_module_body({:language_specific, _, _, :module_definition}, metadata) do
+    Map.get(metadata, :body)
+  end
+
+  defp get_module_body(_ast, _metadata), do: nil
+
+  defp find_function_in_body({:block, statements}, func_name) when is_list(statements) do
+    Enum.find_value(statements, :not_found, fn
+      {:language_specific, _, _, :function_definition, metadata} ->
+        if Map.get(metadata, :function_name) == func_name do
+          {:ok, Map.get(metadata, :body)}
+        else
+          nil
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp find_function_in_body(_body, _func_name), do: :not_found
+
+  defp display_scope_info(_document, :full, nil) do
+    # No special message for full file analysis
+    :ok
+  end
+
+  defp display_scope_info(_document, _scope, scope_info) when is_binary(scope_info) do
+    Mix.shell().info("Note: Analyzing #{scope_info}.\n")
+  end
+
+  defp display_scope_info(document, :full, nil) do
+    if module_file?(document) do
+      Mix.shell().info("Note: Analyzing entire module (includes all nested functions).\n")
+    end
+  end
 end
