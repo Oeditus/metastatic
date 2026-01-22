@@ -377,7 +377,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp transform_cond([clauses]) do
     # cond is a series of condition -> body pairs
     # Transform to nested if/else
-    with {:ok, meta_ast} <- cond_to_nested_if(clauses) do
+    # Extract the clause list from [do: [clauses]]
+    clause_list = Keyword.get(clauses, :do, [])
+
+    with {:ok, meta_ast} <- cond_to_nested_if(clause_list) do
       {:ok, meta_ast, %{original_form: :cond}}
     end
   end
@@ -772,6 +775,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # Helper to extract function name from signature
+  # Handle guarded functions: def foo(x) when guard -> body
+  # The signature is {:when, _, [{:foo, _, args}, guard]}
+  defp extract_function_name({:when, _, [{name, _, _args}, _guard]}) when is_atom(name) do
+    Atom.to_string(name)
+  end
+
   defp extract_function_name({name, _, _}) when is_atom(name), do: Atom.to_string(name)
   defp extract_function_name({name, _, _args}) when is_atom(name), do: Atom.to_string(name)
   defp extract_function_name(nil), do: "anonymous"

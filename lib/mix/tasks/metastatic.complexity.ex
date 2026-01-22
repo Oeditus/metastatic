@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Metastatic.Complexity do
     * `--max-cognitive` - Cognitive complexity threshold (default: 15)
     * `--max-nesting` - Nesting depth threshold (default: 3)
     * `--lines` - Analyze specific line range (e.g., "10-50") - extracted code must be valid
-    * `--function` - Analyze specific function by name (first clause only for multi-clause functions)
+    * `--function` - Analyze specific function by name (all clauses combined for multi-clause functions)
 
   ## Examples
 
@@ -33,8 +33,9 @@ defmodule Mix.Tasks.Metastatic.Complexity do
       # Analyze specific line range
       mix metastatic.complexity my_file.py --lines 10-50
 
-      # Analyze specific function (first clause only for multi-clause functions)
+      # Analyze specific function (all clauses combined)
       mix metastatic.complexity my_file.ex --function complex
+      mix metastatic.complexity my_file.ex --function factorial
 
   ## Exit Codes
 
@@ -289,27 +290,58 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
   defp get_module_body({:language_specific, _, _, :module_definition, metadata}, _doc_metadata)
        when is_map(metadata) do
-    Map.get(metadata, :body)
+    body = Map.get(metadata, :body)
+    # Ensure body is wrapped in a block for uniform handling
+    case body do
+      {:block, _} -> body
+      nil -> {:block, []}
+      single -> {:block, [single]}
+    end
   end
 
   defp get_module_body({:language_specific, _, _, :module_definition}, metadata) do
-    Map.get(metadata, :body)
+    body = Map.get(metadata, :body)
+
+    case body do
+      {:block, _} -> body
+      nil -> {:block, []}
+      single -> {:block, [single]}
+    end
   end
 
   defp get_module_body(_ast, _metadata), do: nil
 
   defp find_function_in_body({:block, statements}, func_name) when is_list(statements) do
-    Enum.find_value(statements, :not_found, fn
-      {:language_specific, _, _, :function_definition, metadata} ->
-        if Map.get(metadata, :function_name) == func_name do
-          {:ok, Map.get(metadata, :body)}
-        else
-          nil
-        end
+    # Find ALL clauses with the same name
+    matching_clauses =
+      Enum.filter(statements, fn
+        {:language_specific, _, _, :function_definition, metadata} ->
+          Map.get(metadata, :function_name) == func_name
 
-      _ ->
-        nil
-    end)
+        _ ->
+          false
+      end)
+
+    case matching_clauses do
+      [] ->
+        :not_found
+
+      clauses ->
+        # Extract bodies from all matching clauses
+        bodies =
+          Enum.map(clauses, fn {:language_specific, _, _, :function_definition, metadata} ->
+            Map.get(metadata, :body)
+          end)
+
+        # Combine all clause bodies into a block
+        combined_ast =
+          case bodies do
+            [single] -> single
+            multiple -> {:block, multiple}
+          end
+
+        {:ok, combined_ast}
+    end
   end
 
   defp find_function_in_body(_body, _func_name), do: :not_found
