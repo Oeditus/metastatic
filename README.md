@@ -17,6 +17,8 @@ Build tools once, apply them everywhere. Create a universal meta-model for progr
 - **Round-Trip Fidelity**: Transform source → MetaAST → source with >90% accuracy
 - **Meta-Model Foundation**: MOF-based meta-modeling (M2 level) for universal AST representation
 - **Cross-Language Equivalence**: Semantically equivalent code produces identical MetaAST across languages
+- **Code Duplication Detection**: Find code clones across different programming languages (Type I-IV clones)
+- **Advanced Analysis**: 9 built-in analyzers (purity, complexity, security, dead code, taint, smells, CFG, unused vars)
 
 ## Scope
 
@@ -25,6 +27,8 @@ Build tools once, apply them everywhere. Create a universal meta-model for progr
 - Language adapters (Python, Elixir, Erlang, Ruby, Haskell)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
+- Code duplication detection (Type I-IV clones across languages)
+- Comprehensive static analysis suite (9 analyzers)
 
 **What Metastatic Does NOT Provide:**
 - Code quality auditing (see Oeditus ecosystem at https://oeditus.com)
@@ -65,6 +69,10 @@ mix metastatic.validate_equivalence hello.py hello.ex
 
 # Show detailed differences
 mix metastatic.validate_equivalence --verbose file1.py file2.ex
+
+# Cross-language code duplication detection
+mix metastatic.detect_duplicates file1.py file2.ex
+mix metastatic.detect_duplicates --dir lib/ --format json
 ```
 
 ### Using Language Adapters
