@@ -247,10 +247,9 @@ defmodule Metastatic.Analysis.Duplication.Reporter do
   defp format_locations(locations) when is_list(locations) do
     locations
     |> Enum.with_index(1)
-    |> Enum.map(fn {loc, idx} ->
+    |> Enum.map_join("\n", fn {loc, idx} ->
       "  [#{idx}] #{format_single_location(loc)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_locations(_), do: "Invalid location information"
@@ -260,7 +259,7 @@ defmodule Metastatic.Analysis.Duplication.Reporter do
   defp format_locations_detailed(locations) when is_list(locations) do
     locations
     |> Enum.with_index(1)
-    |> Enum.map(fn {loc, idx} ->
+    |> Enum.map_join("\n", fn {loc, idx} ->
       file = loc[:file] || "unknown"
       start_line = loc[:start_line] || "?"
       end_line = loc[:end_line] || "?"
@@ -273,7 +272,6 @@ defmodule Metastatic.Analysis.Duplication.Reporter do
       """
       |> String.trim()
     end)
-    |> Enum.join("\n")
   end
 
   defp format_locations_detailed(_), do: "  Invalid location information"
@@ -292,11 +290,9 @@ defmodule Metastatic.Analysis.Duplication.Reporter do
   defp format_group_locations([]), do: "  No locations"
 
   defp format_group_locations(locations) when is_list(locations) do
-    locations
-    |> Enum.map(fn loc ->
+    Enum.map_join(locations, "\n", fn loc ->
       "  - #{format_single_location(loc)}"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_group_locations(_), do: "  Invalid locations"
@@ -306,7 +302,7 @@ defmodule Metastatic.Analysis.Duplication.Reporter do
   defp format_group_locations_detailed(locations) when is_list(locations) do
     locations
     |> Enum.with_index(1)
-    |> Enum.map(fn {loc, idx} ->
+    |> Enum.map_join("\n", fn {loc, idx} ->
       file = loc[:file] || "unknown"
       start_line = loc[:start_line] || "?"
       end_line = loc[:end_line] || "?"
@@ -314,7 +310,6 @@ defmodule Metastatic.Analysis.Duplication.Reporter do
 
       "  [#{idx}] #{file}:#{start_line}-#{end_line} (#{language})"
     end)
-    |> Enum.join("\n")
   end
 
   defp format_group_locations_detailed(_), do: "  Invalid locations"

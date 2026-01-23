@@ -73,11 +73,9 @@ defmodule Metastatic.Analysis.Complexity.Formatter do
 
   defp format_per_function(functions) do
     formatted =
-      functions
-      |> Enum.map(fn func ->
+      Enum.map_join(functions, "\n", fn func ->
         "    #{func.name}: CC=#{func.cyclomatic}, Cog=#{func.cognitive}, Nest=#{func.max_nesting}, Stmts=#{func.statements}, Vars=#{func.variables}"
       end)
-      |> Enum.join("\n")
 
     "\n  Per-Function Breakdown:\n" <> formatted <> "\n"
   end

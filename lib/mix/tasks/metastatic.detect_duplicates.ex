@@ -57,9 +57,6 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
 
   use Mix.Task
 
-  # alias Metastatic.Analysis.Duplication
-  alias Metastatic.Analysis.Duplication.Reporter
-
   @impl Mix.Task
   def run(args) do
     {opts, files, _} =

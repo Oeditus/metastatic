@@ -245,8 +245,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
       tokens = Fingerprint.tokens(ast)
 
       # Tokens should be in order
-      assert is_list(tokens)
-      assert length(tokens) > 0
+      assert match?([_ | _], tokens)
     end
   end
 

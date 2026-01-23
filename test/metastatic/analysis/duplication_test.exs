@@ -1,7 +1,7 @@
 defmodule Metastatic.Analysis.DuplicationTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Document, Analysis.Duplication}
+  alias Metastatic.{Analysis.Duplication, Document}
 
   doctest Metastatic.Analysis.Duplication
 

@@ -101,9 +101,7 @@ defmodule Metastatic.Analysis.Duplication do
   @spec detect(Document.t(), Document.t(), detect_opts()) :: {:ok, Result.t()}
   def detect(%Document{ast: ast1} = doc1, %Document{ast: ast2} = doc2, opts \\ []) do
     # Validate both ASTs conform to MetaAST
-    unless AST.conforms?(ast1) and AST.conforms?(ast2) do
-      {:ok, Result.no_duplicate()}
-    else
+    if AST.conforms?(ast1) and AST.conforms?(ast2) do
       # Get options
       threshold = Keyword.get(opts, :threshold, 0.8)
 
@@ -130,6 +128,8 @@ defmodule Metastatic.Analysis.Duplication do
         end
 
       {:ok, result}
+    else
+      {:ok, Result.no_duplicate()}
     end
   end
 
@@ -215,9 +215,8 @@ defmodule Metastatic.Analysis.Duplication do
 
     # Find all duplicate pairs
     pairs =
-      for i <- 0..(length(indexed_docs) - 1),
-          j <- (i + 1)..(length(indexed_docs) - 1),
-          i < length(indexed_docs) and j < length(indexed_docs) do
+      for i <- 0..(length(indexed_docs) - 1)//1,
+          j <- (i + 1)..(length(indexed_docs) - 1)//1 do
         doc1_info = Enum.at(indexed_docs, i)
         doc2_info = Enum.at(indexed_docs, j)
 

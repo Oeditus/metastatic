@@ -2,7 +2,6 @@ defmodule Metastatic.Analysis.Duplication.ReporterTest do
   use ExUnit.Case, async: true
 
   alias Metastatic.Analysis.Duplication.{Reporter, Result}
-  alias Metastatic.Document
 
   doctest Metastatic.Analysis.Duplication.Reporter
 

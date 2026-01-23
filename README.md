@@ -292,6 +292,10 @@ Reporter.format_groups(groups, :detailed)
 - Batch detection with clone grouping
 - Structural and token-based similarity metrics
 
+**Based on:**
+- Ira Baxter et al. “Clone Detection Using Abstract Syntax Trees” (1998)
+- Chanchal K. Roy and James R. Cordy “A Survey on Software Clone Detection Research” (2007)
+
 ### Purity Analysis
 
 Analyze code for side effects and functional purity across all supported languages:
