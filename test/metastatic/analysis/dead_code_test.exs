@@ -1,7 +1,7 @@
 defmodule Metastatic.Analysis.DeadCodeTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Document, Analysis.DeadCode}
+  alias Metastatic.{Analysis.DeadCode, Document}
 
   doctest Metastatic.Analysis.DeadCode
   doctest Metastatic.Analysis.DeadCode.Result

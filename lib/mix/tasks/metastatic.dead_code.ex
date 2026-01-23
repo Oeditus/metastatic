@@ -97,8 +97,7 @@ defmodule Mix.Tasks.Metastatic.DeadCode do
     summary = result.summary <> "\n\n"
 
     details =
-      result.dead_locations
-      |> Enum.map(fn loc ->
+      Enum.map_join(result.dead_locations, "\n", fn loc ->
         """
         Type: #{loc.type}
         Confidence: #{loc.confidence}
@@ -107,7 +106,6 @@ defmodule Mix.Tasks.Metastatic.DeadCode do
         ---
         """
       end)
-      |> Enum.join("\n")
 
     summary <> details
   end

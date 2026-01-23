@@ -45,7 +45,7 @@ defmodule Metastatic.Analysis.Taint.Result do
 
   defstruct has_taint_flows?: false,
             taint_flows: [],
-            summary: "",
+            summary: "No taint flows detected",
             total_flows: 0,
             by_risk: %{}
 
@@ -63,12 +63,13 @@ defmodule Metastatic.Analysis.Taint.Result do
       true
   """
   @spec new([taint_flow()]) :: t()
-  def new(taint_flows) when is_list(taint_flows) do
-    has_taint_flows? = length(taint_flows) > 0
+  def new([]), do: %__MODULE__{}
+
+  def new([_ | _] = taint_flows) do
     by_risk = count_by_risk(taint_flows)
 
     %__MODULE__{
-      has_taint_flows?: has_taint_flows?,
+      has_taint_flows?: true,
       taint_flows: taint_flows,
       summary: build_summary(taint_flows, by_risk),
       total_flows: length(taint_flows),
@@ -119,20 +120,15 @@ defmodule Metastatic.Analysis.Taint.Result do
     end)
   end
 
-  defp build_summary([], _by_risk) do
-    "No taint flows detected"
-  end
-
   defp build_summary(flows, by_risk) do
     total = length(flows)
 
     risk_summary =
       by_risk
       |> Enum.sort_by(fn {risk, _} -> risk_order(risk) end, :desc)
-      |> Enum.map(fn {risk, count} ->
+      |> Enum.map_join(", ", fn {risk, count} ->
         "#{count} #{risk}"
       end)
-      |> Enum.join(", ")
 
     "Found #{total} taint flow(s): #{risk_summary}"
   end

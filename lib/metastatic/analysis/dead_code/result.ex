@@ -58,7 +58,7 @@ defmodule Metastatic.Analysis.DeadCode.Result do
 
   defstruct has_dead_code?: false,
             dead_locations: [],
-            summary: "",
+            summary: "No dead code detected",
             total_dead_statements: 0,
             by_type: %{}
 
@@ -76,12 +76,13 @@ defmodule Metastatic.Analysis.DeadCode.Result do
       true
   """
   @spec new([dead_location()]) :: t()
-  def new(dead_locations) when is_list(dead_locations) do
-    has_dead_code? = length(dead_locations) > 0
+  def new([]), do: %__MODULE__{}
+
+  def new([_ | _] = dead_locations) do
     by_type = count_by_type(dead_locations)
 
     %__MODULE__{
-      has_dead_code?: has_dead_code?,
+      has_dead_code?: true,
       dead_locations: dead_locations,
       summary: build_summary(dead_locations, by_type),
       total_dead_statements: length(dead_locations),
@@ -132,19 +133,13 @@ defmodule Metastatic.Analysis.DeadCode.Result do
     end)
   end
 
-  defp build_summary([], _by_type) do
-    "No dead code detected"
-  end
-
   defp build_summary(locations, by_type) do
     total = length(locations)
 
     parts =
-      by_type
-      |> Enum.map(fn {type, count} ->
+      Enum.map_join(by_type, ", ", fn {type, count} ->
         "#{count} #{format_type(type)}"
       end)
-      |> Enum.join(", ")
 
     "Found #{total} dead code location(s): #{parts}"
   end

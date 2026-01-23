@@ -91,8 +91,7 @@ defmodule Mix.Tasks.Metastatic.UnusedVars do
     summary = result.summary <> "\n\n"
 
     details =
-      result.unused_variables
-      |> Enum.map(fn var ->
+      Enum.map_join(result.unused_variables, "\n", fn var ->
         """
         Variable: #{var.name}
         Category: #{var.category}
@@ -100,7 +99,6 @@ defmodule Mix.Tasks.Metastatic.UnusedVars do
         ---
         """
       end)
-      |> Enum.join("\n")
 
     summary <> details
   end

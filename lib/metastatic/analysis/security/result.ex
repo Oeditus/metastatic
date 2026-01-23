@@ -65,7 +65,7 @@ defmodule Metastatic.Analysis.Security.Result do
 
   defstruct has_vulnerabilities?: false,
             vulnerabilities: [],
-            summary: "",
+            summary: "No security vulnerabilities detected",
             total_vulnerabilities: 0,
             by_severity: %{},
             by_category: %{}
@@ -84,13 +84,14 @@ defmodule Metastatic.Analysis.Security.Result do
       true
   """
   @spec new([vulnerability()]) :: t()
-  def new(vulnerabilities) when is_list(vulnerabilities) do
-    has_vulnerabilities? = length(vulnerabilities) > 0
+  def new([]), do: %__MODULE__{}
+
+  def new([_ | _] = vulnerabilities) do
     by_severity = count_by_severity(vulnerabilities)
     by_category = count_by_category(vulnerabilities)
 
     %__MODULE__{
-      has_vulnerabilities?: has_vulnerabilities?,
+      has_vulnerabilities?: true,
       vulnerabilities: vulnerabilities,
       summary: build_summary(vulnerabilities, by_severity),
       total_vulnerabilities: length(vulnerabilities),
@@ -149,20 +150,15 @@ defmodule Metastatic.Analysis.Security.Result do
     end)
   end
 
-  defp build_summary([], _by_severity) do
-    "No security vulnerabilities detected"
-  end
-
   defp build_summary(vulns, by_severity) do
     total = length(vulns)
 
     severity_summary =
       by_severity
       |> Enum.sort_by(fn {sev, _} -> severity_order(sev) end, :desc)
-      |> Enum.map(fn {sev, count} ->
+      |> Enum.map_join(", ", fn {sev, count} ->
         "#{count} #{sev}"
       end)
-      |> Enum.join(", ")
 
     "Found #{total} security vulnerability(ies): #{severity_summary}"
   end

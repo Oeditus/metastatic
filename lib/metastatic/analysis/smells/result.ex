@@ -66,7 +66,7 @@ defmodule Metastatic.Analysis.Smells.Result do
 
   defstruct has_smells?: false,
             smells: [],
-            summary: "",
+            summary: "No code smells detected",
             total_smells: 0,
             by_severity: %{},
             by_type: %{}
@@ -85,13 +85,14 @@ defmodule Metastatic.Analysis.Smells.Result do
       true
   """
   @spec new([smell()]) :: t()
-  def new(smells) when is_list(smells) do
-    has_smells? = length(smells) > 0
+  def new([]), do: %__MODULE__{}
+
+  def new([_ | _] = smells) do
     by_severity = count_by_severity(smells)
     by_type = count_by_type(smells)
 
     %__MODULE__{
-      has_smells?: has_smells?,
+      has_smells?: true,
       smells: smells,
       summary: build_summary(smells, by_severity, by_type),
       total_smells: length(smells),
@@ -150,20 +151,15 @@ defmodule Metastatic.Analysis.Smells.Result do
     end)
   end
 
-  defp build_summary([], _by_severity, _by_type) do
-    "No code smells detected"
-  end
-
   defp build_summary(smells, by_severity, _by_type) do
     total = length(smells)
 
     severity_summary =
       by_severity
       |> Enum.sort_by(fn {sev, _} -> severity_order(sev) end, :desc)
-      |> Enum.map(fn {sev, count} ->
+      |> Enum.map_join(", ", fn {sev, count} ->
         "#{count} #{sev}"
       end)
-      |> Enum.join(", ")
 
     "Found #{total} code smell(s): #{severity_summary}"
   end

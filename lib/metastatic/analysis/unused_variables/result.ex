@@ -53,7 +53,7 @@ defmodule Metastatic.Analysis.UnusedVariables.Result do
 
   defstruct has_unused?: false,
             unused_variables: [],
-            summary: "",
+            summary: "No unused variables detected",
             total_unused: 0,
             by_category: %{}
 
@@ -71,12 +71,13 @@ defmodule Metastatic.Analysis.UnusedVariables.Result do
       true
   """
   @spec new([unused_variable()]) :: t()
-  def new(unused_variables) when is_list(unused_variables) do
-    has_unused? = length(unused_variables) > 0
+  def new([]), do: %__MODULE__{}
+
+  def new([_ | _] = unused_variables) do
     by_category = count_by_category(unused_variables)
 
     %__MODULE__{
-      has_unused?: has_unused?,
+      has_unused?: true,
       unused_variables: unused_variables,
       summary: build_summary(unused_variables, by_category),
       total_unused: length(unused_variables),
@@ -127,19 +128,13 @@ defmodule Metastatic.Analysis.UnusedVariables.Result do
     end)
   end
 
-  defp build_summary([], _by_category) do
-    "No unused variables detected"
-  end
-
   defp build_summary(vars, by_category) do
     total = length(vars)
 
     parts =
-      by_category
-      |> Enum.map(fn {category, count} ->
+      Enum.map_join(by_category, ", ", fn {category, count} ->
         "#{count} #{format_category(category)}"
       end)
-      |> Enum.join(", ")
 
     "Found #{total} unused variable(s): #{parts}"
   end

@@ -147,7 +147,6 @@ defmodule Metastatic.Analysis.Taint do
 
   defp find_taint_sinks(ast, language) do
     sink_patterns = Map.get(@taint_sinks, language, [])
-    sink_names = Enum.map(sink_patterns, fn {name, _risk} -> name end)
 
     walk_ast(ast, [], fn node, acc ->
       case node do
@@ -170,31 +169,20 @@ defmodule Metastatic.Analysis.Taint do
       []
     else
       walk_ast(ast, [], fn node, acc ->
-        case node do
-          {:function_call, name, args} ->
-            case Enum.find(sinks, fn {sink_name, _} -> sink_name == name end) do
-              {sink_name, risk} ->
-                # Check if any arg contains a taint source
-                if has_taint_source?(args, sources) do
-                  flow = %{
-                    source: Enum.join(sources, ", "),
-                    sink: sink_name,
-                    risk: risk,
-                    path: [sink_name],
-                    recommendation: get_recommendation(risk)
-                  }
+        with {:function_call, name, args} <- node,
+             {sink_name, risk} <- Enum.find(sinks, fn {sink_name, _} -> sink_name == name end),
+             true <- has_taint_source?(args, sources) do
+          flow = %{
+            source: Enum.join(sources, ", "),
+            sink: sink_name,
+            risk: risk,
+            path: [sink_name],
+            recommendation: get_recommendation(risk)
+          }
 
-                  [flow | acc]
-                else
-                  acc
-                end
-
-              nil ->
-                acc
-            end
-
-          _ ->
-            acc
+          [flow | acc]
+        else
+          _ -> acc
         end
       end)
     end

@@ -189,21 +189,17 @@ defmodule Metastatic.Analysis.ControlFlow.Result do
     footer = "}\n"
 
     nodes =
-      cfg.nodes
-      |> Enum.map(fn {id, node} ->
+      Enum.map_join(cfg.nodes, "\n", fn {id, node} ->
         label = format_node_label(node)
         shape = node_shape(node.type)
         ~s(  #{id} [label="#{label}", shape=#{shape}];)
       end)
-      |> Enum.join("\n")
 
     edges =
-      cfg.edges
-      |> Enum.map(fn {from, to, condition} ->
+      Enum.map_join(cfg.edges, "\n", fn {from, to, condition} ->
         label = if condition, do: ~s([label="#{condition}"]), else: ""
         ~s(  #{from} -> #{to}#{label};)
       end)
-      |> Enum.join("\n")
 
     header <> nodes <> "\n" <> edges <> "\n" <> footer
   end
@@ -236,7 +232,7 @@ defmodule Metastatic.Analysis.ControlFlow.Result do
     detect_cycle_dfs(cfg, cfg.entry, MapSet.new(), MapSet.new())
   end
 
-  defp detect_cycle_dfs(_cfg, node_id, visited, _rec_stack) when node_id == nil, do: false
+  defp detect_cycle_dfs(_cfg, node_id, _visited, _rec_stack) when node_id == nil, do: false
 
   defp detect_cycle_dfs(cfg, node_id, visited, rec_stack) do
     if MapSet.member?(rec_stack, node_id) do
