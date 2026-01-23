@@ -9,18 +9,27 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 - **Git** for version control
 
 ### Current Status
-**Phase 4 Complete!** Purity analysis and complexity metrics are now operational.
+**Phase 6 Partial + Advanced Analysis Complete!** All major analysis features are now operational.
 
-- Phase 0: Core Foundation + BEAM/Python Adapters (650 tests)
-- Phase 2: Supplemental Modules (613 tests)
-- Phase 3: Purity Analysis (650 tests)
-- Phase 4: Complexity Metrics (755 tests - 45 doctests + 710 tests)
+- Phase 0: Core Foundation + BEAM/Python Adapters
+- Phase 2: Supplemental Modules
+- Phase 3: Purity Analysis
+- Phase 4: Complexity Metrics
+- Phase 6: Ruby & Haskell Adapters (2/5 additional languages)
+- **NEW:** Advanced Analysis Features (6 analyzers)
+- **Current test count:** 876+ tests passing
 
 **Current Capabilities:**
-- Parse and transform code across Python, Elixir, and Erlang
+- Parse and transform code across Python, Elixir, Erlang, Ruby, and Haskell
 - Analyze function purity and side effects
-- Measure code complexity (6 metric types)
-- CLI tools for analysis and code inspection
+- Measure code complexity (6 comprehensive metric types)
+- Detect dead code and unreachable branches
+- Track unused variables with scope awareness
+- Generate control flow graphs (DOT/D3.js formats)
+- Perform taint analysis for security vulnerabilities
+- Scan for security issues with CWE identifiers
+- Detect code smells and maintainability issues
+- 15+ CLI tools for all analysis operations
 
 ### Optional (for future adapter development)
 - **Python 3.9+** (Phase 3 - Python adapter)
@@ -38,7 +47,7 @@ cd /home/am/Proyectos/Oeditus/metastatic
 # Install dependencies
 mix deps.get
 
-# Run tests (755 tests, all passing!)
+# Run tests (876+ tests, all passing!)
 mix test
 
 # Generate documentation
@@ -59,30 +68,45 @@ metastatic/
 │       ├── builder.ex              # ✅ High-level API
 │       ├── adapter.ex              # ✅ Adapter behaviour
 │       ├── validator.ex            # ✅ Conformance validation
-│       ├── adapters/               # ✅ Python, Elixir, Erlang adapters
+│       ├── adapters/               # ✅ 5 language adapters
 │       │   ├── python/             # ✅ Full Python support
 │       │   ├── elixir/             # ✅ Full Elixir support
-│       │   └── erlang/             # ✅ Full Erlang support
+│       │   ├── erlang/             # ✅ Full Erlang support
+│       │   ├── ruby/               # ✅ Full Ruby support
+│       │   └── haskell/            # ✅ Full Haskell support
 │       ├── supplemental/           # ✅ Phase 2 - Cross-language support
 │       │   ├── registry.ex         # ✅ Supplemental module registry
 │       │   ├── transformer.ex      # ✅ Transformation helper
 │       │   └── python/             # ✅ Pykka (actors), Asyncio
-│       ├── analysis/               # ✅ Phase 3-4 - Code analysis
+│       ├── analysis/               # ✅ Complete analysis suite
 │       │   ├── purity.ex           # ✅ Purity analyzer
 │       │   ├── purity/             # ✅ Side effect detection
-│       │   ├── complexity.ex       # ✅ Complexity analyzer
-│       │   └── complexity/         # ✅ 6 metric calculators
-│       └── mix/tasks/              # ✅ CLI tools
+│       │   ├── complexity.ex       # ✅ Complexity analyzer (6 metrics)
+│       │   ├── complexity/         # ✅ Metric calculators
+│       │   ├── duplication.ex      # ✅ Code duplication detection
+│       │   ├── dead_code.ex        # ✅ Dead code detection
+│       │   ├── unused_variables.ex # ✅ Unused variable analysis
+│       │   ├── control_flow.ex     # ✅ CFG generation
+│       │   ├── taint.ex            # ✅ Taint analysis
+│       │   ├── security.ex         # ✅ Security scanning
+│       │   └── smells.ex           # ✅ Code smell detection
+│       └── mix/tasks/              # ✅ CLI tools (15+ tasks)
 │           ├── metastatic.translate.ex
 │           ├── metastatic.inspect.ex
 │           ├── metastatic.purity_check.ex
-│           └── metastatic.complexity.ex
+│           ├── metastatic.complexity.ex
+│           ├── metastatic.dead_code.ex
+│           ├── metastatic.unused_vars.ex
+│           ├── metastatic.control_flow.ex
+│           ├── metastatic.taint_check.ex
+│           ├── metastatic.security_scan.ex
+│           └── metastatic.code_smells.ex
 ├── test/
-│   └── metastatic/                 # ✅ 755 tests (45 doctests + 710 tests)
+│   └── metastatic/                 # ✅ 876+ tests passing
 │       ├── ast_test.exs
-│       ├── adapters/               # ✅ Python, Elixir, Erlang
+│       ├── adapters/               # ✅ Python, Elixir, Erlang, Ruby, Haskell
 │       ├── supplemental/           # ✅ Supplemental modules
-│       ├── analysis/               # ✅ Purity + Complexity
+│       ├── analysis/               # ✅ All analyzers
 │       └── mix/tasks/              # ✅ CLI tools
 ├── RESEARCH.md                     # ✅ Research and architecture (826 lines)
 ├── THEORETICAL_FOUNDATIONS.md      # ✅ Formal theory (953 lines)
@@ -105,7 +129,7 @@ Before diving in, read these documents in order:
 ### 2. Running Tests
 
 ```bash
-# Run all tests (755 tests, all passing!)
+# Run all tests (876+ tests, all passing!)
 mix test
 
 # Run specific test file
@@ -242,7 +266,7 @@ source = "X + 5."
 # => "X + 5"
 ```
 
-#### Cross-Language Equivalence
+### Cross-Language Equivalence
 
 ```elixir
 # Parse Elixir
@@ -259,6 +283,151 @@ erlang_vars = erlang_doc.ast |> normalize_vars()
 
 # Same MetaAST structure!
 assert elixir_vars == erlang_vars
+```
+
+### Using Advanced Analyzers (Available Now!)
+
+Metastatic includes six advanced static analysis capabilities:
+
+#### Dead Code Detection
+
+```elixir
+alias Metastatic.Analysis.DeadCode
+
+# Detect code after return
+ast = {:block, [
+  {:early_return, {:literal, :integer, 42}},
+  {:function_call, "print", [{:literal, :string, "hello"}]}  # unreachable!
+]}
+doc = Document.new(ast, :python)
+{:ok, result} = DeadCode.analyze(doc)
+
+result.has_dead_code?  # => true
+result.issues          # => [{:code_after_return, :high, "Code after return statement", ...}]
+
+# CLI usage
+# mix metastatic.dead_code my_file.py
+# mix metastatic.dead_code my_file.ex --format json
+```
+
+#### Unused Variables
+
+```elixir
+alias Metastatic.Analysis.UnusedVariables
+
+# Track variable usage
+ast = {:block, [
+  {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
+  {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
+  {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 1}}
+]}
+doc = Document.new(ast, :elixir)
+{:ok, result} = UnusedVariables.analyze(doc)
+
+result.has_unused?  # => true
+result.unused       # => MapSet.new(["x"])
+result.defined      # => MapSet.new(["x", "y"])
+result.used         # => MapSet.new(["y"])
+
+# CLI usage
+# mix metastatic.unused_vars my_file.ex
+# mix metastatic.unused_vars my_file.py --ignore-underscore
+```
+
+#### Control Flow Graph
+
+```elixir
+alias Metastatic.Analysis.ControlFlow
+
+# Build CFG
+ast = {:conditional, {:variable, "x"},
+  {:early_return, {:literal, :integer, 1}},
+  {:literal, :integer, 2}
+}
+doc = Document.new(ast, :python)
+{:ok, result} = ControlFlow.analyze(doc)
+
+result.node_count   # => 5
+result.edge_count   # => 4
+result.has_cycles?  # => false
+
+# Export to DOT for Graphviz
+dot_graph = result.to_dot()
+# "digraph CFG {\n  0 [label=\"ENTRY\"];\n  ...
+
+# Export to D3.js JSON
+json_data = result.to_d3_json()
+# %{nodes: [%{id: 0, label: "ENTRY", type: "entry", group: 1}, ...],
+#   links: [%{source: 0, target: 1, label: nil, type: "normal"}, ...]}
+
+# CLI usage
+# mix metastatic.control_flow my_file.py --format dot
+# mix metastatic.control_flow my_file.ex --format d3 --output cfg.json
+```
+
+#### Taint Analysis
+
+```elixir
+alias Metastatic.Analysis.Taint
+
+# Detect taint vulnerabilities
+ast = {:function_call, "eval", [
+  {:function_call, "input", []}  # Dangerous: eval(input())
+]}
+doc = Document.new(ast, :python)
+{:ok, result} = Taint.analyze(doc)
+
+result.has_vulnerabilities?  # => true
+result.vulnerabilities       # => [{:code_injection, "eval called with untrusted source", :high}]
+
+# CLI usage
+# mix metastatic.taint_check my_file.py
+# mix metastatic.taint_check my_file.ex --format json
+```
+
+#### Security Scanning
+
+```elixir
+alias Metastatic.Analysis.Security
+
+# Detect security issues
+ast = {:assignment, {:variable, "password"}, {:literal, :string, "admin123"}}
+doc = Document.new(ast, :python)
+{:ok, result} = Security.analyze(doc)
+
+result.has_vulnerabilities?  # => true
+vuln = hd(result.vulnerabilities)
+vuln.type      # => :hardcoded_secret
+vuln.severity  # => :high
+vuln.cwe       # => "CWE-798"
+vuln.location  # => "Variable: password"
+
+# CLI usage
+# mix metastatic.security_scan my_file.py
+# mix metastatic.security_scan my_file.ex --format json
+```
+
+#### Code Smell Detection
+
+```elixir
+alias Metastatic.Analysis.Smells
+
+# Detect code smells (requires complexity metrics first)
+ast = {:block, [
+  {:conditional, {:variable, "a"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
+  {:conditional, {:variable, "b"}, {:literal, :integer, 3}, {:literal, :integer, 4}},
+  # ... many more statements creating long function and deep nesting
+]}
+doc = Document.new(ast, :python)
+{:ok, result} = Smells.analyze(doc)
+
+result.has_smells?  # => true (if thresholds exceeded)
+result.smells       # => [:long_function, :deep_nesting] (if detected)
+result.severity     # => :medium or :high
+
+# CLI usage
+# mix metastatic.code_smells my_file.py
+# mix metastatic.code_smells my_file.ex --format detailed
 ```
 
 ### Adding a New Language Adapter (Phase 3+)

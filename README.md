@@ -393,6 +393,236 @@ result.summary         # => "Code has low complexity"
 - Nesting: 3 (warning), 5 (error)
 - Logical LoC: 50 (warning), 100 (error)
 
+### Advanced Analysis Features
+
+Metastatic provides six additional static analysis capabilities that work uniformly across all supported languages:
+
+#### Dead Code Detection
+
+Identify unreachable code paths and constant conditional branches:
+
+```bash
+# Detect dead code
+mix metastatic.dead_code my_file.py
+
+# JSON output
+mix metastatic.dead_code my_file.ex --format json
+
+# Filter by confidence level
+mix metastatic.dead_code my_file.rb --confidence high
+```
+
+```elixir
+alias Metastatic.{Document, Analysis.DeadCode}
+
+# Code after return statement
+ast = {:block, [
+  {:early_return, {:literal, :integer, 42}},
+  {:function_call, "print", [{:literal, :string, "unreachable"}]}
+]}
+doc = Document.new(ast, :python)
+{:ok, result} = DeadCode.analyze(doc)
+
+result.has_dead_code?  # => true
+result.issues          # => [{:code_after_return, :high, ...}]
+result.summary         # => "1 dead code issue detected"
+```
+
+**Detects:**
+- Code after return/break/continue statements
+- Constant conditional branches (always true/false)
+- Unreachable exception handlers
+
+#### Unused Variables
+
+Track variable definitions and usage with scope-aware analysis:
+
+```bash
+# Find unused variables
+mix metastatic.unused_vars my_file.py
+
+# Ignore underscore-prefixed variables
+mix metastatic.unused_vars my_file.ex --ignore-underscore
+
+# JSON output
+mix metastatic.unused_vars my_file.erl --format json
+```
+
+```elixir
+alias Metastatic.Analysis.UnusedVariables
+
+ast = {:block, [
+  {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
+  {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
+  {:variable, "y"}
+]}
+doc = Document.new(ast, :python)
+{:ok, result} = UnusedVariables.analyze(doc)
+
+result.has_unused?     # => true
+result.unused          # => MapSet.new(["x"])
+result.summary         # => "1 unused variable: x"
+```
+
+**Features:**
+- Symbol table with scope tracking
+- Distinguishes reads from writes
+- Handles nested scopes (blocks, loops, conditionals)
+
+#### Control Flow Graph
+
+Generate control flow graphs with multiple export formats:
+
+```bash
+# Generate CFG in DOT format (for Graphviz)
+mix metastatic.control_flow my_file.py --format dot
+
+# Generate D3.js JSON for interactive visualization
+mix metastatic.control_flow my_file.ex --format d3 --output cfg.json
+
+# Text representation
+mix metastatic.control_flow my_file.rb --format text
+```
+
+```elixir
+alias Metastatic.Analysis.ControlFlow
+
+ast = {:conditional, {:variable, "x"}, 
+  {:early_return, {:literal, :integer, 1}},
+  {:literal, :integer, 2}
+}
+doc = Document.new(ast, :python)
+{:ok, result} = ControlFlow.analyze(doc)
+
+result.node_count      # => 5
+result.edge_count      # => 4
+result.has_cycles?     # => false
+result.to_dot()        # => "digraph CFG { ... }"
+result.to_d3_json()    # => %{nodes: [...], links: [...]}
+```
+
+**Export Formats:**
+- DOT format for Graphviz rendering
+- D3.js JSON for web visualization
+- Plain text representation
+- Elixir map structure
+
+**Features:**
+- Cycle detection
+- Entry/exit node identification
+- Branch and merge point tracking
+
+#### Taint Analysis
+
+Track data flow from untrusted sources to sensitive operations:
+
+```bash
+# Check for taint vulnerabilities
+mix metastatic.taint_check my_file.py
+
+# JSON output
+mix metastatic.taint_check my_file.ex --format json
+```
+
+```elixir
+alias Metastatic.Analysis.Taint
+
+# Dangerous pattern: eval(input())
+ast = {:function_call, "eval", [
+  {:function_call, "input", []}
+]}
+doc = Document.new(ast, :python)
+{:ok, result} = Taint.analyze(doc)
+
+result.has_vulnerabilities?  # => true
+result.vulnerabilities       # => [{:code_injection, ...}]
+result.summary               # => "1 taint vulnerability detected"
+```
+
+**Detects:**
+- Code injection (eval, exec with untrusted input)
+- Command injection (system, shell commands)
+- SQL injection patterns
+- Path traversal vulnerabilities
+
+**Note:** Current implementation detects direct flows. Variable tracking and interprocedural analysis planned for future releases.
+
+#### Security Vulnerability Detection
+
+Pattern-based security scanning with CWE identifiers:
+
+```bash
+# Scan for security issues
+mix metastatic.security_scan my_file.py
+
+# JSON output with CWE details
+mix metastatic.security_scan my_file.ex --format json
+```
+
+```elixir
+alias Metastatic.Analysis.Security
+
+# Hardcoded password
+ast = {:assignment, {:variable, "password"}, {:literal, :string, "admin123"}}
+doc = Document.new(ast, :python)
+{:ok, result} = Security.analyze(doc)
+
+result.has_vulnerabilities?  # => true
+result.vulnerabilities[0].type       # => :hardcoded_secret
+result.vulnerabilities[0].severity   # => :high
+result.vulnerabilities[0].cwe        # => "CWE-798"
+```
+
+**Vulnerability Categories:**
+- Dangerous functions (eval, exec, pickle.loads)
+- Hardcoded secrets (passwords, API keys, tokens)
+- Weak cryptography (MD5, SHA1, DES)
+- Insecure protocols (HTTP for sensitive data)
+- SQL injection patterns
+- Command injection patterns
+
+**Severity Levels:** Critical, High, Medium, Low
+
+#### Code Smell Detection
+
+Identify maintainability issues and anti-patterns:
+
+```bash
+# Detect code smells
+mix metastatic.code_smells my_file.py
+
+# Detailed report
+mix metastatic.code_smells my_file.ex --format detailed
+
+# JSON output
+mix metastatic.code_smells my_file.rb --format json
+```
+
+```elixir
+alias Metastatic.Analysis.Smells
+
+# Long function with deep nesting
+ast = {:block, [
+  # ... 25+ statements with nesting depth 6
+]}
+doc = Document.new(ast, :python)
+{:ok, result} = Smells.analyze(doc)
+
+result.has_smells?     # => true
+result.smells          # => [:long_function, :deep_nesting]
+result.severity        # => :high
+```
+
+**Detected Smells:**
+- Long functions (>20 statements)
+- Deep nesting (>4 levels)
+- High cyclomatic complexity (>10)
+- High cognitive complexity (>15)
+- Magic numbers (unexplained literals)
+- Complex conditionals (>3 boolean operators)
+
+**Integration:** Leverages existing complexity metrics for detection.
+
 ## Documentation
 
 - **[Theoretical Foundations](THEORETICAL_FOUNDATIONS.md)** - Formal meta-modeling theory and proofs
