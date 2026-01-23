@@ -228,6 +228,70 @@ analysis.required_supplementals  # => [:pykka, :asyncio]
 
 See **[Supplemental Modules](SUPPLEMENTAL_MODULES.md)** for comprehensive guide on using and creating supplementals.
 
+### Code Duplication Detection
+
+Detect code clones across same or different programming languages using unified MetaAST representation:
+
+```bash
+# Detect duplicates (note: requires language adapters, Phase 2+)
+mix metastatic.detect_duplicates file1.py file2.ex
+
+# Scan entire directory
+mix metastatic.detect_duplicates --dir lib/
+
+# JSON output with custom threshold
+mix metastatic.detect_duplicates file1.py file2.ex --format json --threshold 0.85
+
+# Save detailed report
+mix metastatic.detect_duplicates --dir lib/ --format detailed --output report.txt
+```
+
+```elixir
+alias Metastatic.{Document, Analysis.Duplication}
+alias Metastatic.Analysis.Duplication.Reporter
+
+# Detect duplication between two documents
+ast1 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+ast2 = {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 5}}
+doc1 = Document.new(ast1, :python)
+doc2 = Document.new(ast2, :elixir)
+
+{:ok, result} = Duplication.detect(doc1, doc2)
+
+result.duplicate?         # => true
+result.clone_type         # => :type_ii (renamed clone)
+result.similarity_score   # => 1.0
+
+# Format results
+Reporter.format(result, :text)
+# "Duplicate detected: Type II (Renamed Clone)
+#  Similarity score: 1.0
+#  ..."
+
+# Detect across multiple documents
+ast3 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+doc3 = Document.new(ast3, :elixir)
+
+{:ok, groups} = Duplication.detect_in_list([doc1, doc2, doc3])
+length(groups)  # => 1 (all three form a clone group)
+
+# Format clone groups
+Reporter.format_groups(groups, :detailed)
+```
+
+**Clone Types Detected:**
+- **Type I**: Exact clones (identical AST across languages)
+- **Type II**: Renamed clones (same structure, different identifiers)
+- **Type III**: Near-miss clones (similar structure above threshold)
+- **Type IV**: Semantic clones (implicit in cross-language Type I-III)
+
+**Features:**
+- Cross-language detection (Python ↔ Elixir ↔ Erlang, etc.)
+- Configurable similarity threshold (0.0-1.0, default 0.8)
+- Multiple output formats (text, JSON, detailed)
+- Batch detection with clone grouping
+- Structural and token-based similarity metrics
+
 ### Purity Analysis
 
 Analyze code for side effects and functional purity across all supported languages:
