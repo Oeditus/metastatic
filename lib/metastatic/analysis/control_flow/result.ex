@@ -89,6 +89,10 @@ defmodule Metastatic.Analysis.ControlFlow.Result do
   @doc """
   Converts result to JSON-compatible map.
 
+  ## Options
+
+  - `:format` - Output format (`:standard` or `:d3`). Default: `:standard`
+
   ## Examples
 
       iex> cfg = %{nodes: %{}, edges: [], entry: 0, exits: []}
@@ -96,18 +100,75 @@ defmodule Metastatic.Analysis.ControlFlow.Result do
       iex> map = Metastatic.Analysis.ControlFlow.Result.to_map(result)
       iex> is_map(map)
       true
+
+      iex> cfg = %{nodes: %{0 => %{id: 0, type: :entry, ast: nil, predecessors: [], successors: []}}, edges: [], entry: 0, exits: [0]}
+      iex> result = Metastatic.Analysis.ControlFlow.Result.new(cfg)
+      iex> map = Metastatic.Analysis.ControlFlow.Result.to_map(result, format: :d3)
+      iex> Map.has_key?(map, :nodes) and Map.has_key?(map, :links)
+      true
   """
-  @spec to_map(t()) :: map()
-  def to_map(%__MODULE__{} = result) do
+  @spec to_map(t(), keyword()) :: map()
+  def to_map(%__MODULE__{} = result, opts \\ []) do
+    case Keyword.get(opts, :format, :standard) do
+      :d3 ->
+        to_d3_json(result)
+
+      _ ->
+        %{
+          entry_node: result.entry_node,
+          exit_nodes: result.exit_nodes,
+          reachable_nodes: MapSet.to_list(result.reachable_nodes),
+          has_cycles: result.has_cycles?,
+          node_count: result.node_count,
+          edge_count: result.edge_count,
+          nodes: result.cfg.nodes,
+          edges: result.cfg.edges
+        }
+    end
+  end
+
+  @doc """
+  Exports CFG to D3.js-compatible JSON format.
+
+  Returns a map with `nodes` and `links` arrays suitable for D3.js force-directed graphs.
+
+  ## Examples
+
+      iex> cfg = %{nodes: %{0 => %{id: 0, type: :entry, ast: nil, predecessors: [], successors: [1]}, 1 => %{id: 1, type: :exit, ast: nil, predecessors: [0], successors: []}}, edges: [{0, 1, nil}], entry: 0, exits: [1]}
+      iex> result = Metastatic.Analysis.ControlFlow.Result.new(cfg)
+      iex> json = Metastatic.Analysis.ControlFlow.Result.to_d3_json(result)
+      iex> is_list(json.nodes)
+      true
+      iex> is_list(json.links)
+      true
+  """
+  @spec to_d3_json(t()) :: map()
+  def to_d3_json(%__MODULE__{cfg: cfg}) do
+    nodes =
+      cfg.nodes
+      |> Enum.map(fn {id, node} ->
+        %{
+          id: id,
+          label: format_node_label(node),
+          type: node.type,
+          group: node_group(node.type)
+        }
+      end)
+
+    links =
+      cfg.edges
+      |> Enum.map(fn {source, target, condition} ->
+        %{
+          source: source,
+          target: target,
+          label: condition,
+          type: edge_type(condition)
+        }
+      end)
+
     %{
-      entry_node: result.entry_node,
-      exit_nodes: result.exit_nodes,
-      reachable_nodes: MapSet.to_list(result.reachable_nodes),
-      has_cycles: result.has_cycles?,
-      node_count: result.node_count,
-      edge_count: result.edge_count,
-      nodes: result.cfg.nodes,
-      edges: result.cfg.edges
+      nodes: nodes,
+      links: links
     }
   end
 
@@ -208,4 +269,17 @@ defmodule Metastatic.Analysis.ControlFlow.Result do
   defp node_shape(:conditional), do: "diamond"
   defp node_shape(:loop), do: "box"
   defp node_shape(_), do: "rectangle"
+
+  # D3.js helpers
+  defp node_group(:entry), do: 1
+  defp node_group(:exit), do: 2
+  defp node_group(:conditional), do: 3
+  defp node_group(:loop), do: 4
+  defp node_group(_), do: 5
+
+  defp edge_type(:then), do: "conditional"
+  defp edge_type(:else), do: "conditional"
+  defp edge_type(:loop_back), do: "loop"
+  defp edge_type(:exit), do: "exit"
+  defp edge_type(_), do: "normal"
 end
