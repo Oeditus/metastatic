@@ -544,26 +544,30 @@ end
 
 **Current State:** Structural constructs are at M1 (model) level, embedded in M2.3 (Native Layer) as escape hatches.
 
-```
-M3: Elixir type system
-  ↓
-M2.3: {:language_specific, :elixir, M1_elixir_ast, hint}
-  ↓ PROBLEM: M1 embedded in M2!
-M1: Elixir-specific defmodule AST
-  ↓
-M0: Compiled BEAM module
+```mermaid
+flowchart TD
+    M3["M3: Elixir type system"]
+    M2_3["M2.3: {:language_specific, :elixir, M1_elixir_ast, hint}"]
+    M1["M1: Elixir-specific defmodule AST"]
+    M0["M0: Compiled BEAM module"]
+    
+    M3 --> M2_3
+    M2_3 -->|PROBLEM: M1 embedded in M2!| M1
+    M1 --> M0
 ```
 
 **Proposed State:** Lift structural constructs to M2.2 (Extended Layer), making them true meta-model concepts.
 
-```
-M3: Elixir type system
-  ↓
-M2.2: {:container, :module, "Foo", metadata, members}
-  ↓ instance-of
-M1: Elixir defmodule AST, Ruby class AST, Python class AST
-  ↓ instance-of
-M0: Compiled module/class at runtime
+```mermaid
+flowchart TD
+    M3["M3: Elixir type system"]
+    M2_2["M2.2: {:container, :module, 'Foo', metadata, members}"]
+    M1["M1: Elixir defmodule AST, Ruby class AST, Python class AST"]
+    M0["M0: Compiled module/class at runtime"]
+    
+    M3 --> M2_2
+    M2_2 -->|instance-of| M1
+    M1 -->|instance-of| M0
 ```
 
 ### 5.2 Instance-Of Relation

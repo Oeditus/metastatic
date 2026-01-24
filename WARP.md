@@ -53,17 +53,19 @@ mix test test/metastatic/ast_test.exs:8
 
 ## Architecture
 
-### Meta-Modeling Hierarchy (MOF-based)
+## Meta-Modeling Hierarchy (MOF-based)
 Metastatic follows a four-level meta-modeling hierarchy:
 
-```
-M3: Elixir type system (@type, @spec)
-  ↓ instance-of
-M2: MetaAST (this library - CURRENT FOCUS)
-  ↓ instance-of  
-M1: Language-specific ASTs (Python/JS/Elixir AST - Phase 2+)
-  ↓ instance-of
-M0: Runtime execution
+```mermaid
+flowchart TD
+    M3["M3: Elixir type system (@type, @spec)"]
+    M2["M2: MetaAST (this library - CURRENT FOCUS)"]
+    M1["M1: Language-specific ASTs (Python/JS/Elixir AST - Phase 2+)"]
+    M0["M0: Runtime execution"]
+    
+    M3 -->|instance-of| M2
+    M2 -->|instance-of| M1
+    M1 -->|instance-of| M0
 ```
 
 **M2** is the meta-model that defines what AST nodes CAN be. All language-specific ASTs (M1) are instances that conform to M2.

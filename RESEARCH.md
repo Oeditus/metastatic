@@ -26,14 +26,16 @@ Both projects identified the challenge of extending to multiple programming lang
 
 MetaAST operates as a **true meta-model** in the formal sense of meta-modeling hierarchies, similar to MOF (Meta-Object Facility) and UML:
 
-```
-M3: Meta-Meta-Model (MOF)
-     ↓ instance-of
-M2: Meta-Model (UML, MetaAST)
-     ↓ instance-of
-M1: Model (UML Class Diagram, Python AST, JavaScript AST)
-     ↓ instance-of
-M0: Instance (Actual objects, Actual running code)
+```mermaid
+flowchart TD
+    M3["M3: Meta-Meta-Model (MOF)"]
+    M2["M2: Meta-Model (UML, MetaAST)"]
+    M1["M1: Model (UML Class Diagram, Python AST, JavaScript AST)"]
+    M0["M0: Instance (Actual objects in running system, Actual running code)"]
+    
+    M3 -->|instance-of| M2
+    M2 -->|instance-of| M1
+    M1 -->|instance-of| M0
 ```
 
 ### MetaAST as M2 (Meta-Model Level)

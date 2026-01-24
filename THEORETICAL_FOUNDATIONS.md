@@ -63,17 +63,16 @@ Metastatic applies these principles to the domain of **abstract syntax trees for
 
 The OMG Meta-Object Facility defines a four-level hierarchy of models:
 
-```
-M3: Meta-Meta-Model (MOF)
-     │ instance-of
-     ↓
-M2: Meta-Model (UML, MetaAST)
-     │ instance-of
-     ↓
-M1: Model (Class Diagram, Python AST)
-     │ instance-of
-     ↓
-M0: Instance (Running Object, Executing Code)
+```mermaid
+flowchart TD
+    M3["M3: Meta-Meta-Model (MOF)"]
+    M2["M2: Meta-Model (UML, MetaAST)"]
+    M1["M1: Model (Class Diagram, Python AST)"]
+    M0["M0: Instance (Running Object, Executing Code)"]
+    
+    M3 -->|instance-of| M2
+    M2 -->|instance-of| M1
+    M1 -->|instance-of| M0
 ```
 
 **Definition 2.1 (Layer Mₙ):** 

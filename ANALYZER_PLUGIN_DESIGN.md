@@ -17,62 +17,33 @@ This document describes the plugin-like architecture for extensible analyzers an
 
 ### Components
 
-```
-┌────────────────────────────────────────────────────────────┐
-│                  Analyzer Plugin System                    │
-├────────────────────────────────────────────────────────────┤
-│                                                            │
-│  ┌──────────────┐     ┌──────────────┐                   │
-│  │  Analyzer    │────▶│    Issue     │                   │
-│  │  Behaviour   │     │   (result)   │                   │
-│  └──────────────┘     └──────────────┘                   │
-│         │                                                  │
-│         ▼                                                  │
-│  ┌─────────────────────────────────────┐                 │
-│  │      Runner (Analysis Engine)        │                 │
-│  │  - AST traversal coordination        │                 │
-│  │  - Multi-analyzer execution          │                 │
-│  │  - Issue collection                  │                 │
-│  └─────────────────────────────────────┘                 │
-│         │                                                  │
-│         ▼                                                  │
-│  ┌─────────────────────────────────────┐                 │
-│  │         Registry (GenServer)         │                 │
-│  │  - Analyzer discovery                │                 │
-│  │  - Configuration management          │                 │
-│  │  - Category indexing                 │                 │
-│  └─────────────────────────────────────┘                 │
-│         │                                                  │
-│         ▼                                                  │
-│  ┌─────────────────────────────────────┐                 │
-│  │  Concrete Analyzers & Refactorings   │                 │
-│  │  - UnusedVariables                   │                 │
-│  │  - ComplexityCheck                   │                 │
-│  │  - SimplifyConditional (refactoring) │                 │
-│  │  - ... (user-extensible)             │                 │
-│  └─────────────────────────────────────┘                 │
-│                                                            │
-└────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph System["Analyzer Plugin System"]
+        Behaviour["Analyzer Behaviour<br/>(spec)"] --> Issue["Issue<br/>(result)"]
+        Behaviour --> Runner
+        
+        Runner["Runner (Analysis Engine)<br/>- AST traversal coordination<br/>- Multi-analyzer execution<br/>- Issue collection"]
+        Runner --> Registry
+        
+        Registry["Registry (GenServer)<br/>- Analyzer discovery<br/>- Configuration management<br/>- Category indexing"]
+        Registry --> Concrete
+        
+        Concrete["Concrete Analyzers & Refactorings<br/>- UnusedVariables<br/>- ComplexityCheck<br/>- SimplifyConditional (refactoring)<br/>- ... (user-extensible)"]
+    end
 ```
 
 ### Data Flow
 
-```
-Document/AST
-     ↓
-[Configure analyzers]
-     ↓
-[Runner.run/2]
-     ↓
-Single-pass AST traversal
-     ↓
-Dispatch to enabled analyzers
-     ↓
-Collect issues from each
-     ↓
-Sort, filter, format results
-     ↓
-Report with suggestions
+```mermaid
+flowchart TD
+    A["Document/AST"] --> B["Configure analyzers"]
+    B --> C["Runner.run/2"]
+    C --> D["Single-pass AST traversal"]
+    D --> E["Dispatch to enabled analyzers"]
+    E --> F["Collect issues from each"]
+    F --> G["Sort, filter, format results"]
+    G --> H["Report with suggestions"]
 ```
 
 ## Core API

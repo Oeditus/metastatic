@@ -129,7 +129,8 @@ defmodule Metastatic.MixProject do
       ],
       authors: ["Aleksei Matiushkin"],
       canonical: "https://hexdocs.pm/#{@app}",
-      skip_undefined_reference_warnings_on: []
+      skip_undefined_reference_warnings_on: [],
+      before_closing_body_tag: &before_closing_body_tag/1
     ]
   end
 
@@ -140,6 +141,7 @@ defmodule Metastatic.MixProject do
       "THEORETICAL_FOUNDATIONS.md": [title: "Theoretical Foundations"],
       "SUPPLEMENTAL_MODULES.md": [title: "Supplemental Modules"],
       "CONTRIBUTING_SUPPLEMENTALS.md": [title: "Contributing Supplementals"],
+      "ANALYZER_PLUGIN_DESIGN.md": [title: "Analyzer Plugin Design"],
       "CHANGELOG.md": [title: "Changelog"]
     ]
   end
@@ -203,4 +205,26 @@ defmodule Metastatic.MixProject do
       ]
     ]
   end
+
+  defp before_closing_body_tag(:html) do
+    """
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        mermaid.initialize({
+          startOnLoad: true,
+          theme: "default",
+          flowchart: {
+            useMaxWidth: true,
+            htmlLabels: true,
+            curve: "basis"
+          }
+        });
+        window.mermaid = mermaid;
+      });
+    </script>
+    """
+  end
+
+  defp before_closing_body_tag(_), do: ""
 end

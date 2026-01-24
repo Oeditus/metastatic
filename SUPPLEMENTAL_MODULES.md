@@ -71,58 +71,32 @@ A centralized GenServer registry maintains all available supplementals, enabling
 
 ### Components
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  Supplemental System                    │
-├─────────────────────────────────────────────────────────┤
-│                                                         │
-│  ┌──────────────┐     ┌──────────────┐                │
-│  │  Behaviour   │────▶│     Info     │                │
-│  │   (spec)     │     │  (metadata)  │                │
-│  └──────────────┘     └──────────────┘                │
-│         │                                               │
-│         ▼                                               │
-│  ┌─────────────────────────────────────┐              │
-│  │         Registry (GenServer)         │              │
-│  │  - by_construct index                │              │
-│  │  - by_language index                 │              │
-│  │  - conflict detection                │              │
-│  └─────────────────────────────────────┘              │
-│         │                                               │
-│         ▼                                               │
-│  ┌─────────────────────────────────────┐              │
-│  │         Transformer                  │              │
-│  │  - lookup + invoke supplementals     │              │
-│  │  - error handling                    │              │
-│  └─────────────────────────────────────┘              │
-│         │                                               │
-│         ▼                                               │
-│  ┌─────────────────────────────────────┐              │
-│  │  Concrete Supplementals              │              │
-│  │  - Python.Pykka                      │              │
-│  │  - Python.Asyncio                    │              │
-│  │  - ... (extensible)                  │              │
-│  └─────────────────────────────────────┘              │
-│                                                         │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph System["Supplemental System"]
+        Behaviour["Behaviour<br/>(spec)"] --> Info["Info<br/>(metadata)"]
+        Behaviour --> Registry
+        
+        Registry["Registry (GenServer)<br/>- by_construct index<br/>- by_language index<br/>- conflict detection"]
+        Registry --> Transformer
+        
+        Transformer["Transformer<br/>- lookup + invoke supplementals<br/>- error handling"]
+        Transformer --> Concrete
+        
+        Concrete["Concrete Supplementals<br/>- Python.Pykka<br/>- Python.Asyncio<br/>- ... (extensible)"]
+    end
 ```
 
 ### Data Flow
 
-```
-User AST with supplemental constructs
-         ↓
-   [Validator]
-         ↓
-  Identify required supplementals
-         ↓
-   [Registry lookup]
-         ↓
-   [Transformer]
-         ↓
-  Invoke supplemental.transform/3
-         ↓
-  Concrete language AST
+```mermaid
+flowchart TD
+    A["User AST with supplemental constructs"] --> B["Validator"]
+    B --> C["Identify required supplementals"]
+    C --> D["Registry lookup"]
+    D --> E["Transformer"]
+    E --> F["Invoke supplemental.transform/3"]
+    F --> G["Concrete language AST"]
 ```
 
 ## Using Supplementals
