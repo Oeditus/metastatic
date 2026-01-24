@@ -222,20 +222,27 @@ defmodule Metastatic.Document do
   @spec normalize(t() | {atom(), term()}) :: {:ok, t()} | {:error, term()}
   def normalize(%__MODULE__{} = doc), do: {:ok, doc}
 
+  def normalize({language, source}) when is_atom(language) and is_binary(source) do
+    with {:ok, adapter} <- Metastatic.adapter_for_language(language) do
+      case adapter.parse(source) do
+        {:ok, ast} ->
+          normalize({language, ast})
+
+        {:error, reason} ->
+          {:error, {:parsing_source_failed, reason}}
+      end
+    end
+  end
+
   def normalize({language, native_ast}) when is_atom(language) do
-    case adapter_for_language(language) do
-      {:ok, adapter} ->
-        case adapter.to_meta(native_ast) do
-          {:ok, meta_ast, metadata} ->
-            doc = new(meta_ast, language, metadata)
-            {:ok, doc}
+    with {:ok, adapter} <- Metastatic.adapter_for_language(language) do
+      case adapter.to_meta(native_ast) do
+        {:ok, meta_ast, metadata} ->
+          {:ok, new(meta_ast, language, metadata)}
 
-          {:error, reason} ->
-            {:error, {:transformation_failed, reason}}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, {:transformation_failed, reason}}
+      end
     end
   end
 
@@ -260,14 +267,4 @@ defmodule Metastatic.Document do
       {:error, reason} -> raise "Failed to normalize input: #{inspect(reason)}"
     end
   end
-
-  # Private helper to get adapter module for a language
-  defp adapter_for_language(:python), do: {:ok, Metastatic.Adapters.Python}
-  defp adapter_for_language(:elixir), do: {:ok, Metastatic.Adapters.Elixir}
-  defp adapter_for_language(:erlang), do: {:ok, Metastatic.Adapters.Erlang}
-  defp adapter_for_language(:ruby), do: {:ok, Metastatic.Adapters.Ruby}
-  defp adapter_for_language(:haskell), do: {:ok, Metastatic.Adapters.Haskell}
-
-  defp adapter_for_language(lang),
-    do: {:error, {:unsupported_language, "No adapter found for language: #{inspect(lang)}"}}
 end

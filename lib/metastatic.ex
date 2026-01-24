@@ -3,16 +3,25 @@ defmodule Metastatic do
   Documentation for `Metastatic`.
   """
 
-  @doc """
-  Hello world.
+  @type language :: :elixir | :erlang | :ruby | :haskell | :python
 
-  ## Examples
+  @languages ~w|elixir erlang ruby haskell python|a
 
-      iex> Metastatic.hello()
-      :world
+  @doc false
+  def languages, do: @languages
 
-  """
-  def hello do
-    :world
+  @doc false
+  def supported?(lang) when lang in @languages, do: true
+  def supported?(_), do: false
+
+  @doc false
+  def adapter_for_language(language)
+
+  for lang <- @languages do
+    mod = Module.concat([Metastatic.Adapters, lang |> Atom.to_string() |> Macro.camelize()])
+    def adapter_for_language(unquote(lang)), do: {:ok, unquote(mod)}
   end
+
+  def adapter_for_language(lang),
+    do: {:error, {:unsupported_language, "No adapter found for language: #{inspect(lang)}"}}
 end

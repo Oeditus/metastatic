@@ -57,36 +57,28 @@ defmodule Metastatic.Analysis.UnusedVariables do
   alias Metastatic.Analysis.UnusedVariables.Result
   alias Metastatic.Document
 
-  @doc """
-  Analyzes a document for unused variables.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document for unused variables.
 
-  Returns `{:ok, result}` where result is a `Metastatic.Analysis.UnusedVariables.Result` struct.
+    Returns `{:ok, result}` where result is a `Metastatic.Analysis.UnusedVariables.Result` struct.
 
-  ## Options
+    ## Options
 
-  - `:ignore_underscore` - Ignore variables starting with underscore (default: true)
-  - `:categories` - List of categories to check (default: all)
+    - `:ignore_underscore` - Ignore variables starting with underscore (default: true)
+    - `:categories` - List of categories to check (default: all)
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> {:ok, result} = Metastatic.Analysis.UnusedVariables.analyze(doc)
-      iex> result.has_unused?
-      false
-  """
-  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
-          {:ok, Result.t()} | {:error, term()}
-  def analyze(input, opts \\ [])
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :elixir)
+        iex> {:ok, result} = Metastatic.Analysis.UnusedVariables.analyze(doc)
+        iex> result.has_unused?
+        false
+    """
 
-  def analyze(input, opts) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  def analyze(%Document{ast: ast} = _doc, opts) do
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast} = _doc, opts) do
     ignore_underscore = Keyword.get(opts, :ignore_underscore, true)
 
     # Build symbol table: track writes and reads
@@ -103,25 +95,6 @@ defmodule Metastatic.Analysis.UnusedVariables do
       |> Enum.map(&format_unused_variable/1)
 
     {:ok, Result.new(unused)}
-  end
-
-  @doc """
-  Analyzes a document for unused variables, raising on error.
-
-  ## Examples
-
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.UnusedVariables.analyze!(doc)
-      iex> result.has_unused?
-      false
-  """
-  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
-  def analyze!(input, opts \\ []) do
-    case analyze(input, opts) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "UnusedVariables analysis failed: #{inspect(reason)}"
-    end
   end
 
   # Private implementation

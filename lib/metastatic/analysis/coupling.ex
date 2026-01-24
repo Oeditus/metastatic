@@ -43,28 +43,17 @@ defmodule Metastatic.Analysis.Coupling do
           recommendations: [String.t()]
         }
 
-  @doc """
-  Analyzes coupling in a document.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes coupling in a document.
 
-  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
-  """
-  @spec analyze(Document.t() | {atom(), term()}) :: {:ok, result()} | {:error, term()}
-  def analyze(input) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc)
-      {:error, reason} -> {:error, reason}
-    end
-  end
+    Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
+    """
 
-  def analyze(%Document{ast: ast}) do
-    case extract_container(ast) do
-      {:ok, _type, name, members} ->
-        result = analyze_coupling(name, members)
-        {:ok, result}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast}, _opts \\ []) do
+    with {:ok, _type, name, members} <- extract_container(ast),
+         do: {:ok, analyze_coupling(name, members)}
   end
 
   defp extract_container({:container, type, name, _metadata, members}) do

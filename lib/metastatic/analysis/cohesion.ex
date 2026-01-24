@@ -67,43 +67,32 @@ defmodule Metastatic.Analysis.Cohesion do
 
   alias Metastatic.{Analysis.Cohesion.Result, Document}
 
-  @doc """
-  Analyze cohesion of a container (module/class/namespace).
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyze cohesion of a container (module/class/namespace).
 
-  Returns `{:ok, result}` if the AST contains a container, or `{:error, reason}` otherwise.
+    Returns `{:ok, result}` if the AST contains a container, or `{:error, reason}` otherwise.
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:container, :class, \"Calculator\", %{}, [
-      ...>   {:function_def, :public, \"add\", [\"x\"], %{},
-      ...>    {:augmented_assignment, :+, {:attribute_access, {:variable, \"self\"}, \"total\"}, {:variable, \"x\"}}},
-      ...>   {:function_def, :public, \"get_total\", [], %{},
-      ...>    {:attribute_access, {:variable, \"self\"}, \"total\"}}
-      ...> ]}
-      iex> doc = Metastatic.Document.new(ast, :python)
-      iex> {:ok, result} = Metastatic.Analysis.Cohesion.analyze(doc)
-      iex> result.lcom
-      0
-      iex> result.tcc
-      1.0
-  """
-  @spec analyze(Document.t() | {atom(), term()}) :: {:ok, Result.t()} | {:error, term()}
-  def analyze(input) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc)
-      {:error, reason} -> {:error, reason}
-    end
-  end
+        iex> ast = {:container, :class, \"Calculator\", %{}, [
+        ...>   {:function_def, :public, \"add\", [\"x\"], %{},
+        ...>    {:augmented_assignment, :+, {:attribute_access, {:variable, \"self\"}, \"total\"}, {:variable, \"x\"}}},
+        ...>   {:function_def, :public, \"get_total\", [], %{},
+        ...>    {:attribute_access, {:variable, \"self\"}, \"total\"}}
+        ...> ]}
+        iex> doc = Metastatic.Document.new(ast, :python)
+        iex> {:ok, result} = Metastatic.Analysis.Cohesion.analyze(doc)
+        iex> result.lcom
+        0
+        iex> result.tcc
+        1.0
+    """
 
-  def analyze(%Document{ast: ast}) do
-    case extract_container(ast) do
-      {:ok, container_type, container_name, members} ->
-        result = analyze_container(container_type, container_name, members)
-        {:ok, result}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast}, _opts \\ []) do
+    with {:ok, container_type, container_name, members} <- extract_container(ast),
+         do: {:ok, analyze_container(container_type, container_name, members)}
   end
 
   # Private implementation

@@ -86,36 +86,28 @@ defmodule Metastatic.Analysis.Security do
     {"token", ~r/token\s*=\s*["'].+["']/i}
   ]
 
-  @doc """
-  Analyzes a document for security vulnerabilities.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document for security vulnerabilities.
 
-  Returns `{:ok, result}` where result is a `Metastatic.Analysis.Security.Result` struct.
+    Returns `{:ok, result}` where result is a `Metastatic.Analysis.Security.Result` struct.
 
-  ## Options
+    ## Options
 
-  - `:categories` - List of vulnerability categories to check (default: all)
-  - `:min_severity` - Minimum severity to report (default: :low)
+    - `:categories` - List of vulnerability categories to check (default: all)
+    - `:min_severity` - Minimum severity to report (default: :low)
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> {:ok, result} = Metastatic.Analysis.Security.analyze(doc)
-      iex> result.has_vulnerabilities?
-      false
-  """
-  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
-          {:ok, Result.t()} | {:error, term()}
-  def analyze(input, opts \\ [])
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :elixir)
+        iex> {:ok, result} = Metastatic.Analysis.Security.analyze(doc)
+        iex> result.has_vulnerabilities?
+        false
+    """
 
-  def analyze(input, opts) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  def analyze(%Document{ast: ast, language: language} = _doc, opts) do
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast, language: language} = _doc, opts \\ []) do
     vulns =
       []
       |> detect_dangerous_functions(ast, language)
@@ -125,25 +117,6 @@ defmodule Metastatic.Analysis.Security do
       |> filter_by_options(opts)
 
     {:ok, Result.new(vulns)}
-  end
-
-  @doc """
-  Analyzes a document for security vulnerabilities, raising on error.
-
-  ## Examples
-
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.Security.analyze!(doc)
-      iex> result.has_vulnerabilities?
-      false
-  """
-  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
-  def analyze!(input, opts \\ []) do
-    case analyze(input, opts) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "Security analysis failed: #{inspect(reason)}"
-    end
   end
 
   # Private implementation

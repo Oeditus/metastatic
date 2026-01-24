@@ -36,34 +36,23 @@ defmodule Metastatic.Analysis.StateManagement do
 
   alias Metastatic.{Analysis.StateManagement.Result, Document}
 
-  @doc """
-  Analyze state management of a container.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyze state management of a container.
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:container, :class, "Empty", %{}, []}
-      iex> doc = Metastatic.Document.new(ast, :python)
-      iex> {:ok, result} = Metastatic.Analysis.StateManagement.analyze(doc)
-      iex> result.pattern
-      :stateless
-  """
-  @spec analyze(Document.t() | {atom(), term()}) :: {:ok, Result.t()} | {:error, term()}
-  def analyze(input) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc)
-      {:error, reason} -> {:error, reason}
-    end
-  end
+        iex> ast = {:container, :class, "Empty", %{}, []}
+        iex> doc = Metastatic.Document.new(ast, :python)
+        iex> {:ok, result} = Metastatic.Analysis.StateManagement.analyze(doc)
+        iex> result.pattern
+        :stateless
+    """
 
-  def analyze(%Document{ast: ast}) do
-    case extract_container(ast) do
-      {:ok, container_type, container_name, members} ->
-        result = analyze_container(container_type, container_name, members)
-        {:ok, result}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast}, _opts \\ []) do
+    with {:ok, container_type, container_name, members} <- extract_container(ast),
+         do: {:ok, analyze_container(container_type, container_name, members)}
   end
 
   # Private implementation

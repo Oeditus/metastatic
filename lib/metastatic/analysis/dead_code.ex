@@ -55,36 +55,28 @@ defmodule Metastatic.Analysis.DeadCode do
   alias Metastatic.Analysis.DeadCode.Result
   alias Metastatic.Document
 
-  @doc """
-  Analyzes a document for dead code.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document for dead code.
 
-  Returns `{:ok, result}` where result is a `Metastatic.Analysis.DeadCode.Result` struct.
+    Returns `{:ok, result}` where result is a `Metastatic.Analysis.DeadCode.Result` struct.
 
-  ## Options
+    ## Options
 
-  - `:detect_unused_functions` - Enable unused function detection (default: false, requires module context)
-  - `:min_confidence` - Minimum confidence level to report (default: :low)
+    - `:detect_unused_functions` - Enable unused function detection (default: false, requires module context)
+    - `:min_confidence` - Minimum confidence level to report (default: :low)
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> {:ok, result} = Metastatic.Analysis.DeadCode.analyze(doc)
-      iex> result.has_dead_code?
-      false
-  """
-  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
-          {:ok, Result.t()} | {:error, term()}
-  def analyze(input, opts \\ [])
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :elixir)
+        iex> {:ok, result} = Metastatic.Analysis.DeadCode.analyze(doc)
+        iex> result.has_dead_code?
+        false
+    """
 
-  def analyze(input, opts) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  def analyze(%Document{ast: ast} = _doc, opts) do
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast} = _doc, opts \\ []) do
     dead_locations =
       []
       |> detect_unreachable_after_return(ast, [])
@@ -92,25 +84,6 @@ defmodule Metastatic.Analysis.DeadCode do
       |> filter_by_confidence(opts)
 
     {:ok, Result.new(dead_locations)}
-  end
-
-  @doc """
-  Analyzes a document for dead code, raising on error.
-
-  ## Examples
-
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.DeadCode.analyze!(doc)
-      iex> result.has_dead_code?
-      false
-  """
-  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
-  def analyze!(input, opts \\ []) do
-    case analyze(input, opts) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "DeadCode analysis failed: #{inspect(reason)}"
-    end
   end
 
   # Private implementation

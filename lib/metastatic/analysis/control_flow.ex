@@ -41,57 +41,26 @@ defmodule Metastatic.Analysis.ControlFlow do
   alias Metastatic.Analysis.ControlFlow.Result
   alias Metastatic.Document
 
-  @doc """
-  Analyzes a document to build its control flow graph.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document to build its control flow graph.
 
-  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
+    Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
 
-  Returns `{:ok, result}` where result contains the CFG and analysis.
+    Returns `{:ok, result}` where result contains the CFG and analysis.
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> {:ok, result} = Metastatic.Analysis.ControlFlow.analyze(doc)
-      iex> is_integer(result.node_count)
-      true
-  """
-  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
-          {:ok, Result.t()} | {:error, term()}
-  def analyze(input, opts \\ [])
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :elixir)
+        iex> {:ok, result} = Metastatic.Analysis.ControlFlow.analyze(doc)
+        iex> is_integer(result.node_count)
+        true
+    """
 
-  def analyze(%Document{ast: ast} = _doc, _opts) do
-    cfg = build_cfg(ast)
-    {:ok, Result.new(cfg)}
-  end
-
-  def analyze(input, opts) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @doc """
-  Analyzes a document to build its CFG, raising on error.
-
-  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
-
-  ## Examples
-
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.ControlFlow.analyze!(doc)
-      iex> is_integer(result.node_count)
-      true
-  """
-  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
-  def analyze!(input, opts \\ []) do
-    case analyze(input, opts) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "ControlFlow analysis failed: #{inspect(reason)}"
-    end
-  end
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast} = _doc, _opts \\ []),
+    do: {:ok, ast |> build_cfg() |> Result.new()}
 
   # Private implementation
 

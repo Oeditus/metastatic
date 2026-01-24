@@ -68,42 +68,41 @@ defmodule Metastatic.Analysis.Complexity do
 
   alias Metastatic.Document
 
-  @doc """
-  Analyzes a document for complexity.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document for complexity.
 
-  Accepts either:
-  - A `Metastatic.Document` struct
-  - A `{language, native_ast}` tuple
+    Accepts either:
+    - A `Metastatic.Document` struct
+    - A `{language, native_ast}` tuple
 
-  Returns `{:ok, result}` where result is a `Metastatic.Analysis.Complexity.Result` struct.
+    Returns `{:ok, result}` where result is a `Metastatic.Analysis.Complexity.Result` struct.
 
-  ## Options
+    ## Options
 
-  - `:thresholds` - Threshold map for warnings (default thresholds used if not provided)
-  - `:metrics` - List of metrics to calculate (default: `:all`)
+    - `:thresholds` - Threshold map for warnings (default thresholds used if not provided)
+    - `:metrics` - List of metrics to calculate (default: `:all`)
 
-  ## Examples
+    ## Examples
 
-      # Using Document
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :python)
-      iex> {:ok, result} = Metastatic.Analysis.Complexity.analyze(doc)
-      iex> result.cyclomatic
-      1
-      iex> result.cognitive
-      0
+        # Using Document
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :python)
+        iex> {:ok, result} = Metastatic.Analysis.Complexity.analyze(doc)
+        iex> result.cyclomatic
+        1
+        iex> result.cognitive
+        0
 
-      # Using {language, native_ast} tuple
-      iex> python_ast = %{"_type" => "Constant", "value" => 42}
-      iex> {:ok, result} = Metastatic.Analysis.Complexity.analyze({:python, python_ast})
-      iex> result.cyclomatic
-      1
-  """
-  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
-          {:ok, Result.t()} | {:error, term()}
-  def analyze(input, opts \\ [])
+        # Using {language, native_ast} tuple
+        iex> python_ast = %{"_type" => "Constant", "value" => 42}
+        iex> {:ok, result} = Metastatic.Analysis.Complexity.analyze(:python, python_ast, [])
+        iex> result.cyclomatic
+        1
+    """
 
-  def analyze(%Document{ast: ast, metadata: metadata} = doc, opts) do
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast, metadata: metadata} = doc, opts \\ []) do
     thresholds = Keyword.get(opts, :thresholds, %{})
     metrics = Keyword.get(opts, :metrics, :all)
 
@@ -127,41 +126,6 @@ defmodule Metastatic.Analysis.Complexity do
       |> Result.apply_thresholds(thresholds)
 
     {:ok, result}
-  end
-
-  def analyze(input, opts) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @doc """
-  Analyzes a document for complexity, raising on error.
-
-  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
-
-  ## Examples
-
-      # Using Document
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.Complexity.analyze!(doc)
-      iex> result.cyclomatic
-      1
-
-      # Using {language, native_ast} tuple
-      iex> python_ast = %{"_type" => "Constant", "value" => 42}
-      iex> result = Metastatic.Analysis.Complexity.analyze!({:python, python_ast})
-      iex> result.cyclomatic
-      1
-  """
-  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
-  def analyze!(input, opts \\ []) do
-    case analyze(input, opts) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "Complexity analysis failed: #{inspect(reason)}"
-    end
   end
 
   # Private implementation

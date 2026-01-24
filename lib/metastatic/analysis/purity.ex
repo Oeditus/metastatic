@@ -57,68 +57,40 @@ defmodule Metastatic.Analysis.Purity do
   alias Metastatic.Analysis.Purity.{Effects, Result}
   alias Metastatic.Document
 
-  @doc """
-  Analyzes a document for purity.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document for purity.
 
-  Accepts either:
-  - A `Metastatic.Document` struct
-  - A `{language, native_ast}` tuple
+    Accepts either:
+    - A `Metastatic.Document` struct
+    - A `{language, native_ast}` tuple
 
-  Returns `{:ok, result}` where result is a `Metastatic.Analysis.Purity.Result` struct.
+    Returns `{:ok, result}` where result is a `Metastatic.Analysis.Purity.Result` struct.
 
-  ## Examples
+    ## Examples
 
-      # Using Document
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> {:ok, result} = Metastatic.Analysis.Purity.analyze(doc)
-      iex> result.pure?
-      true
+        # Using Document
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :elixir)
+        iex> {:ok, result} = Metastatic.Analysis.Purity.analyze(doc)
+        iex> result.pure?
+        true
 
-      # Using {language, native_ast} tuple
-      iex> python_ast = %{"_type" => "Constant", "value" => 42}
-      iex> {:ok, result} = Metastatic.Analysis.Purity.analyze({:python, python_ast})
-      iex> result.pure?
-      true
-  """
-  @spec analyze(Document.t() | {atom(), term()}) :: {:ok, Result.t()} | {:error, term()}
-  def analyze(input) do
-    case Document.normalize(input) do
-      {:ok, %Document{ast: ast}} ->
-        context = walk(ast, %{in_loop: false, effects: [], locations: [], unknown: []})
-        {:ok, build_result(context)}
+        # Using {language, native_ast} tuple
+        iex> python_ast = %{"_type" => "Constant", "value" => 42}
+        iex> {:ok, result} = Metastatic.Analysis.Purity.analyze(:python, python_ast)
+        iex> result.pure?
+        true
+    """
 
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast}, _opts \\ []) do
+    result =
+      ast
+      |> walk(%{in_loop: false, effects: [], locations: [], unknown: []})
+      |> build_result()
 
-  @doc """
-  Analyzes a document for purity, raising on error.
-
-  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
-
-  ## Examples
-
-      # Using Document
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.Purity.analyze!(doc)
-      iex> result.pure?
-      true
-
-      # Using {language, native_ast} tuple
-      iex> python_ast = %{"_type" => "Constant", "value" => 42}
-      iex> result = Metastatic.Analysis.Purity.analyze!({:python, python_ast})
-      iex> result.pure?
-      true
-  """
-  @spec analyze!(Document.t() | {atom(), term()}) :: Result.t()
-  def analyze!(input) do
-    case analyze(input) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "Purity analysis failed: #{inspect(reason)}"
-    end
+    {:ok, result}
   end
 
   # Private implementation

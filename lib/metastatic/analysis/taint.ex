@@ -78,31 +78,23 @@ defmodule Metastatic.Analysis.Taint do
     ]
   }
 
-  @doc """
-  Analyzes a document for taint flows.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document for taint flows.
 
-  Returns `{:ok, result}` where result is a `Metastatic.Analysis.Taint.Result` struct.
+    Returns `{:ok, result}` where result is a `Metastatic.Analysis.Taint.Result` struct.
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> {:ok, result} = Metastatic.Analysis.Taint.analyze(doc)
-      iex> result.has_taint_flows?
-      false
-  """
-  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
-          {:ok, Result.t()} | {:error, term()}
-  def analyze(input, opts \\ [])
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :elixir)
+        iex> {:ok, result} = Metastatic.Analysis.Taint.analyze(doc)
+        iex> result.has_taint_flows?
+        false
+    """
 
-  def analyze(input, opts) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  def analyze(%Document{ast: ast, language: language} = _doc, _opts) do
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast, language: language} = _doc, _opts \\ []) do
     # Find taint sources
     sources = find_taint_sources(ast, language)
 
@@ -113,25 +105,6 @@ defmodule Metastatic.Analysis.Taint do
     flows = detect_taint_flows(ast, sources, sinks)
 
     {:ok, Result.new(flows)}
-  end
-
-  @doc """
-  Analyzes a document for taint flows, raising on error.
-
-  ## Examples
-
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.Taint.analyze!(doc)
-      iex> result.has_taint_flows?
-      false
-  """
-  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
-  def analyze!(input, opts \\ []) do
-    case analyze(input, opts) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "Taint analysis failed: #{inspect(reason)}"
-    end
   end
 
   # Private implementation

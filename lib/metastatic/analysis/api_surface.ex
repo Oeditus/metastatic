@@ -39,23 +39,12 @@ defmodule Metastatic.Analysis.ApiSurface do
           recommendations: [String.t()]
         }
 
-  @spec analyze(Document.t() | {atom(), term()}) :: {:ok, result()} | {:error, term()}
-  def analyze(input) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc)
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  use Metastatic.Document.Analyzer
 
-  def analyze(%Document{ast: ast}) do
-    case extract_container(ast) do
-      {:ok, _type, name, members} ->
-        result = analyze_api(name, members)
-        {:ok, result}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast}, _opts \\ []) do
+    with {:ok, _type, name, members} <- extract_container(ast),
+         do: {:ok, analyze_api(name, members)}
   end
 
   defp extract_container({:container, type, name, _metadata, members}) do

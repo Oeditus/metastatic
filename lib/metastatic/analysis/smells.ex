@@ -58,36 +58,28 @@ defmodule Metastatic.Analysis.Smells do
     max_cognitive: 15
   }
 
-  @doc """
-  Analyzes a document for code smells.
+  use Metastatic.Document.Analyzer,
+    doc: """
+    Analyzes a document for code smells.
 
-  Returns `{:ok, result}` where result is a `Metastatic.Analysis.Smells.Result` struct.
+    Returns `{:ok, result}` where result is a `Metastatic.Analysis.Smells.Result` struct.
 
-  ## Options
+    ## Options
 
-  - `:thresholds` - Map of threshold overrides (see default thresholds)
-  - `:detect` - List of smell types to detect (default: all)
+    - `:thresholds` - Map of threshold overrides (see default thresholds)
+    - `:detect` - List of smell types to detect (default: all)
 
-  ## Examples
+    ## Examples
 
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> {:ok, result} = Metastatic.Analysis.Smells.analyze(doc)
-      iex> result.has_smells?
-      false
-  """
-  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
-          {:ok, Result.t()} | {:error, term()}
-  def analyze(input, opts \\ [])
+        iex> ast = {:literal, :integer, 42}
+        iex> doc = Metastatic.Document.new(ast, :elixir)
+        iex> {:ok, result} = Metastatic.Analysis.Smells.analyze(doc)
+        iex> result.has_smells?
+        false
+    """
 
-  def analyze(input, opts) when is_tuple(input) do
-    case Document.normalize(input) do
-      {:ok, doc} -> analyze(doc, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  def analyze(%Document{ast: ast} = doc, opts) do
+  @impl Metastatic.Document.Analyzer
+  def handle_analyze(%Document{ast: ast} = doc, opts \\ []) do
     thresholds = Keyword.get(opts, :thresholds, %{}) |> merge_thresholds()
 
     smells =
@@ -101,25 +93,6 @@ defmodule Metastatic.Analysis.Smells do
     smells = smells ++ magic_smells ++ complex_smells
 
     {:ok, Result.new(smells)}
-  end
-
-  @doc """
-  Analyzes a document for code smells, raising on error.
-
-  ## Examples
-
-      iex> ast = {:literal, :integer, 42}
-      iex> doc = Metastatic.Document.new(ast, :elixir)
-      iex> result = Metastatic.Analysis.Smells.analyze!(doc)
-      iex> result.has_smells?
-      false
-  """
-  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
-  def analyze!(input, opts \\ []) do
-    case analyze(input, opts) do
-      {:ok, result} -> result
-      {:error, reason} -> raise "Smells analysis failed: #{inspect(reason)}"
-    end
   end
 
   # Private implementation
