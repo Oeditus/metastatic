@@ -1,8 +1,7 @@
 defmodule Metastatic.Analysis.CohesionTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Document, Analysis.Cohesion}
-  alias Metastatic.Analysis.Cohesion.Result
+  alias Metastatic.{Analysis.Cohesion, Analysis.Cohesion.Result, Document}
 
   doctest Metastatic.Analysis.Cohesion
   doctest Metastatic.Analysis.Cohesion.Result
@@ -93,7 +92,7 @@ defmodule Metastatic.Analysis.CohesionTest do
       assert result.lcc == 0.0
       assert result.shared_state == []
       assert result.assessment == :very_poor
-      assert length(result.warnings) > 0
+      assert match?([_ | _], result.warnings)
     end
 
     test "class with disjoint method groups" do

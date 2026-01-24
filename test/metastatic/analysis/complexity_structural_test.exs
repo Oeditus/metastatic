@@ -1,7 +1,7 @@
 defmodule Metastatic.Analysis.ComplexityStructuralTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Document, Analysis.Complexity}
+  alias Metastatic.{Analysis.Complexity, Document}
 
   describe "complexity analysis for containers" do
     test "empty container has base complexity" do

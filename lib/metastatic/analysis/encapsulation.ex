@@ -59,8 +59,7 @@ defmodule Metastatic.Analysis.Encapsulation do
       result.assessment  # => :poor
   """
 
-  alias Metastatic.Document
-  alias Metastatic.Analysis.Encapsulation.Result
+  alias Metastatic.{Analysis.Encapsulation.Result, Document}
 
   @doc """
   Analyze encapsulation of a container (module/class/namespace).
@@ -142,34 +141,34 @@ defmodule Metastatic.Analysis.Encapsulation do
 
   # Count methods that are simple accessors (getters/setters)
   defp count_accessors(methods) do
-    Enum.count(methods, &is_accessor?/1)
+    Enum.count(methods, &accessor?/1)
   end
 
   # Check if a function is a simple accessor
-  defp is_accessor?({:function_def, :public, name, params, _meta, body}) do
+  defp accessor?({:function_def, :public, name, params, _meta, body}) do
     # Getter: no params, returns attribute access
-    is_getter = length(params) == 0 and is_getter_body?(body)
+    getter? = params == [] and getter_body?(body)
 
     # Setter: one param, assigns to attribute
-    is_setter = length(params) == 1 and is_setter_body?(body)
+    setter? = match?([_], params) and setter_body?(body)
 
     # Check if name suggests accessor (get_*, set_*, or property-style)
     name_suggests_accessor =
       String.starts_with?(name, ["get_", "set_"]) or
         not String.contains?(name, "_")
 
-    (is_getter or is_setter) and name_suggests_accessor
+    (getter? or setter?) and name_suggests_accessor
   end
 
-  defp is_accessor?(_), do: false
+  defp accessor?(_), do: false
 
   # Check if body is a getter (returns attribute access)
-  defp is_getter_body?({:attribute_access, _, _}), do: true
-  defp is_getter_body?(_), do: false
+  defp getter_body?({:attribute_access, _, _}), do: true
+  defp getter_body?(_), do: false
 
   # Check if body is a setter (assigns to attribute)
-  defp is_setter_body?({:assignment, {:attribute_access, _, _}, _}), do: true
-  defp is_setter_body?(_), do: false
+  defp setter_body?({:assignment, {:attribute_access, _, _}, _}), do: true
+  defp setter_body?(_), do: false
 
   # Extract all state variables accessed in members
   defp extract_state_variables(members) do
@@ -252,7 +251,7 @@ defmodule Metastatic.Analysis.Encapsulation do
     methods
     |> Enum.flat_map(fn {:function_def, visibility, name, _params, _meta, body} = method ->
       # Skip if it's already an accessor
-      if is_accessor?(method) do
+      if accessor?(method) do
         []
       else
         # Check if method directly assigns to state
@@ -373,7 +372,7 @@ defmodule Metastatic.Analysis.Encapsulation do
         returns_internal_structure?(then_br)
 
       # Block - check last statement
-      {:block, stmts} when is_list(stmts) and length(stmts) > 0 ->
+      {:block, [_ | _] = stmts} ->
         returns_internal_structure?(List.last(stmts))
 
       _ ->

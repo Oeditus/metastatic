@@ -258,11 +258,6 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
      if(setter, do: normalize_ast(setter), else: nil), :_}
   end
 
-  # Helper for normalizing function parameters
-  defp normalize_param(param) when is_binary(param), do: :_
-  defp normalize_param({:pattern, pattern}), do: {:pattern, normalize_ast(pattern)}
-  defp normalize_param({:default, _name, default}), do: {:default, :_, normalize_ast(default)}
-
   # M2.3 Native layer - preserve structure hints but not data
   defp normalize_ast({:language_specific, lang, _native, hint, _metadata}) do
     {:language_specific, lang, :_, hint, :_}
@@ -280,6 +275,11 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   defp normalize_ast(:_), do: :_
   defp normalize_ast(nil), do: nil
   defp normalize_ast(other), do: other
+
+  # Helper for normalizing function parameters
+  defp normalize_param(param) when is_binary(param), do: :_
+  defp normalize_param({:pattern, pattern}), do: {:pattern, normalize_ast(pattern)}
+  defp normalize_param({:default, _name, default}), do: {:default, :_, normalize_ast(default)}
 
   # Extract tokens for token-based similarity
   defp extract_tokens({:variable, _name}, acc), do: [:variable | acc]
@@ -407,15 +407,6 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
     if setter, do: extract_tokens(setter, acc), else: acc
   end
 
-  # Helper for extracting tokens from function parameters
-  defp extract_param_tokens(param, acc) when is_binary(param), do: [:param | acc]
-
-  defp extract_param_tokens({:pattern, pattern}, acc),
-    do: extract_tokens(pattern, [:pattern_param | acc])
-
-  defp extract_param_tokens({:default, _name, default}, acc),
-    do: extract_tokens(default, [:default_param | acc])
-
   # M2.3 Native
   defp extract_tokens({:language_specific, lang, _native, hint, _metadata}, acc) do
     [hint, lang, :language_specific | acc]
@@ -432,4 +423,13 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   defp extract_tokens(:_, acc), do: [:wildcard | acc]
   defp extract_tokens(nil, acc), do: acc
   defp extract_tokens(_other, acc), do: acc
+
+  # Helper for extracting tokens from function parameters
+  defp extract_param_tokens(param, acc) when is_binary(param), do: [:param | acc]
+
+  defp extract_param_tokens({:pattern, pattern}, acc),
+    do: extract_tokens(pattern, [:pattern_param | acc])
+
+  defp extract_param_tokens({:default, _name, default}, acc),
+    do: extract_tokens(default, [:default_param | acc])
 end

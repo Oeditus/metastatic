@@ -65,8 +65,7 @@ defmodule Metastatic.Analysis.Cohesion do
       result.assessment     # => :very_poor
   """
 
-  alias Metastatic.Document
-  alias Metastatic.Analysis.Cohesion.Result
+  alias Metastatic.{Analysis.Cohesion.Result, Document}
 
   @doc """
   Analyze cohesion of a container (module/class/namespace).

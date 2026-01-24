@@ -1,7 +1,7 @@
 defmodule Metastatic.ValidatorStructuralTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.{Validator, Document}
+  alias Metastatic.{Document, Validator}
 
   describe "structural layer validation" do
     test "container validates as extended level" do

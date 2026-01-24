@@ -34,8 +34,7 @@ defmodule Metastatic.Analysis.StateManagement do
       result.pattern  # => :controlled_mutation
   """
 
-  alias Metastatic.Document
-  alias Metastatic.Analysis.StateManagement.Result
+  alias Metastatic.{Analysis.StateManagement.Result, Document}
 
   @doc """
   Analyze state management of a container.

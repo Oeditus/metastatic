@@ -100,11 +100,11 @@ defmodule Metastatic.Analysis.StateManagement.Result do
         :immutable_state
 
       # All state is read-only except explicitly mutable
-      length(read_only) > 0 and length(mutable) > 0 ->
+      match?([_ | _], read_only) and match?([_ | _], mutable) ->
         :controlled_mutation
 
       # Has mutations with mixed patterns
-      mutation_count > 0 and length(mutable) > 0 ->
+      mutation_count > 0 and match?([_ | _], mutable) ->
         :controlled_mutation
 
       # Mutations without clear pattern
@@ -179,13 +179,15 @@ defmodule Metastatic.Analysis.StateManagement.Result do
       end
 
     warnings =
-      if length(uninitialized) > 0 do
-        [
-          "State variables may be uninitialized: #{Enum.join(uninitialized, ", ")}"
-          | warnings
-        ]
-      else
-        warnings
+      case uninitialized do
+        [_ | _] ->
+          [
+            "State variables may be uninitialized: #{Enum.join(uninitialized, ", ")}"
+            | warnings
+          ]
+
+        _ ->
+          warnings
       end
 
     Enum.reverse(warnings)
