@@ -61,8 +61,29 @@ defmodule Metastatic.Adapters.PythonTest do
         ]
       }
 
-      assert {:ok, {:literal, :collection, elements}, _} = ToMeta.transform(ast)
+      assert {:ok, {:list, elements}, _} = ToMeta.transform(ast)
       assert [{:literal, :integer, 1}, {:literal, :integer, 2}] = elements
+    end
+
+    test "transforms dict literals" do
+      ast = %{
+        "_type" => "Dict",
+        "keys" => [
+          %{"_type" => "Constant", "value" => "name"},
+          %{"_type" => "Constant", "value" => "age"}
+        ],
+        "values" => [
+          %{"_type" => "Constant", "value" => "Alice"},
+          %{"_type" => "Constant", "value" => 30}
+        ]
+      }
+
+      assert {:ok, {:map, pairs}, _} = ToMeta.transform(ast)
+
+      assert [
+               {{:literal, :string, "name"}, {:literal, :string, "Alice"}},
+               {{:literal, :string, "age"}, {:literal, :integer, 30}}
+             ] = pairs
     end
   end
 

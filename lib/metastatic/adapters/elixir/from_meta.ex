@@ -69,14 +69,21 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     {:ok, atom}
   end
 
-  def transform({:literal, :collection, items}, metadata) do
+  # Lists - M2.1 Core Layer
+  def transform({:list, items}, metadata) do
     case transform_list(items, metadata) do
       {:ok, transformed_items} ->
-        # Return as list literal
         {:ok, transformed_items}
 
       error ->
         error
+    end
+  end
+
+  # Maps - M2.1 Core Layer
+  def transform({:map, pairs}, metadata) do
+    with {:ok, pairs_ex} <- transform_map_pairs(pairs, metadata) do
+      {:ok, {:%{}, [], pairs_ex}}
     end
   end
 
@@ -323,6 +330,22 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     end)
     |> case do
       {:ok, items} -> {:ok, Enum.reverse(items)}
+      error -> error
+    end
+  end
+
+  defp transform_map_pairs(pairs, metadata) when is_list(pairs) do
+    pairs
+    |> Enum.reduce_while({:ok, []}, fn {key, value}, {:ok, acc} ->
+      with {:ok, key_ex} <- transform(key, metadata),
+           {:ok, value_ex} <- transform(value, metadata) do
+        {:cont, {:ok, [{key_ex, value_ex} | acc]}}
+      else
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, pairs} -> {:ok, Enum.reverse(pairs)}
       error -> error
     end
   end

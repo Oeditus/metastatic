@@ -52,6 +52,8 @@ defmodule Metastatic.AST do
   @type meta_ast ::
           literal()
           | variable()
+          | list_literal()
+          | map_literal()
           | binary_op()
           | unary_op()
           | function_call()
@@ -129,6 +131,48 @@ defmodule Metastatic.AST do
       {:variable, "userName"}
   """
   @type variable :: {:variable, name :: String.t()}
+
+  @typedoc """
+  M2 meta-type: List collection.
+
+  Represents ordered sequences of elements. Lists are fundamental data structures
+  present in all programming languages, making them universal (M2.1 Core).
+
+  ## M1 instances
+  - Python: `ast.List`
+  - JavaScript: `Array`
+  - Elixir: list literal `[1, 2, 3]`
+  - Ruby: `Array`
+  - Erlang: list
+
+  ## Examples
+
+      {:list, []}
+      {:list, [{:literal, :integer, 1}, {:literal, :integer, 2}]}
+      {:list, [{:variable, "x"}, {:variable, "y"}]}
+  """
+  @type list_literal :: {:list, elements :: [meta_ast()]}
+
+  @typedoc """
+  M2 meta-type: Map/Dictionary collection.
+
+  Represents key-value mappings. Maps/dictionaries are fundamental data structures
+  present in all modern programming languages, making them universal (M2.1 Core).
+
+  ## M1 instances
+  - Python: `ast.Dict`
+  - JavaScript: `Object` literal
+  - Elixir: map `%{key => value}`
+  - Ruby: `Hash`
+  - Erlang: map
+
+  ## Examples
+
+      {:map, []}
+      {:map, [{{:literal, :string, "name"}, {:literal, :string, "Alice"}}]}
+      {:map, [{{:variable, "key"}, {:variable, "value"}}]}
+  """
+  @type map_literal :: {:map, pairs :: [{key :: meta_ast(), value :: meta_ast()}]}
 
   @typedoc """
   M2 meta-type: Binary operation.
@@ -705,6 +749,12 @@ defmodule Metastatic.AST do
       :_ ->
         true
 
+      {:list, elements} when is_list(elements) ->
+        Enum.all?(elements, &conforms?/1)
+
+      {:map, pairs} when is_list(pairs) ->
+        Enum.all?(pairs, fn {key, value} -> conforms?(key) and conforms?(value) end)
+
       {:binary_op, category, _op, left, right}
       when category in [:arithmetic, :comparison, :boolean] ->
         conforms?(left) and conforms?(right)
@@ -928,6 +978,17 @@ defmodule Metastatic.AST do
 
   defp collect_variables({:tuple, elements}, acc) do
     Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
+  end
+
+  defp collect_variables({:list, elements}, acc) do
+    Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
+  end
+
+  defp collect_variables({:map, pairs}, acc) do
+    Enum.reduce(pairs, acc, fn {key, value}, a ->
+      a = collect_variables(key, a)
+      collect_variables(value, a)
+    end)
   end
 
   defp collect_variables({:loop, :while, condition, body}, acc) do

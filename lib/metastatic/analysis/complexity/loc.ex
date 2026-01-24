@@ -269,6 +269,13 @@ defmodule Metastatic.Analysis.Complexity.LoC do
     Enum.reduce(elems, count, fn elem, c -> walk_expr(elem, c) end)
   end
 
+  defp walk_expr({:map, pairs}, count) when is_list(pairs) do
+    Enum.reduce(pairs, count, fn {key, value}, c ->
+      c = walk_expr(key, c)
+      walk_expr(value, c)
+    end)
+  end
+
   defp walk_expr({:literal, _, _}, count), do: count
   defp walk_expr({:variable, _}, count), do: count
   defp walk_expr(nil, count), do: count

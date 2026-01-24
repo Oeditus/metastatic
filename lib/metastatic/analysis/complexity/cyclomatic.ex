@@ -190,6 +190,14 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
     Enum.reduce(elems, count, fn elem, c -> walk(elem, c) end)
   end
 
+  # Map
+  defp walk({:map, pairs}, count) when is_list(pairs) do
+    Enum.reduce(pairs, count, fn {key, value}, c ->
+      c = walk(key, c)
+      walk(value, c)
+    end)
+  end
+
   # Async operation
   defp walk({:async_operation, type, body}, count) do
     _ = type

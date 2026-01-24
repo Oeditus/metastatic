@@ -281,6 +281,14 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
         acc = %{acc | operators: ["list" | acc.operators]}
         Enum.reduce(elems, acc, fn elem, a -> walk(elem, a) end)
 
+      {:map, pairs} when is_list(pairs) ->
+        acc = %{acc | operators: ["map" | acc.operators]}
+
+        Enum.reduce(pairs, acc, fn {key, value}, a ->
+          a = walk(key, a)
+          walk(value, a)
+        end)
+
       # Async operation
       {:async_operation, type, body} ->
         acc = %{acc | operators: [to_string(type) | acc.operators]}

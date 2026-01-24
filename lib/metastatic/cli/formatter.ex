@@ -62,6 +62,27 @@ defmodule Metastatic.CLI.Formatter do
     "#{indent}variable: #{name}"
   end
 
+  defp format_tree_node({:list, elements}, indent, depth) do
+    element_lines = Enum.map(elements, &format_tree(&1, depth + 1))
+    lines = ["#{indent}list" | element_lines]
+    Enum.join(lines, "\n")
+  end
+
+  defp format_tree_node({:map, pairs}, indent, depth) do
+    pair_lines =
+      Enum.flat_map(pairs, fn {key, value} ->
+        [
+          "#{indent}  key:",
+          format_tree(key, depth + 2),
+          "#{indent}  value:",
+          format_tree(value, depth + 2)
+        ]
+      end)
+
+    lines = ["#{indent}map" | pair_lines]
+    Enum.join(lines, "\n")
+  end
+
   defp format_tree_node({:binary_op, category, op, left, right}, indent, depth) do
     lines = [
       "#{indent}binary_op (#{category}: #{op})",
@@ -285,6 +306,17 @@ defmodule Metastatic.CLI.Formatter do
 
   defp ast_to_map({:variable, name}) do
     %{type: "variable", name: name}
+  end
+
+  defp ast_to_map({:list, elements}) do
+    %{type: "list", elements: Enum.map(elements, &ast_to_map/1)}
+  end
+
+  defp ast_to_map({:map, pairs}) do
+    %{
+      type: "map",
+      pairs: Enum.map(pairs, fn {k, v} -> %{key: ast_to_map(k), value: ast_to_map(v)} end)
+    }
   end
 
   defp ast_to_map({:binary_op, category, op, left, right}) do

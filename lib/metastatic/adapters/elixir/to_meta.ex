@@ -97,7 +97,15 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   def transform(list) when is_list(list) do
     # Lists in Elixir can be literal lists like [1, 2, 3]
     with {:ok, items_meta} <- transform_list(list) do
-      {:ok, {:literal, :collection, items_meta}, %{collection_type: :list}}
+      {:ok, {:list, items_meta}, %{}}
+    end
+  end
+
+  # Map literals - M2.1 Core Layer
+  def transform({:%{}, _meta, pairs}) when is_list(pairs) do
+    # Map literal: %{key => value, ...}
+    with {:ok, pairs_meta} <- transform_map_pairs(pairs) do
+      {:ok, {:map, pairs_meta}, %{}}
     end
   end
 
@@ -785,4 +793,27 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp extract_function_name({name, _, _args}) when is_atom(name), do: Atom.to_string(name)
   defp extract_function_name(nil), do: "anonymous"
   defp extract_function_name(_), do: "unknown"
+
+  # Helper to transform map key-value pairs
+  defp transform_map_pairs(pairs) do
+    pairs
+    |> Enum.reduce_while({:ok, []}, fn pair, {:ok, acc} ->
+      case pair do
+        {key, value} ->
+          with {:ok, key_meta, _} <- transform(key),
+               {:ok, value_meta, _} <- transform(value) do
+            {:cont, {:ok, [{key_meta, value_meta} | acc]}}
+          else
+            error -> {:halt, error}
+          end
+
+        _ ->
+          {:halt, {:error, "Invalid map pair: #{inspect(pair)}"}}
+      end
+    end)
+    |> case do
+      {:ok, pairs} -> {:ok, Enum.reverse(pairs)}
+      error -> error
+    end
+  end
 end

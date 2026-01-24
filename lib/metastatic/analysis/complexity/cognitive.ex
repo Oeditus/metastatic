@@ -200,6 +200,14 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
     Enum.reduce(elems, acc, fn elem, a -> walk(elem, nesting, a) end)
   end
 
+  # Map
+  defp walk({:map, pairs}, nesting, acc) when is_list(pairs) do
+    Enum.reduce(pairs, acc, fn {key, value}, a ->
+      a = walk(key, nesting, a)
+      walk(value, nesting, a)
+    end)
+  end
+
   # Async operation
   defp walk({:async_operation, _type, body}, nesting, acc) do
     walk(body, nesting, acc)

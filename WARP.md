@@ -7,14 +7,15 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
 **Current Status:** Phase 1 Complete (v0.1.0-dev)  
-- Core MetaAST foundation implemented with 99 passing tests (100% coverage)
-- Language adapters (Python, JavaScript, etc.) coming in Phase 2+
+- Core MetaAST foundation implemented with 1356 passing tests (100% coverage)
+- Language adapters: Python and Elixir implemented and fully tested
+- Additional language adapters (JavaScript, Ruby, etc.) coming in Phase 2+
 
 ## Essential Commands
 
 ### Testing
 ```bash
-# Run all tests (99 tests, all passing)
+# Run all tests (1356 tests: 131 doctests + 1225 tests, all passing)
 mix test
 
 # Run specific test file
@@ -73,9 +74,9 @@ flowchart TD
 ### Three-Layer MetaAST (within M2)
 
 **M2.1 Core Layer** - Universal concepts present in ALL languages
-- Types: `literal`, `variable`, `binary_op`, `unary_op`, `function_call`, `conditional`, `early_return`, `block`
+- Types: `literal`, `variable`, `binary_op`, `unary_op`, `function_call`, `conditional`, `early_return`, `block`, `list`, `map`
 - Always normalized to common representation
-- Examples: arithmetic operations, comparisons, function calls
+- Examples: arithmetic operations, comparisons, function calls, lists, maps/dictionaries
 
 **M2.2 Extended Layer** - Common patterns present in MOST languages  
 - Types: `loop`, `lambda`, `collection_op`, `pattern_match`, `exception_handling`, `async_operation`

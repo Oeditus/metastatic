@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- M2.1 Core Layer enhancements:
+  - `list` type for list/array literals (moved from literal collection to first-class core type)
+  - `map` type for map/dictionary/object literals (moved from literal collection to first-class core type)
+  - Updated all language adapters (Python, Elixir) to use new list/map types
+  - Updated all analysis modules to traverse list elements and map key-value pairs
+  - Updated validator to classify list/map as core layer
+  - Updated CLI tools (inspector, formatter) to handle list/map display
+  - Added 12 new tests for list/map functionality (1,356 total tests passing: 131 doctests + 1,225 tests)
 - M2.2s Structural/Organizational Layer - New meta-model layer for cross-language structural constructs
   - `container` type for modules/classes/namespaces with visibility-aware member tracking
   - `function_def` type for function/method definitions with guards, visibility, and pattern parameters

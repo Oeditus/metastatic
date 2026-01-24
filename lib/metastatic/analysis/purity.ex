@@ -185,6 +185,13 @@ defmodule Metastatic.Analysis.Purity do
     Enum.reduce(elems, ctx, fn elem, c -> walk(elem, c) end)
   end
 
+  defp walk_node({:map, pairs}, ctx) when is_list(pairs) do
+    Enum.reduce(pairs, ctx, fn {key, value}, c ->
+      c = walk(key, c)
+      walk(value, c)
+    end)
+  end
+
   defp walk_node({:language_specific, _, _}, ctx), do: ctx
   defp walk_node({:language_specific, _, _, _}, ctx), do: ctx
   defp walk_node({:literal, _, _}, ctx), do: ctx

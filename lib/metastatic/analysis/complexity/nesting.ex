@@ -269,6 +269,17 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {current, max}
   end
 
+  # Map
+  defp walk({:map, pairs}, current, max) when is_list(pairs) do
+    {_, max} =
+      Enum.reduce(pairs, {current, max}, fn {key, value}, {c, m} ->
+        {_, m} = walk(key, c, m)
+        walk(value, c, m)
+      end)
+
+    {current, max}
+  end
+
   # Async operation
   defp walk({:async_operation, _type, body}, current, max) do
     walk(body, current, max)

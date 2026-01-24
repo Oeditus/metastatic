@@ -189,6 +189,14 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
     {:tuple, Enum.map(elements, &normalize_ast/1)}
   end
 
+  defp normalize_ast({:list, elements}) when is_list(elements) do
+    {:list, Enum.map(elements, &normalize_ast/1)}
+  end
+
+  defp normalize_ast({:map, pairs}) when is_list(pairs) do
+    {:map, Enum.map(pairs, fn {k, v} -> {normalize_ast(k), normalize_ast(v)} end)}
+  end
+
   # M2.2 Extended layer
   defp normalize_ast({:loop, :while, cond, body}) do
     {:loop, :while, normalize_ast(cond), normalize_ast(body)}
@@ -338,6 +346,20 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   defp extract_tokens({:tuple, elements}, acc) when is_list(elements) do
     acc = [:tuple | acc]
     Enum.reduce(elements, acc, fn elem, a -> extract_tokens(elem, a) end)
+  end
+
+  defp extract_tokens({:list, elements}, acc) when is_list(elements) do
+    acc = [:list | acc]
+    Enum.reduce(elements, acc, fn elem, a -> extract_tokens(elem, a) end)
+  end
+
+  defp extract_tokens({:map, pairs}, acc) when is_list(pairs) do
+    acc = [:map | acc]
+
+    Enum.reduce(pairs, acc, fn {k, v}, a ->
+      a = extract_tokens(k, a)
+      extract_tokens(v, a)
+    end)
   end
 
   # M2.2 Extended

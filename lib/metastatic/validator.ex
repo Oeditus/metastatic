@@ -182,6 +182,7 @@ defmodule Metastatic.Validator do
 
   defp has_extended?(ast) do
     walk_ast(ast, false, fn
+      # M2.2: Extended layer - Common patterns with variations
       {:loop, _, _, _}, _acc -> true
       {:lambda, _, _, _}, _acc -> true
       {:collection_op, _, _, _}, _acc -> true
@@ -194,6 +195,9 @@ defmodule Metastatic.Validator do
       {:attribute_access, _, _}, _acc -> true
       {:augmented_assignment, _, _, _}, _acc -> true
       {:property, _, _, _, _}, _acc -> true
+      # M2.1 Core: list and map are NOT extended
+      # {:list, _}, _acc -> false
+      # {:map, _}, _acc -> false
       _node, acc -> acc
     end)
   end

@@ -152,6 +152,64 @@ defmodule Metastatic.ASTTest do
       assert AST.conforms?(ast)
     end
 
+    test "list empty" do
+      ast = {:list, []}
+      assert AST.conforms?(ast)
+    end
+
+    test "list with literals" do
+      ast = {:list, [{:literal, :integer, 1}, {:literal, :integer, 2}, {:literal, :integer, 3}]}
+      assert AST.conforms?(ast)
+    end
+
+    test "list with variables" do
+      ast = {:list, [{:variable, "x"}, {:variable, "y"}]}
+      assert AST.conforms?(ast)
+    end
+
+    test "list nested" do
+      ast =
+        {:list,
+         [
+           {:list, [{:literal, :integer, 1}]},
+           {:list, [{:literal, :integer, 2}]}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "map empty" do
+      ast = {:map, []}
+      assert AST.conforms?(ast)
+    end
+
+    test "map with literal keys and values" do
+      ast =
+        {:map,
+         [
+           {{:literal, :string, "name"}, {:literal, :string, "Alice"}},
+           {{:literal, :string, "age"}, {:literal, :integer, 30}}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "map with variable keys and values" do
+      ast = {:map, [{{:variable, "key"}, {:variable, "value"}}]}
+      assert AST.conforms?(ast)
+    end
+
+    test "map nested" do
+      ast =
+        {:map,
+         [
+           {{:literal, :string, "user"},
+            {:map, [{{:literal, :string, "name"}, {:literal, :string, "Bob"}}]}}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
     test "complex nested expression" do
       # ((x + 5) * y) > 10
       ast =
@@ -407,6 +465,57 @@ defmodule Metastatic.ASTTest do
         {:inline_match, {:tuple, [{:variable, "x"}, {:variable, "y"}]}, {:variable, "result"}}
 
       assert AST.variables(ast) == MapSet.new(["x", "y", "result"])
+    end
+
+    test "list with variables" do
+      ast = {:list, [{:variable, "x"}, {:variable, "y"}, {:variable, "z"}]}
+      assert AST.variables(ast) == MapSet.new(["x", "y", "z"])
+    end
+
+    test "list with nested expressions" do
+      # [x + 1, y * 2]
+      ast =
+        {:list,
+         [
+           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}},
+           {:binary_op, :arithmetic, :*, {:variable, "y"}, {:literal, :integer, 2}}
+         ]}
+
+      assert AST.variables(ast) == MapSet.new(["x", "y"])
+    end
+
+    test "map with variable keys and values" do
+      ast =
+        {:map,
+         [
+           {{:variable, "key1"}, {:variable, "value1"}},
+           {{:variable, "key2"}, {:variable, "value2"}}
+         ]}
+
+      assert AST.variables(ast) == MapSet.new(["key1", "value1", "key2", "value2"])
+    end
+
+    test "map with literal keys and variable values" do
+      # %{"name" => name, "age" => age}
+      ast =
+        {:map,
+         [
+           {{:literal, :string, "name"}, {:variable, "name"}},
+           {{:literal, :string, "age"}, {:variable, "age"}}
+         ]}
+
+      assert AST.variables(ast) == MapSet.new(["name", "age"])
+    end
+
+    test "nested list and map" do
+      # [%{"key" => x}]
+      ast =
+        {:list,
+         [
+           {:map, [{{:literal, :string, "key"}, {:variable, "x"}}]}
+         ]}
+
+      assert AST.variables(ast) == MapSet.new(["x"])
     end
   end
 end

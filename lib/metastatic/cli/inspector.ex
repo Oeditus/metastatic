@@ -121,6 +121,8 @@ defmodule Metastatic.CLI.Inspector do
   @spec node_layer(AST.meta_ast()) :: layer()
   defp node_layer({:literal, _, _}), do: :core
   defp node_layer({:variable, _}), do: :core
+  defp node_layer({:list, _}), do: :core
+  defp node_layer({:map, _}), do: :core
   defp node_layer({:binary_op, _, _, _, _}), do: :core
   defp node_layer({:unary_op, _, _, _}), do: :core
   defp node_layer({:function_call, _, _}), do: :core
@@ -139,6 +141,8 @@ defmodule Metastatic.CLI.Inspector do
   @spec composite_node?(AST.meta_ast()) :: boolean()
   defp composite_node?({:binary_op, _, _, _, _}), do: true
   defp composite_node?({:unary_op, _, _, _}), do: true
+  defp composite_node?({:list, _}), do: true
+  defp composite_node?({:map, _}), do: true
   defp composite_node?({:function_call, _, _}), do: true
   defp composite_node?({:conditional, _, _, _}), do: true
   defp composite_node?({:block, _}), do: true
@@ -188,6 +192,24 @@ defmodule Metastatic.CLI.Inspector do
       1
     else
       1 + (Enum.map(statements, &calculate_depth/1) |> Enum.max())
+    end
+  end
+
+  defp calculate_depth({:list, elements}) do
+    if Enum.empty?(elements) do
+      1
+    else
+      1 + (Enum.map(elements, &calculate_depth/1) |> Enum.max())
+    end
+  end
+
+  defp calculate_depth({:map, pairs}) do
+    if Enum.empty?(pairs) do
+      1
+    else
+      1 +
+        (Enum.flat_map(pairs, fn {k, v} -> [calculate_depth(k), calculate_depth(v)] end)
+         |> Enum.max())
     end
   end
 
@@ -242,6 +264,14 @@ defmodule Metastatic.CLI.Inspector do
 
   defp count_nodes({:block, statements}) do
     1 + Enum.sum(Enum.map(statements, &count_nodes/1))
+  end
+
+  defp count_nodes({:list, elements}) do
+    1 + Enum.sum(Enum.map(elements, &count_nodes/1))
+  end
+
+  defp count_nodes({:map, pairs}) do
+    1 + Enum.sum(Enum.flat_map(pairs, fn {k, v} -> [count_nodes(k), count_nodes(v)] end))
   end
 
   defp count_nodes({:loop, _, condition, body}) do

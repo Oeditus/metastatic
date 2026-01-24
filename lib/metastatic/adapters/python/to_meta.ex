@@ -310,10 +310,19 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:ok, {:language_specific, :python, node, :type_annotation}, %{}}
   end
 
-  # Lists as literal collections
+  # Lists - M2.1 Core Layer
   def transform(%{"_type" => "List", "elts" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
+      {:ok, {:list, elements_meta}, %{}}
+    end
+  end
+
+  # Dicts (Maps) - M2.1 Core Layer
+  def transform(%{"_type" => "Dict", "keys" => keys, "values" => values}) do
+    with {:ok, keys_meta} <- transform_list(keys),
+         {:ok, values_meta} <- transform_list(values) do
+      pairs = Enum.zip(keys_meta, values_meta)
+      {:ok, {:map, pairs}, %{}}
     end
   end
 

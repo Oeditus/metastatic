@@ -55,9 +55,20 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     {:ok, %{"_type" => "Constant", "value" => nil, "kind" => nil}}
   end
 
-  def transform({:literal, :collection, elements}, metadata) do
+  # Lists - M2.1 Core Layer
+  def transform({:list, elements}, metadata) do
     with {:ok, elements_py} <- transform_list(elements, metadata) do
       {:ok, %{"_type" => "List", "elts" => elements_py, "ctx" => %{"_type" => "Load"}}}
+    end
+  end
+
+  # Maps (Dicts) - M2.1 Core Layer
+  def transform({:map, pairs}, metadata) do
+    {keys, values} = Enum.unzip(pairs)
+
+    with {:ok, keys_py} <- transform_list(keys, metadata),
+         {:ok, values_py} <- transform_list(values, metadata) do
+      {:ok, %{"_type" => "Dict", "keys" => keys_py, "values" => values_py}}
     end
   end
 

@@ -190,7 +190,7 @@ defmodule Metastatic.Adapters.ElixirTest do
 
       assert {:ok, {:collection_op, :map, fun, collection}, %{}} = ToMeta.transform(ast)
       assert {:lambda, _, _, _} = fun
-      assert {:literal, :collection, _} = collection
+      assert {:list, _} = collection
     end
 
     test "transforms Enum.filter to collection_op" do
@@ -333,7 +333,7 @@ defmodule Metastatic.Adapters.ElixirTest do
                ToMeta.transform(ast)
 
       assert {:lambda, [{:param, "x", nil, nil}], _captures, _body} = lambda
-      assert {:literal, :collection, _} = collection
+      assert {:list, _} = collection
     end
   end
 
@@ -436,8 +436,7 @@ defmodule Metastatic.Adapters.ElixirTest do
 
     test "transforms remote function calls back" do
       meta_ast =
-        {:function_call, "Enum.map",
-         [{:literal, :collection, []}, {:lambda, [], {:literal, :integer, 1}}]}
+        {:function_call, "Enum.map", [{:list, []}, {:lambda, [], {:literal, :integer, 1}}]}
 
       assert {:ok, {{:., [], [{:__aliases__, [], [:Enum]}, :map]}, [], _args}} =
                FromMeta.transform(meta_ast, %{})

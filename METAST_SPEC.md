@@ -53,6 +53,48 @@ Always normalized to common representation without hints.
 ```
 **Example**: `{:variable, "x"}`
 
+#### List
+```elixir
+{:list, elements_list}
+```
+
+Lists are ordered sequences of elements, fundamental data structures present in all programming languages.
+
+**M1 instances**:
+- Python: `ast.List`
+- JavaScript: `Array`
+- Elixir: list literal `[1, 2, 3]`
+- Ruby: `Array`
+- Erlang: list
+
+**Examples**:
+```elixir
+{:list, []}
+{:list, [{:literal, :integer, 1}, {:literal, :integer, 2}]}
+{:list, [{:variable, "x"}, {:variable, "y"}]}
+```
+
+#### Map
+```elixir
+{:map, pairs_list}
+```
+
+Maps are key-value mappings, fundamental data structures present in all modern programming languages. Each pair is a 2-tuple `{key_ast, value_ast}`.
+
+**M1 instances**:
+- Python: `ast.Dict`
+- JavaScript: `Object` literal
+- Elixir: map `%{key => value}`
+- Ruby: `Hash`
+- Erlang: map
+
+**Examples**:
+```elixir
+{:map, []}
+{:map, [{{:literal, :string, "name"}, {:literal, :string, "Alice"}}]}
+{:map, [{{:variable, "key"}, {:variable, "value"}}]}
+```
+
 #### Binary Operation
 ```elixir
 {:binary_op, category, operator, left_ast, right_ast}
@@ -420,9 +462,13 @@ The `Metastatic.AST` module provides utility functions:
 ```elixir
 # Conformance validation
 AST.conforms?(ast)  # => true | false
+AST.conforms?({:list, [{:variable, "x"}]})  # => true
+AST.conforms?({:map, [{{:literal, :string, "k"}, {:variable, "v"}}]})  # => true
 
 # Variable extraction
 AST.variables(ast)  # => MapSet.new(["x", "y"])
+AST.variables({:list, [{:variable, "a"}, {:variable, "b"}]})  # => MapSet.new(["a", "b"])
+AST.variables({:map, [{{:variable, "k"}, {:variable, "v"}}]})  # => MapSet.new(["k", "v"])
 
 # Container queries
 AST.container_name(container_ast)  # => "MyApp.Math"
