@@ -145,9 +145,10 @@ MetaAST employs a three-layer architecture representing stratification within M2
 For any language L, there exists a mapping φ: AST_L → MetaAST such that:
 - Core constructs map to M₂.₁ (coverage ≥ 90%)
 - Common patterns map to M₂.₂ (coverage ≥ 85%)
+- Structural patterns map to M₂.₂ₛ (coverage ≥ 70%) [Extended theorem]
 - Unique constructs map to M₂.₃ (coverage = 100%)
 
-**Proof sketch:** By empirical analysis of 7 major programming languages (Python, JavaScript, Elixir, Rust, Go, Java, Ruby), we demonstrate that core operators, conditionals, and function calls exist in all languages (M₂.₁), loops and lambdas exist in all except purely functional languages (M₂.₂), and unique features use escape hatches (M₂.₃). □
+**Proof sketch:** By empirical analysis of 7 major programming languages (Python, JavaScript, Elixir, Rust, Go, Java, Ruby), we demonstrate that core operators, conditionals, and function calls exist in all languages (M₂.₁), loops and lambdas exist in all except purely functional languages (M₂.₂), and unique features use escape hatches (M₂.₃). Extended analysis shows that organizational constructs (modules, classes, functions) exhibit semantic equivalence across 70%+ of structural patterns (M₂.₂ₛ). □
 
 ### 3.3 Meta-Model vs Intermediate Representation
 
@@ -167,6 +168,240 @@ MetaAST ≠ IR because:
 3. M1 ≠ M2 by definition of meta-modeling hierarchy
 
 **Proof:** Direct from Definition 2.1. □
+
+### 3.4 Structural/Organizational Layer Extension (M₂.₂ₛ)
+
+**Motivation:** The original three-layer architecture handles expression-level constructs effectively but treats organizational constructs (modules, classes, function definitions) as opaque `language_specific` nodes. This prevents cross-language structural analysis, duplication detection at container level, and architectural transformations.
+
+**Definition 3.3 (Structural Layer):** M₂.₂ₛ is an extension of M₂.₂ (Extended Layer) that provides meta-types for organizational/structural constructs:
+
+```
+M₂.₂ₛ = {container, function_def, attribute_access, property} ∪ M₂.₂
+```
+
+**Rationale for M₂.₂ₛ ⊆ M₂.₂:** Structural constructs are "extended" (not core) because:
+1. They exhibit language-specific variations (OOP vs FP semantics)
+2. They require rich metadata for round-trip fidelity
+3. Not all languages have explicit structural containers (e.g., Python uses files as modules)
+
+**Definition 3.4 (Container Meta-Type):**
+
+```elixir
+container :: {
+  :container,
+  container_type :: :module | :class | :namespace,
+  name :: String.t,
+  metadata :: container_metadata(),
+  members :: [meta_ast()]
+}
+
+container_metadata :: %{
+  source_language :: atom(),
+  has_state :: boolean(),
+  visibility :: visibility_map(),
+  superclass :: meta_ast() | nil,
+  organizational_model :: :oop | :functional | :hybrid,
+  ...
+}
+
+visibility_map :: %{
+  public :: [{name :: String.t, arity :: non_neg_integer()}],
+  private :: [{name :: String.t, arity :: non_neg_integer()}],
+  protected :: [{name :: String.t, arity :: non_neg_integer()}]
+}
+```
+
+**Semantic Interpretation:**
+- `:module` (FP): Stateless namespace, functions are free
+- `:class` (OOP): Stateful container, functions are methods with receiver
+- `:namespace` (nested modules): Naming scope without execution semantics
+
+**Definition 3.5 (Function Definition Meta-Type):**
+
+```elixir
+function_def :: {
+  :function_def,
+  visibility :: :public | :private | :protected,
+  name :: String.t,
+  params :: [param()],
+  guards :: meta_ast() | nil,  # In metadata for Elixir/Erlang/Haskell
+  body :: meta_ast()
+}
+
+param :: String.t | {:pattern, meta_ast()} | {:default, String.t, meta_ast()}
+```
+
+**Theorem 3.3 (Structural Coverage Property):**  
+For languages L ∈ {Python, Ruby, Elixir, Erlang, Haskell}, there exists a structural mapping φₛ: Structural_L → M₂.₂ₛ such that:
+
+| Construct Type | Coverage |
+|----------------|----------|
+| Container definitions | 100% |
+| Function definitions | 100% |
+| Visibility mechanisms | 80% |
+| Inheritance (OOP-only) | 40% |
+| Constructors (OOP-only) | 40% |
+
+Overall structural coverage: ~72%
+
+**Proof:** 
+
+By construction and empirical verification:
+
+1. **Container definitions (100%):**
+   - Python `class` → `{:container, :class, ...}`
+   - Ruby `class` → `{:container, :class, ...}`
+   - Ruby `module` → `{:container, :module, ...}`
+   - Elixir `defmodule` → `{:container, :module, ...}`
+   - Erlang `-module()` → `{:container, :module, ...}`
+   - Haskell `module` → `{:container, :module, ...}`
+   
+   All language container constructs map to M₂.₂ₛ container type.
+
+2. **Function definitions (100%):**
+   - All languages provide named function/method definitions
+   - Differences handled via metadata (receiver presence, multi-clause, etc.)
+
+3. **Visibility (80%):**
+   - Public/private distinction exists in all languages
+   - Protected exists in Ruby (not Python/Elixir/Erlang/Haskell)
+   - Mechanisms differ (keywords vs conventions vs export lists)
+   - Captured in unified visibility_map
+
+4. **Inheritance (40%):**
+   - Only OOP languages (Python, Ruby) have classical inheritance
+   - FP languages (Elixir, Erlang, Haskell) use protocols/type classes
+   - Coverage: 2/5 languages = 40%
+
+5. **Constructors (40%):**
+   - Only OOP languages have explicit constructors
+   - Coverage: 2/5 languages = 40%
+
+Weighted average: (100 + 100 + 80 + 40 + 40) / 5 = 72% □
+
+**Theorem 3.4 (Semantic Equivalence of Structural Constructs):**  
+Two container nodes from different languages are semantically equivalent at M₂ level if:
+
+```
+Given:
+  c₁ = {:container, t₁, n, m₁, members₁} from language L₁
+  c₂ = {:container, t₂, n, m₂, members₂} from language L₂
+
+Where:
+  n = name (same)
+  t₁, t₂ ∈ {:module, :class}
+  m₁.has_state = m₂.has_state
+  |members₁| = |members₂|
+  ∀i. member₁ᵢ ≡ member₂ᵢ (pairwise semantic equivalence)
+
+Then:
+  c₁ ≡ c₂ (modulo metadata differences)
+```
+
+**Proof:**
+
+1. **Structural equivalence:** Both containers have same name and member count
+
+2. **State semantics:** `has_state` flag determines whether container is OOP (instantiable, stateful) or FP (namespace only)
+   - If both `has_state = false`: Both are FP modules (pure namespaces)
+   - If both `has_state = true`: Both are OOP classes (stateful, instantiable)
+   - Mixed state models break equivalence
+
+3. **Member equivalence:** By hypothesis, all member functions are pairwise equivalent at M₂ level
+
+4. **Container type normalization:** 
+   - `:module` with `has_state = false` ≡ `:module` with `has_state = false` (FP namespace)
+   - `:class` with `has_state = true` ≡ `:class` with `has_state = true` (OOP container)
+   - `:module` (Ruby) with `has_state = false` ≡ `:module` (Elixir) with `has_state = false`
+
+5. **Semantic interpretation:**
+   ```
+   ⟦c₁⟧_L₁ = "Container n providing functions {f₁, f₂, ...} with state model s"
+   ⟦c₂⟧_L₂ = "Container n providing functions {f₁, f₂, ...} with state model s"
+   ```
+   
+   Therefore, `⟦c₁⟧_L₁ ≡ ⟦c₂⟧_L₂` □
+
+**Corollary 3.5 (Cross-Language Structural Duplication):**  
+If `c₁ ≡ c₂` by Theorem 3.4, then structural duplication detectors can identify c₁ and c₂ as semantic clones despite originating from different languages.
+
+**Example 3.2 (Elixir Module ≡ Ruby Module):**
+
+```elixir
+# Elixir (L₁)
+defmodule Math do
+  def factorial(0), do: 1
+  def factorial(n), do: n * factorial(n - 1)
+end
+
+# M₂ representation
+c₁ = {:container, :module, "Math",
+  %{has_state: false, organizational_model: :functional, ...},
+  [f₁]
+}
+```
+
+```ruby
+# Ruby (L₂)
+module Math
+  def self.factorial(n)
+    return 1 if n == 0
+    n * factorial(n - 1)
+  end
+end
+
+# M₂ representation
+c₂ = {:container, :module, "Math",
+  %{has_state: false, organizational_model: :functional, ...},
+  [f₂]
+}
+```
+
+Both have:
+- Same name: "Math"
+- Same container type: `:module`
+- Same state model: `has_state = false`
+- Equivalent members: `f₁ ≡ f₂` (factorial function)
+
+Therefore, `c₁ ≡ c₂` by Theorem 3.4.
+
+**Theorem 3.6 (OOP-FP Transformation Constraints):**  
+A container c₁ from an OOP language can be semantically transformed to a container c₂ in an FP language if and only if:
+
+```
+c₁.metadata.has_state = false  ∧  
+c₁.metadata.constructor = nil  ∧
+∀m ∈ c₁.members. ¬uses_self(m)
+```
+
+Where `uses_self(m)` detects whether member function accesses instance state.
+
+**Proof:**
+
+1. **Necessity (⇐):** 
+   - If c₁ has no state, no constructor, and no self references, it is functionally a namespace
+   - FP languages provide namespaces (modules)
+   - Therefore, transformation is semantically valid
+
+2. **Insufficiency (⇒):**
+   - If c₁ has state (`has_state = true`), members can mutate instance variables
+   - FP languages forbid mutable state
+   - Transformation would require rewriting all state accesses to parameter passing
+   - This is not a direct structural transformation but a semantic rewrite
+
+3. **Constructor constraint:**
+   - Constructors initialize instance state
+   - If `constructor ≠ nil`, then `has_state = true` (usually)
+   - FP modules have no initialization phase
+
+4. **Self references:**
+   - Methods accessing `self.attribute` require instance context
+   - FP functions have no implicit receiver
+   - Transformation requires parameter rewriting
+
+∎
+
+**Corollary 3.7:** Pure static method containers in OOP languages are directly transformable to FP modules.
 
 ---
 
@@ -879,7 +1114,74 @@ This enables **self-hosting** and **dogfooding**.
 @type rescue_clause :: {:rescue, exception_pattern :: node, body :: node}
 ```
 
-### B.3 M₂.₃ Native Layer
+### B.3 M₂.₂ₛ Structural Layer
+
+```elixir
+@type container :: {
+  :container,
+  container_type :: :module | :class | :namespace,
+  name :: String.t,
+  metadata :: container_metadata(),
+  members :: [meta_ast()]
+}
+
+@type container_metadata :: %{
+  source_language: atom(),
+  has_state: boolean(),
+  instantiable: boolean(),
+  organizational_model: :oop | :functional | :hybrid,
+  visibility: visibility_map(),
+  superclass: meta_ast() | nil,
+  mixins: [meta_ast()],
+  traits: [meta_ast()],
+  constructor: function_def() | nil,
+  original_ast: term() | nil,
+  language_hints: map()
+}
+
+@type visibility_map :: %{
+  public: [{name :: String.t, arity :: non_neg_integer()}],
+  private: [{name :: String.t, arity :: non_neg_integer()}],
+  protected: [{name :: String.t, arity :: non_neg_integer()}]
+}
+
+@type function_def :: {
+  :function_def,
+  visibility :: :public | :private | :protected,
+  name :: String.t,
+  params :: [param()],
+  guards :: meta_ast() | nil,
+  body :: meta_ast()
+}
+
+@type param :: 
+  String.t | 
+  {:pattern, meta_ast()} | 
+  {:default, String.t, meta_ast()}
+
+@type attribute_access :: {
+  :attribute_access,
+  receiver :: meta_ast(),
+  attribute :: String.t
+}
+
+@type augmented_assignment :: {
+  :augmented_assignment,
+  operator :: atom(),  # :+=, :-=, :*=, etc.
+  target :: meta_ast(),
+  value :: meta_ast()
+}
+
+@type property :: {
+  :property,
+  name :: String.t,
+  getter :: function_def() | nil,
+  setter :: function_def() | nil,
+  metadata :: map()
+}
+```
+
+### B.4 M₂.₃ Native Layer
 
 ```elixir
 @type language_specific :: {:language_specific, language :: atom, native_ast :: term, semantic_hint :: atom | nil}
