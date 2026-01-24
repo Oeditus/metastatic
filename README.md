@@ -350,6 +350,33 @@ result.summary            # => "Function is impure due to I/O operations"
 - Exception handling (try/catch)
 - Unknown function calls (low confidence)
 
+#### Direct Native AST Input
+
+All analyzers accept native language AST directly as `{language, native_ast}` tuples for integration with existing tooling:
+
+```elixir
+alias Metastatic.Analysis.Purity
+
+# Python native AST (from Python's ast module)
+python_ast = %{"_type" => "Constant", "value" => 42}
+{:ok, result} = Purity.analyze({:python, python_ast})
+result.pure?  # => true
+
+# Elixir native AST  
+elixir_ast = {:+, [], [{:x, [], nil}, 5]}
+{:ok, result} = Purity.analyze({:elixir, elixir_ast})
+result.pure?  # => true
+
+# Supports all analyzers
+alias Metastatic.Analysis.Complexity
+{:ok, result} = Complexity.analyze({:python, python_ast})
+
+# Error handling for unsupported languages
+{:error, {:unsupported_language, _}} = Purity.analyze({:unsupported, :some_ast})
+```
+
+This enables seamless integration with language-specific parsers and build tools without requiring Document struct creation.
+
 ### Complexity Analysis
 
 Analyze code complexity with six comprehensive metrics that work uniformly across all supported languages:

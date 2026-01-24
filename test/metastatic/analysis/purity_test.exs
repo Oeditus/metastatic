@@ -389,4 +389,49 @@ defmodule Metastatic.Analysis.PurityTest do
       assert result.pure?
     end
   end
+
+  describe "tuple input format" do
+    test "accepts {language, native_ast} tuple for Python" do
+      # Python AST for: 42
+      python_ast = %{"_type" => "Constant", "value" => 42}
+
+      assert {:ok, result} = Purity.analyze({:python, python_ast})
+      assert result.pure?
+      assert result.effects == []
+    end
+
+    test "accepts {language, native_ast} tuple for Python impure code" do
+      # Python AST for: print("hello")
+      python_ast = %{
+        "_type" => "Call",
+        "func" => %{"_type" => "Name", "id" => "print"},
+        "args" => [%{"_type" => "Constant", "value" => "hello"}],
+        "keywords" => []
+      }
+
+      assert {:ok, result} = Purity.analyze({:python, python_ast})
+      refute result.pure?
+      assert :io in result.effects
+    end
+
+    test "accepts {language, native_ast} tuple for Elixir" do
+      # Elixir AST for: x + 5
+      elixir_ast = {:+, [], [{:x, [], nil}, 5]}
+
+      assert {:ok, result} = Purity.analyze({:elixir, elixir_ast})
+      assert result.pure?
+    end
+
+    test "analyze! also accepts tuple format" do
+      python_ast = %{"_type" => "Constant", "value" => 42}
+
+      result = Purity.analyze!({:python, python_ast})
+      assert %Result{} = result
+      assert result.pure?
+    end
+
+    test "returns error for unsupported language" do
+      assert {:error, {:unsupported_language, _}} = Purity.analyze({:unsupported_lang, :some_ast})
+    end
+  end
 end

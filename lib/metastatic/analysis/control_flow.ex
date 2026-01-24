@@ -44,6 +44,8 @@ defmodule Metastatic.Analysis.ControlFlow do
   @doc """
   Analyzes a document to build its control flow graph.
 
+  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
+
   Returns `{:ok, result}` where result contains the CFG and analysis.
 
   ## Examples
@@ -54,14 +56,26 @@ defmodule Metastatic.Analysis.ControlFlow do
       iex> is_integer(result.node_count)
       true
   """
-  @spec analyze(Document.t(), keyword()) :: {:ok, Result.t()}
-  def analyze(%Document{ast: ast} = _doc, _opts \\ []) do
+  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
+          {:ok, Result.t()} | {:error, term()}
+  def analyze(input, opts \\ [])
+
+  def analyze(%Document{ast: ast} = _doc, _opts) do
     cfg = build_cfg(ast)
     {:ok, Result.new(cfg)}
   end
 
+  def analyze(input, opts) when is_tuple(input) do
+    case Document.normalize(input) do
+      {:ok, doc} -> analyze(doc, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   @doc """
   Analyzes a document to build its CFG, raising on error.
+
+  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
 
   ## Examples
 
@@ -71,10 +85,12 @@ defmodule Metastatic.Analysis.ControlFlow do
       iex> is_integer(result.node_count)
       true
   """
-  @spec analyze!(Document.t(), keyword()) :: Result.t()
-  def analyze!(doc, opts \\ []) do
-    {:ok, result} = analyze(doc, opts)
-    result
+  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
+  def analyze!(input, opts \\ []) do
+    case analyze(input, opts) do
+      {:ok, result} -> result
+      {:error, reason} -> raise "ControlFlow analysis failed: #{inspect(reason)}"
+    end
   end
 
   # Private implementation

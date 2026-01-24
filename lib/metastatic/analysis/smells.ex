@@ -76,8 +76,18 @@ defmodule Metastatic.Analysis.Smells do
       iex> result.has_smells?
       false
   """
-  @spec analyze(Document.t(), keyword()) :: {:ok, Result.t()}
-  def analyze(%Document{ast: ast} = doc, opts \\ []) do
+  @spec analyze(Document.t() | {atom(), term()}, keyword()) ::
+          {:ok, Result.t()} | {:error, term()}
+  def analyze(input, opts \\ [])
+
+  def analyze(input, opts) when is_tuple(input) do
+    case Document.normalize(input) do
+      {:ok, doc} -> analyze(doc, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def analyze(%Document{ast: ast} = doc, opts) do
     thresholds = Keyword.get(opts, :thresholds, %{}) |> merge_thresholds()
 
     smells =
@@ -104,10 +114,12 @@ defmodule Metastatic.Analysis.Smells do
       iex> result.has_smells?
       false
   """
-  @spec analyze!(Document.t(), keyword()) :: Result.t()
-  def analyze!(doc, opts \\ []) do
-    {:ok, result} = analyze(doc, opts)
-    result
+  @spec analyze!(Document.t() | {atom(), term()}, keyword()) :: Result.t()
+  def analyze!(input, opts \\ []) do
+    case analyze(input, opts) do
+      {:ok, result} -> result
+      {:error, reason} -> raise "Smells analysis failed: #{inspect(reason)}"
+    end
   end
 
   # Private implementation

@@ -79,7 +79,14 @@ defmodule Metastatic.Analysis.Encapsulation do
       iex> result.assessment
       :excellent
   """
-  @spec analyze(Document.t()) :: {:ok, Result.t()} | {:error, String.t()}
+  @spec analyze(Document.t() | {atom(), term()}) :: {:ok, Result.t()} | {:error, term()}
+  def analyze(input) when is_tuple(input) do
+    case Document.normalize(input) do
+      {:ok, doc} -> analyze(doc)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   def analyze(%Document{ast: ast}) do
     case extract_container(ast) do
       {:ok, container_type, container_name, members} ->

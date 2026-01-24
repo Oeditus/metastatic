@@ -194,4 +194,80 @@ defmodule Metastatic.Document do
   def variables(%__MODULE__{ast: ast}) do
     AST.variables(ast)
   end
+
+  @doc """
+  Normalize input to a Document.
+
+  Accepts either:
+  - A `Metastatic.Document` struct (returned as-is)
+  - A `{language, native_ast}` tuple (converted to Document using the appropriate adapter)
+
+  This enables analyzers to accept both formats for convenience.
+
+  ## Examples
+
+      # Already a Document - returns as-is
+      iex> doc = Metastatic.Document.new({:literal, :integer, 42}, :python)
+      iex> Metastatic.Document.normalize(doc)
+      {:ok, doc}
+
+      # {lang, native_ast} tuple - converts using adapter
+      iex> python_ast = %{"_type" => "Constant", "value" => 42}
+      iex> {:ok, doc} = Metastatic.Document.normalize({:python, python_ast})
+      iex> doc.ast
+      {:literal, :integer, 42}
+      iex> doc.language
+      :python
+  """
+  @spec normalize(t() | {atom(), term()}) :: {:ok, t()} | {:error, term()}
+  def normalize(%__MODULE__{} = doc), do: {:ok, doc}
+
+  def normalize({language, native_ast}) when is_atom(language) do
+    case adapter_for_language(language) do
+      {:ok, adapter} ->
+        case adapter.to_meta(native_ast) do
+          {:ok, meta_ast, metadata} ->
+            doc = new(meta_ast, language, metadata)
+            {:ok, doc}
+
+          {:error, reason} ->
+            {:error, {:transformation_failed, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def normalize(other) do
+    {:error,
+     {:invalid_input, "Expected Document.t() or {language, native_ast}, got: #{inspect(other)}"}}
+  end
+
+  @doc """
+  Normalize input to a Document, raising on error.
+
+  ## Examples
+
+      iex> doc = Metastatic.Document.new({:literal, :integer, 42}, :python)
+      iex> Metastatic.Document.normalize!(doc)
+      doc
+  """
+  @spec normalize!(t() | {atom(), term()}) :: t()
+  def normalize!(input) do
+    case normalize(input) do
+      {:ok, doc} -> doc
+      {:error, reason} -> raise "Failed to normalize input: #{inspect(reason)}"
+    end
+  end
+
+  # Private helper to get adapter module for a language
+  defp adapter_for_language(:python), do: {:ok, Metastatic.Adapters.Python}
+  defp adapter_for_language(:elixir), do: {:ok, Metastatic.Adapters.Elixir}
+  defp adapter_for_language(:erlang), do: {:ok, Metastatic.Adapters.Erlang}
+  defp adapter_for_language(:ruby), do: {:ok, Metastatic.Adapters.Ruby}
+  defp adapter_for_language(:haskell), do: {:ok, Metastatic.Adapters.Haskell}
+
+  defp adapter_for_language(lang),
+    do: {:error, {:unsupported_language, "No adapter found for language: #{inspect(lang)}"}}
 end

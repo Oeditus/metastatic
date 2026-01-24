@@ -60,37 +60,65 @@ defmodule Metastatic.Analysis.Purity do
   @doc """
   Analyzes a document for purity.
 
+  Accepts either:
+  - A `Metastatic.Document` struct
+  - A `{language, native_ast}` tuple
+
   Returns `{:ok, result}` where result is a `Metastatic.Analysis.Purity.Result` struct.
 
   ## Examples
 
+      # Using Document
       iex> ast = {:literal, :integer, 42}
       iex> doc = Metastatic.Document.new(ast, :elixir)
       iex> {:ok, result} = Metastatic.Analysis.Purity.analyze(doc)
       iex> result.pure?
       true
+
+      # Using {language, native_ast} tuple
+      iex> python_ast = %{"_type" => "Constant", "value" => 42}
+      iex> {:ok, result} = Metastatic.Analysis.Purity.analyze({:python, python_ast})
+      iex> result.pure?
+      true
   """
-  @spec analyze(Document.t()) :: {:ok, Result.t()}
-  def analyze(%Document{ast: ast} = _doc) do
-    context = walk(ast, %{in_loop: false, effects: [], locations: [], unknown: []})
-    {:ok, build_result(context)}
+  @spec analyze(Document.t() | {atom(), term()}) :: {:ok, Result.t()} | {:error, term()}
+  def analyze(input) do
+    case Document.normalize(input) do
+      {:ok, %Document{ast: ast}} ->
+        context = walk(ast, %{in_loop: false, effects: [], locations: [], unknown: []})
+        {:ok, build_result(context)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @doc """
   Analyzes a document for purity, raising on error.
 
+  Accepts either a `Metastatic.Document` struct or a `{language, native_ast}` tuple.
+
   ## Examples
 
+      # Using Document
       iex> ast = {:literal, :integer, 42}
       iex> doc = Metastatic.Document.new(ast, :elixir)
       iex> result = Metastatic.Analysis.Purity.analyze!(doc)
       iex> result.pure?
       true
+
+      # Using {language, native_ast} tuple
+      iex> python_ast = %{"_type" => "Constant", "value" => 42}
+      iex> result = Metastatic.Analysis.Purity.analyze!({:python, python_ast})
+      iex> result.pure?
+      true
   """
-  @spec analyze!(Document.t()) :: Result.t()
-  def analyze!(doc) do
-    {:ok, result} = analyze(doc)
-    result
+  @spec analyze!(Document.t() | {atom(), term()}) :: Result.t()
+  def analyze!(input) do
+    case analyze(input) do
+      {:ok, result} -> result
+      {:error, reason} -> raise "Purity analysis failed: #{inspect(reason)}"
+    end
   end
 
   # Private implementation
