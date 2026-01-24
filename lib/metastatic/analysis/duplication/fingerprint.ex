@@ -234,6 +234,35 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
     {:async_operation, kind, normalize_ast(operation)}
   end
 
+  # M2.2s Structural/Organizational layer
+  defp normalize_ast({:container, type, _name, _metadata, members}) when is_list(members) do
+    {:container, type, :_, :_, Enum.map(members, &normalize_ast/1)}
+  end
+
+  defp normalize_ast({:function_def, visibility, _name, params, _metadata, body})
+       when is_list(params) do
+    normalized_params = Enum.map(params, &normalize_param/1)
+    {:function_def, visibility, :_, normalized_params, :_, normalize_ast(body)}
+  end
+
+  defp normalize_ast({:attribute_access, receiver, _attribute}) do
+    {:attribute_access, normalize_ast(receiver), :_}
+  end
+
+  defp normalize_ast({:augmented_assignment, op, target, value}) do
+    {:augmented_assignment, op, normalize_ast(target), normalize_ast(value)}
+  end
+
+  defp normalize_ast({:property, _name, getter, setter, _metadata}) do
+    {:property, :_, if(getter, do: normalize_ast(getter), else: nil),
+     if(setter, do: normalize_ast(setter), else: nil), :_}
+  end
+
+  # Helper for normalizing function parameters
+  defp normalize_param(param) when is_binary(param), do: :_
+  defp normalize_param({:pattern, pattern}), do: {:pattern, normalize_ast(pattern)}
+  defp normalize_param({:default, _name, default}), do: {:default, :_, normalize_ast(default)}
+
   # M2.3 Native layer - preserve structure hints but not data
   defp normalize_ast({:language_specific, lang, _native, hint, _metadata}) do
     {:language_specific, lang, :_, hint, :_}
@@ -347,6 +376,45 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
     acc = [kind, :async_operation | acc]
     extract_tokens(operation, acc)
   end
+
+  # M2.2s Structural/Organizational
+  defp extract_tokens({:container, type, _name, _metadata, members}, acc) when is_list(members) do
+    acc = [type, :container | acc]
+    Enum.reduce(members, acc, fn member, a -> extract_tokens(member, a) end)
+  end
+
+  defp extract_tokens({:function_def, visibility, _name, params, _metadata, body}, acc)
+       when is_list(params) do
+    acc = [visibility, :function_def | acc]
+    acc = Enum.reduce(params, acc, fn param, a -> extract_param_tokens(param, a) end)
+    extract_tokens(body, acc)
+  end
+
+  defp extract_tokens({:attribute_access, receiver, _attribute}, acc) do
+    acc = [:attribute_access | acc]
+    extract_tokens(receiver, acc)
+  end
+
+  defp extract_tokens({:augmented_assignment, op, target, value}, acc) do
+    acc = [op, :augmented_assignment | acc]
+    acc = extract_tokens(target, acc)
+    extract_tokens(value, acc)
+  end
+
+  defp extract_tokens({:property, _name, getter, setter, _metadata}, acc) do
+    acc = [:property | acc]
+    acc = if getter, do: extract_tokens(getter, acc), else: acc
+    if setter, do: extract_tokens(setter, acc), else: acc
+  end
+
+  # Helper for extracting tokens from function parameters
+  defp extract_param_tokens(param, acc) when is_binary(param), do: [:param | acc]
+
+  defp extract_param_tokens({:pattern, pattern}, acc),
+    do: extract_tokens(pattern, [:pattern_param | acc])
+
+  defp extract_param_tokens({:default, _name, default}, acc),
+    do: extract_tokens(default, [:default_param | acc])
 
   # M2.3 Native
   defp extract_tokens({:language_specific, lang, _native, hint, _metadata}, acc) do
