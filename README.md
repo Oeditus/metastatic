@@ -641,14 +641,17 @@ result.severity        # => :high
 
 ### Three-Layer MetaAST
 
-**Layer 1: Core** (always normalized)  
-Common constructs: literals, variables, operators, conditionals, function calls
+**Layer 1: Core (M2.1)** - Universal concepts (ALL languages)  
+Common constructs: literals, variables, operators, conditionals, function calls, assignments
 
-**Layer 2: Extended** (normalized with hints)  
-Common patterns: loops, lambdas, collection operations, pattern matching
+**Layer 2: Extended (M2.2)** - Common patterns (MOST languages)  
+Control flow: loops, lambdas, collection operations, pattern matching, exception handling
 
-**Layer 3: Native** (preserved as-is)  
-Language-specific: lifetimes, async models, type systems, metaprogramming
+**Layer 2s: Structural/Organizational (M2.2s)** - Top-level constructs (MOST languages)  
+Organizational: containers (modules/classes/namespaces), function definitions, properties, attribute access, augmented assignments
+
+**Layer 3: Native (M2.3)** - Language-specific escape hatches  
+Language-specific: lifetimes, async models, advanced type systems, metaprogramming
 
 ## Examples
 

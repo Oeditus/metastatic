@@ -17,9 +17,13 @@ defmodule Metastatic.Validator do
 
   ## Validation Levels
 
-  - **Strict** - No M2.3 native constructs allowed (M2.1 + M2.2 only)
+  - **Strict** - No M2.3 native constructs allowed (M2.1 + M2.2 + M2.2s only)
   - **Standard** - M2.3 allowed but discouraged
   - **Permissive** - All M2 levels accepted
+
+  Note: M2.2s (Structural/Organizational layer) is part of the extended layer
+  and includes container, function_def, attribute_access, augmented_assignment,
+  and property types.
 
   ## Usage
 
@@ -184,6 +188,12 @@ defmodule Metastatic.Validator do
       {:pattern_match, _, _}, _acc -> true
       {:exception_handling, _, _, _}, _acc -> true
       {:async_operation, _, _}, _acc -> true
+      # M2.2s: Structural/Organizational layer
+      {:container, _, _, _, _}, _acc -> true
+      {:function_def, _, _, _, _, _}, _acc -> true
+      {:attribute_access, _, _}, _acc -> true
+      {:augmented_assignment, _, _, _}, _acc -> true
+      {:property, _, _, _, _}, _acc -> true
       _node, acc -> acc
     end)
   end

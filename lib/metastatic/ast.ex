@@ -67,6 +67,12 @@ defmodule Metastatic.AST do
           | pattern_match()
           | exception_handling()
           | async_operation()
+          # M2.2s: Structural/Organizational layer - Top-level constructs
+          | container()
+          | function_def()
+          | attribute_access()
+          | augmented_assignment()
+          | property()
           # M2.3: Native layer - M1 escape hatch
           | language_specific()
 
@@ -414,6 +420,237 @@ defmodule Metastatic.AST do
   """
   @type async_operation :: {:async_operation, :await | :async, operation :: meta_ast()}
 
+  # ----- M2.2s: Structural/Organizational Layer -----
+  # Top-level constructs: modules, classes, function definitions
+
+  @typedoc """
+  M2 meta-type: Container (module/class/namespace).
+
+  Represents organizational units that group related code.
+
+  ## M1 instances
+  - Python: `ast.Module`, `ast.ClassDef`
+  - JavaScript: Module, `ClassDeclaration`
+  - Elixir: `defmodule`
+  - Ruby: `class`, `module`
+
+  ## Metadata Structure
+
+  The metadata map contains language-specific organizational information:
+
+  - `:source_language` - atom identifying source language (`:python`, `:elixir`, etc.)
+  - `:has_state` - boolean indicating if container manages mutable state (classes typically true)
+  - `:visibility` - visibility map: `%{public: [{name, arity}], private: [{name, arity}], protected: [{name, arity}]}`
+  - `:superclass` - string name of direct superclass (nil for no inheritance)
+    Note: Currently only stores direct superclass. TODO: Full inheritance chain would be better in future.
+  - `:organizational_model` - `:oop` or `:fp` to indicate programming paradigm
+  - `:original_ast` - the original M1 AST for 100% round-trip fidelity
+  - `:decorators` - list of decorator MetaAST nodes (Python `@decorator`, etc.)
+  - `:type_params` - list of generic type parameters for generic classes
+  - `:module_attributes` - module-level attributes (@moduledoc in Elixir, etc.)
+  - `:constructor` - reference to constructor function (by name)
+  - `:is_nested` - boolean indicating if this is a nested container
+
+  ## Examples
+
+      # Python class
+      {:container, :class, "Calculator",
+       %{source_language: :python,
+         has_state: true,
+         visibility: %{public: [{"add", 2}, {"subtract", 2}], private: [{"_validate", 1}], protected: []},
+         superclass: "BaseCalculator",
+         organizational_model: :oop,
+         original_ast: python_class_ast},
+       [function_def1, function_def2]}
+
+      # Elixir module
+      {:container, :module, "MyApp.Calculator",
+       %{source_language: :elixir,
+         has_state: false,
+         visibility: %{public: [{"add", 2}], private: [{"validate", 1}], protected: []},
+         superclass: nil,
+         organizational_model: :fp,
+         original_ast: elixir_module_ast},
+       [function_def1, function_def2]}
+  """
+  @type container ::
+          {:container, container_type(), name :: String.t(), metadata :: map(),
+           members :: [meta_ast()]}
+
+  @typedoc """
+  Container type classification.
+  """
+  @type container_type :: :module | :class | :namespace
+
+  @typedoc """
+  M2 meta-type: Function definition.
+
+  Represents a named function/method definition (not invocation).
+
+  ## M1 instances
+  - Python: `ast.FunctionDef`, `ast.AsyncFunctionDef`
+  - JavaScript: `FunctionDeclaration`, Method in `ClassDeclaration`
+  - Elixir: `def`, `defp`
+  - Ruby: `def`
+
+  ## Parameters
+
+  The params list can contain:
+  - Simple string names: `"x"`, `"count"`
+  - Pattern parameters: `{:pattern, meta_ast}` for destructuring
+  - Default parameters: `{:default, "name", default_value}`
+
+  ## Metadata Structure
+
+  The metadata map can contain:
+  - `:guards` - guard clause as MetaAST (Elixir/Erlang when clauses, etc.)
+  - `:arity` - integer arity of the function
+  - `:return_type` - type annotation for return value
+  - `:decorators` - list of decorator MetaAST nodes
+  - `:is_async` - boolean for async/await functions
+  - `:is_static` - boolean for static methods (in OOP)
+  - `:is_abstract` - boolean for abstract methods
+  - `:specs` - function specifications (@spec in Elixir, type hints in Python)
+  - `:doc` - documentation string
+  - `:original_ast` - original M1 AST for round-trip fidelity
+
+  Note: Guards are stored in metadata (not as separate parameter) per design decision Q1.2.
+  Note: Self parameter is removed at M2 level per design decision Q3.1.
+  Note: For multi-clause functions (Elixir), store as single function_def with pattern match in body per Q2.1.
+
+  ## Examples
+
+      # Simple function: def add(x, y), do: x + y
+      {:function_def, :public, "add", ["x", "y"],
+       %{arity: 2, guards: nil},
+       {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+
+      # Function with guard: def positive?(x) when x > 0
+      {:function_def, :public, "positive?", ["x"],
+       %{arity: 1, guards: {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}}},
+       {:literal, :boolean, true}}
+
+      # Function with pattern matching parameter
+      {:function_def, :public, "get_first", [{:pattern, {:tuple, [{:variable, "x"}, :_]}}],
+       %{arity: 1},
+       {:variable, "x"}}
+
+      # Function with default parameter
+      {:function_def, :public, "greet", [{:default, "name", {:literal, :string, "World"}}],
+       %{arity: 1},
+       {:function_call, "puts", [{:literal, :string, "Hello"}]}}
+  """
+  @type function_def ::
+          {:function_def, visibility(), name :: String.t(), params :: [param()],
+           metadata :: map(), body :: meta_ast()}
+
+  @typedoc """
+  Visibility classification for functions and members.
+  """
+  @type visibility :: :public | :private | :protected
+
+  @typedoc """
+  Function parameter types.
+  """
+  @type param ::
+          String.t()
+          | {:pattern, meta_ast()}
+          | {:default, String.t(), meta_ast()}
+
+  @typedoc """
+  M2 meta-type: Attribute access.
+
+  Represents accessing a field/property/attribute on an object or module.
+
+  ## M1 instances
+  - Python: `ast.Attribute`
+  - JavaScript: `MemberExpression`
+  - Elixir: Module.function (converted to function_call), struct.field
+  - Ruby: `object.method`, `object.field`
+
+  ## Examples
+
+      # Python: obj.value
+      {:attribute_access, {:variable, "obj"}, "value"}
+
+      # JavaScript: user.name
+      {:attribute_access, {:variable, "user"}, "name"}
+
+      # Chained access: user.address.street
+      {:attribute_access,
+       {:attribute_access, {:variable, "user"}, "address"},
+       "street"}
+  """
+  @type attribute_access ::
+          {:attribute_access, receiver :: meta_ast(), attribute :: String.t()}
+
+  @typedoc """
+  M2 meta-type: Augmented assignment.
+
+  Represents compound assignment operators (+=, -=, *=, etc.) in their
+  non-desugared form to preserve source structure.
+
+  ## M1 instances
+  - Python: `ast.AugAssign`
+  - JavaScript: `AssignmentExpression` with operators like `+=`
+  - Ruby: `+=`, `-=` operators
+
+  Note: While these CAN be desugared to `{:assignment, target, {:binary_op, ...}}`,
+  preserving them as a distinct type maintains source fidelity and enables
+  augmented-assignment-specific analysis.
+
+  ## Examples
+
+      # Python: x += 5
+      {:augmented_assignment, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+      # JavaScript: count *= 2
+      {:augmented_assignment, :*, {:variable, "count"}, {:literal, :integer, 2}}
+
+      # Ruby: total -= discount
+      {:augmented_assignment, :-, {:variable, "total"}, {:variable, "discount"}}
+  """
+  @type augmented_assignment ::
+          {:augmented_assignment, operator :: atom(), target :: meta_ast(), value :: meta_ast()}
+
+  @typedoc """
+  M2 meta-type: Property.
+
+  Represents property declarations with getters/setters (Python @property,
+  Ruby attr_accessor, C# properties, etc.).
+
+  ## M1 instances
+  - Python: `@property` decorator pattern
+  - Ruby: `attr_accessor`, `attr_reader`, `attr_writer`
+  - C#: property declarations
+  - JavaScript: getter/setter in classes
+
+  ## Metadata Structure
+
+  - `:original_ast` - original M1 AST
+  - `:is_read_only` - boolean (true for attr_reader/getter-only)
+  - `:is_write_only` - boolean (rare, but possible)
+  - `:backing_field` - name of underlying field if applicable
+
+  ## Examples
+
+      # Python property with getter and setter
+      {:property, "temperature",
+       {:function_def, :public, "temperature", [], %{}, {:variable, "_temp"}},
+       {:function_def, :public, "temperature", ["value"], %{},
+        {:assignment, {:variable, "_temp"}, {:variable, "value"}}},
+       %{is_read_only: false}}
+
+      # Ruby attr_reader (read-only)
+      {:property, "name",
+       {:function_def, :public, "name", [], %{}, {:variable, "@name"}},
+       nil,
+       %{is_read_only: true}}
+  """
+  @type property ::
+          {:property, name :: String.t(), getter :: function_def() | nil,
+           setter :: function_def() | nil, metadata :: map()}
+
   # ----- M2.3: Native Layer - M1 Escape Hatch -----
   # When M1 cannot be lifted to M2, preserve as-is with semantic hints
 
@@ -531,6 +768,27 @@ defmodule Metastatic.AST do
       {:async_operation, kind, operation} when kind in [:await, :async] ->
         conforms?(operation)
 
+      # M2.2s: Structural/Organizational
+      {:container, type, name, metadata, members}
+      when type in [:module, :class, :namespace] and is_binary(name) and is_map(metadata) and
+             is_list(members) ->
+        Enum.all?(members, &conforms?/1)
+
+      {:function_def, visibility, name, params, metadata, body}
+      when visibility in [:public, :private, :protected] and is_binary(name) and
+             is_list(params) and is_map(metadata) ->
+        Enum.all?(params, &valid_param?/1) and conforms?(body)
+
+      {:attribute_access, receiver, attribute} when is_binary(attribute) ->
+        conforms?(receiver)
+
+      {:augmented_assignment, _operator, target, value} ->
+        conforms?(target) and conforms?(value)
+
+      {:property, name, getter, setter, metadata}
+      when is_binary(name) and is_map(metadata) ->
+        (is_nil(getter) or conforms?(getter)) and (is_nil(setter) or conforms?(setter))
+
       # M2.3: Native
       # 5-tuple with embedded metadata (preferred format)
       {:language_specific, language, _native_info, hint, metadata}
@@ -569,6 +827,69 @@ defmodule Metastatic.AST do
   def variables(ast) do
     collect_variables(ast, MapSet.new())
   end
+
+  @doc """
+  Extract the container name from a container node.
+
+  ## Examples
+
+      iex> ast = {:container, :module, "MyApp.Math", %{}, []}
+      iex> Metastatic.AST.container_name(ast)
+      "MyApp.Math"
+  """
+  @spec container_name(container()) :: String.t()
+  def container_name({:container, _type, name, _metadata, _members}), do: name
+
+  @doc """
+  Extract the function name from a function_def node.
+
+  ## Examples
+
+      iex> ast = {:function_def, :public, "add", ["x", "y"], %{}, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+      iex> Metastatic.AST.function_name(ast)
+      "add"
+  """
+  @spec function_name(function_def()) :: String.t()
+  def function_name({:function_def, _visibility, name, _params, _metadata, _body}), do: name
+
+  @doc """
+  Get the visibility of a function_def.
+
+  ## Examples
+
+      iex> ast = {:function_def, :public, "add", [], %{}, {:literal, :integer, 0}}
+      iex> Metastatic.AST.function_visibility(ast)
+      :public
+  """
+  @spec function_visibility(function_def()) :: visibility()
+  def function_visibility({:function_def, visibility, _name, _params, _metadata, _body}),
+    do: visibility
+
+  @doc """
+  Check if a container has state (mutable or immutable).
+
+  Looks at the `:has_state` metadata key.
+
+  ## Examples
+
+      iex> ast = {:container, :class, "Counter", %{has_state: true}, []}
+      iex> Metastatic.AST.has_state?(ast)
+      true
+
+      iex> ast = {:container, :module, "Math", %{has_state: false}, []}
+      iex> Metastatic.AST.has_state?(ast)
+      false
+  """
+  @spec has_state?(container()) :: boolean()
+  def has_state?({:container, _type, _name, metadata, _members}) do
+    Map.get(metadata, :has_state, false)
+  end
+
+  # Validate parameter structure for function_def
+  defp valid_param?(param) when is_binary(param), do: true
+  defp valid_param?({:pattern, ast}), do: conforms?(ast)
+  defp valid_param?({:default, name, default}) when is_binary(name), do: conforms?(default)
+  defp valid_param?(_), do: false
 
   defp collect_variables({:variable, name}, acc), do: MapSet.put(acc, name)
 
@@ -670,6 +991,59 @@ defmodule Metastatic.AST do
 
   defp collect_variables({:early_return, value}, acc) do
     collect_variables(value, acc)
+  end
+
+  # M2.2s: Structural/Organizational
+  defp collect_variables({:container, _, _, metadata, members}, acc) do
+    # Collect variables from members
+    acc = Enum.reduce(members, acc, fn member, a -> collect_variables(member, a) end)
+
+    # Also check decorators in metadata if present
+    case Map.get(metadata, :decorators) do
+      nil -> acc
+      decorators -> Enum.reduce(decorators, acc, fn dec, a -> collect_variables(dec, a) end)
+    end
+  end
+
+  defp collect_variables({:function_def, _, _, params, metadata, body}, acc) do
+    # Collect from parameters (including patterns and defaults)
+    acc =
+      Enum.reduce(params, acc, fn
+        param, a when is_binary(param) -> MapSet.put(a, param)
+        {:pattern, pattern}, a -> collect_variables(pattern, a)
+        {:default, name, default}, a -> collect_variables(default, MapSet.put(a, name))
+      end)
+
+    # Collect from guards in metadata
+    acc =
+      case Map.get(metadata, :guards) do
+        nil -> acc
+        guards -> collect_variables(guards, acc)
+      end
+
+    # Collect from decorators in metadata
+    acc =
+      case Map.get(metadata, :decorators) do
+        nil -> acc
+        decorators -> Enum.reduce(decorators, acc, fn dec, a -> collect_variables(dec, a) end)
+      end
+
+    # Collect from body
+    collect_variables(body, acc)
+  end
+
+  defp collect_variables({:attribute_access, receiver, _attribute}, acc) do
+    collect_variables(receiver, acc)
+  end
+
+  defp collect_variables({:augmented_assignment, _op, target, value}, acc) do
+    acc = collect_variables(target, acc)
+    collect_variables(value, acc)
+  end
+
+  defp collect_variables({:property, _name, getter, setter, _metadata}, acc) do
+    acc = if getter, do: collect_variables(getter, acc), else: acc
+    if setter, do: collect_variables(setter, acc), else: acc
   end
 
   # Language-specific: traverse embedded body if present
