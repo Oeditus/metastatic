@@ -102,6 +102,13 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # Map literals - M2.1 Core Layer
+  def transform({:%{}, _meta, [{:|, _bar_meta, [map_name, pairs]}]}) when is_list(pairs) do
+    reshaped =
+      quote do: Enum.reduce(pairs, unquote(map_name), fn {k, v}, acc -> Map.put(acc, k, v) end)
+
+    transform(reshaped)
+  end
+
   def transform({:%{}, _meta, pairs}) when is_list(pairs) do
     # Map literal: %{key => value, ...}
     with {:ok, pairs_meta} <- transform_map_pairs(pairs) do
@@ -809,6 +816,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
           end
 
         _ ->
+          raise inspect(pair: pair, pairs: pairs)
           {:halt, {:error, "Invalid map pair: #{inspect(pair)}"}}
       end
     end)
