@@ -16,8 +16,8 @@ defmodule Metastatic.Document.Analyzer do
         )
 
       @doc doc
-      @spec analyze(Document.t()) :: {:ok, map()} | {:error, term()}
-      @spec analyze(Document.t(), keyword()) :: {:ok, map()} | {:error, term()}
+      @spec analyze(Metastatic.Document.t()) :: {:ok, map()} | {:error, term()}
+      @spec analyze(Metastatic.Document.t(), keyword()) :: {:ok, map()} | {:error, term()}
       @spec analyze(Metastatic.language(), term(), keyword()) :: {:ok, map()} | {:error, term()}
       def analyze(language_or_doc, source_or_ast_or_opts \\ [], opts \\ [])
 
@@ -33,8 +33,8 @@ defmodule Metastatic.Document.Analyzer do
         do: handle_analyze(doc, opts)
 
       @doc doc <> "\n\nUnlike not-banged version, this one either returns a result or raises"
-      @spec analyze!(Document.t()) :: Result.t()
-      @spec analyze!(Document.t(), keyword()) :: Result.t()
+      @spec analyze!(Metastatic.Document.t()) :: Result.t()
+      @spec analyze!(Metastatic.Document.t(), keyword()) :: Result.t()
       @spec analyze!(Metastatic.language(), term(), keyword()) :: Result.t()
       def analyze!(language_or_doc, source_or_ast_or_opts \\ [], opts \\ []) do
         case analyze(language_or_doc, source_or_ast_or_opts, opts) do
