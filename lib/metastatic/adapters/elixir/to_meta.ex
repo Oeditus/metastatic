@@ -277,6 +277,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Function Calls - M2.1 Core Layer
 
+  # Map field access
+  def transform({{:., _, [{var, _var_meta, nil_or_empty}, field]}, _meta, []})
+      when nil_or_empty in [nil, []] do
+    {:ok, {:attribute_access, {:variable, var}, field}, %{kind: :map}}
+  end
+
   # Remote call (Module.function)
   def transform({{:., _, [module, func]}, _meta, args}) when is_list(args) do
     module_name = module_to_string(module)
@@ -445,13 +451,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp transform_or_nil(nil), do: {:ok, nil, %{}}
   defp transform_or_nil(value), do: transform(value)
 
-  defp module_to_string({:__aliases__, _, parts}) do
-    Enum.map_join(parts, ".", &Atom.to_string/1)
-  end
-
-  defp module_to_string(atom) when is_atom(atom) do
-    Atom.to_string(atom)
-  end
+  defp module_to_string({:__aliases__, _, parts}), do: Enum.join(parts, ".")
+  defp module_to_string(atom) when is_atom(atom), do: Atom.to_string(atom)
 
   defp special_form?(atom) do
     atom in [
