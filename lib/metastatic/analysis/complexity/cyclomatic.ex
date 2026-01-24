@@ -196,6 +196,51 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
     walk(body, count)
   end
 
+  # M2.2s: Structural/Organizational types
+  # Container: walk all members
+  defp walk({:container, _type, _name, _metadata, members}, count) when is_list(members) do
+    Enum.reduce(members, count, fn member, c -> walk(member, c) end)
+  end
+
+  # Function definition: walk body (guards may add decision points)
+  defp walk({:function_def, _visibility, _name, params, metadata, body}, count)
+       when is_list(params) do
+    # Walk parameters (for pattern params with embedded conditionals)
+    count =
+      Enum.reduce(params, count, fn
+        {:pattern, pattern}, c -> walk(pattern, c)
+        {:default, _name, default}, c -> walk(default, c)
+        _simple_param, c -> c
+      end)
+
+    # Walk guards if present
+    count =
+      case Map.get(metadata, :guards) do
+        nil -> count
+        guard -> walk(guard, count)
+      end
+
+    # Walk body
+    walk(body, count)
+  end
+
+  # Attribute access: walk receiver
+  defp walk({:attribute_access, receiver, _attribute}, count) do
+    walk(receiver, count)
+  end
+
+  # Augmented assignment: walk target and value
+  defp walk({:augmented_assignment, _op, target, value}, count) do
+    count = walk(target, count)
+    walk(value, count)
+  end
+
+  # Property: walk getter and setter
+  defp walk({:property, _name, getter, setter, _metadata}, count) do
+    count = if getter, do: walk(getter, count), else: count
+    if setter, do: walk(setter, count), else: count
+  end
+
   # Language-specific: traverse embedded body if present
   defp walk({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
     # If there's a body in metadata (e.g., module/function definitions), traverse it

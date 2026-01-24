@@ -198,6 +198,21 @@ defmodule Metastatic.Analysis.Complexity do
     Map.get(metadata, :body, {:block, []})
   end
 
+  # M2.2s: Structural types - extract members/body for analysis
+  defp extract_analyzable_ast({:container, _type, _name, _metadata, members}, _doc_metadata)
+       when is_list(members) do
+    # For containers, analyze the aggregate complexity of all members
+    {:block, members}
+  end
+
+  defp extract_analyzable_ast(
+         {:function_def, _visibility, _name, _params, _metadata, body},
+         _doc_metadata
+       ) do
+    # For function definitions, analyze the body
+    body
+  end
+
   defp extract_analyzable_ast(ast, _metadata), do: ast
 
   # Extract per-function complexity metrics from a module
@@ -213,6 +228,17 @@ defmodule Metastatic.Analysis.Complexity do
     extract_functions_from_body(body)
   end
 
+  # M2.2s: Extract functions from container members
+  defp extract_per_function_metrics({:container, _type, _name, _metadata, members}, _doc_metadata)
+       when is_list(members) do
+    members
+    |> Enum.filter(fn
+      {:function_def, _, _, _, _, _} -> true
+      _ -> false
+    end)
+    |> Enum.map(&analyze_function_def/1)
+  end
+
   defp extract_per_function_metrics(_, _), do: []
 
   defp extract_functions_from_body({:block, statements}) when is_list(statements) do
@@ -220,9 +246,13 @@ defmodule Metastatic.Analysis.Complexity do
     |> Enum.filter(fn
       {:language_specific, _, _, :function_definition, _} -> true
       {:language_specific, _, _, :function_definition} -> true
+      {:function_def, _, _, _, _, _} -> true
       _ -> false
     end)
-    |> Enum.map(&analyze_function/1)
+    |> Enum.map(fn
+      {:function_def, _, _, _, _, _} = node -> analyze_function_def(node)
+      node -> analyze_function(node)
+    end)
     |> Enum.reject(&is_nil/1)
   end
 
@@ -250,4 +280,18 @@ defmodule Metastatic.Analysis.Complexity do
   end
 
   defp analyze_function(_), do: nil
+
+  # M2.2s: Analyze function_def structural type
+  defp analyze_function_def({:function_def, _visibility, name, _params, _metadata, body}) do
+    variables = Metastatic.AST.variables(body)
+
+    %{
+      name: name,
+      cyclomatic: Cyclomatic.calculate(body),
+      cognitive: Cognitive.calculate(body),
+      max_nesting: Nesting.calculate(body),
+      statements: FunctionMetrics.calculate(body).statement_count,
+      variables: MapSet.size(variables)
+    }
+  end
 end
