@@ -210,6 +210,56 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
         acc = Enum.reduce(params, acc, fn param, a -> walk(param, a) end)
         walk(body, acc)
 
+      # M2.2s: Structural/Organizational Types
+
+      # Container: walk all members, count container type as operator
+      {:container, type, name, _metadata, members} when is_list(members) ->
+        acc = %{acc | operators: [to_string(type) | acc.operators]}
+        acc = %{acc | operands: [name | acc.operands]}
+        Enum.reduce(members, acc, fn member, a -> walk(member, a) end)
+
+      # Function definition: count as operator, walk parameters, guards, and body
+      {:function_def, visibility, name, params, metadata, body} ->
+        acc = %{acc | operators: ["def", to_string(visibility) | acc.operators]}
+        acc = %{acc | operands: [name | acc.operands]}
+
+        # Walk parameters
+        acc =
+          Enum.reduce(params, acc, fn
+            {:pattern, pattern}, a -> walk(pattern, a)
+            {:default, name, default}, a -> a |> walk({:variable, name}) |> walk(default)
+            simple_param, a -> walk(simple_param, a)
+          end)
+
+        # Walk guards if present
+        acc =
+          case Map.get(metadata, :guards) do
+            nil -> acc
+            guard -> walk(guard, acc)
+          end
+
+        # Walk body
+        walk(body, acc)
+
+      # Attribute access: count as operator
+      {:attribute_access, obj, attr} ->
+        acc = %{acc | operators: ["." | acc.operators]}
+        acc = %{acc | operands: [attr | acc.operands]}
+        walk(obj, acc)
+
+      # Augmented assignment: count operator and walk value
+      {:augmented_assignment, op, target, value} ->
+        acc = %{acc | operators: [to_string(op) | acc.operators]}
+        acc = walk(target, acc)
+        walk(value, acc)
+
+      # Property: count getter/setter as operators, walk bodies
+      {:property, name, getter, setter, _metadata} ->
+        acc = %{acc | operators: ["property" | acc.operators]}
+        acc = %{acc | operands: [name | acc.operands]}
+        acc = if getter, do: walk(getter, acc), else: acc
+        if setter, do: walk(setter, acc), else: acc
+
       # Collection operations
       {:collection_op, op, func, coll} ->
         acc = %{acc | operators: [to_string(op) | acc.operators]}

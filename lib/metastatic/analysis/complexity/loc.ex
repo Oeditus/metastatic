@@ -173,6 +173,51 @@ defmodule Metastatic.Analysis.Complexity.LoC do
     Enum.reduce(stmts, count, fn stmt, c -> walk(stmt, c) end)
   end
 
+  # M2.2s: Structural/Organizational Types
+
+  defp walk({:container, _type, _name, _metadata, members}, count) when is_list(members) do
+    count = count + 1
+    Enum.reduce(members, count, fn member, c -> walk(member, c) end)
+  end
+
+  defp walk({:function_def, _visibility, _name, params, metadata, body}, count) do
+    count = count + 1
+
+    # Walk parameters
+    count =
+      Enum.reduce(params, count, fn
+        {:pattern, pattern}, c -> walk_expr(pattern, c)
+        {:default, _name, default}, c -> walk_expr(default, c)
+        _simple_param, c -> c
+      end)
+
+    # Walk guards if present
+    count =
+      case Map.get(metadata, :guards) do
+        nil -> count
+        guard -> walk_expr(guard, count)
+      end
+
+    # Walk body
+    walk(body, count)
+  end
+
+  defp walk({:attribute_access, obj, _attr}, count) do
+    # Attribute access is not a statement, walk as expression
+    walk_expr(obj, count)
+  end
+
+  defp walk({:augmented_assignment, _op, _target, value}, count) do
+    count = count + 1
+    walk_expr(value, count)
+  end
+
+  defp walk({:property, _name, getter, setter, _metadata}, count) do
+    count = count + 1
+    count = if getter, do: walk(getter, count), else: count
+    if setter, do: walk(setter, count), else: count
+  end
+
   defp walk({:collection_op, _, func, coll}, count) do
     count = walk_expr(func, count)
     walk_expr(coll, count)

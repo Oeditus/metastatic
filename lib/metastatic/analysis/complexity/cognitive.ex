@@ -205,6 +205,43 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
     walk(body, nesting, acc)
   end
 
+  # M2.2s: Structural/Organizational types
+  defp walk({:container, _type, _name, _metadata, members}, nesting, acc) when is_list(members) do
+    Enum.reduce(members, acc, fn member, a -> walk(member, nesting, a) end)
+  end
+
+  defp walk({:function_def, _visibility, _name, params, metadata, body}, nesting, acc)
+       when is_list(params) do
+    acc =
+      Enum.reduce(params, acc, fn
+        {:pattern, pattern}, a -> walk(pattern, nesting, a)
+        {:default, _name, default}, a -> walk(default, nesting, a)
+        _simple_param, a -> a
+      end)
+
+    acc =
+      case Map.get(metadata, :guards) do
+        nil -> acc
+        guard -> walk(guard, nesting, acc)
+      end
+
+    walk(body, nesting, acc)
+  end
+
+  defp walk({:attribute_access, receiver, _attribute}, nesting, acc) do
+    walk(receiver, nesting, acc)
+  end
+
+  defp walk({:augmented_assignment, _op, target, value}, nesting, acc) do
+    acc = walk(target, nesting, acc)
+    walk(value, nesting, acc)
+  end
+
+  defp walk({:property, _name, getter, setter, _metadata}, nesting, acc) do
+    acc = if getter, do: walk(getter, nesting, acc), else: acc
+    if setter, do: walk(setter, nesting, acc), else: acc
+  end
+
   # Language-specific: traverse embedded body if present
   defp walk({:language_specific, _, _, _, metadata}, nesting, acc) when is_map(metadata) do
     case Map.get(metadata, :body) do

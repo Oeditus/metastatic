@@ -121,6 +121,51 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     Enum.reduce(stmts, count, fn stmt, c -> walk_statements(stmt, c) end)
   end
 
+  # M2.2s: Structural/Organizational Types
+
+  defp walk_statements({:container, _type, _name, _metadata, members}, count)
+       when is_list(members) do
+    count = count + 1
+    Enum.reduce(members, count, fn member, c -> walk_statements(member, c) end)
+  end
+
+  defp walk_statements({:function_def, _visibility, _name, params, metadata, body}, count) do
+    count = count + 1
+
+    # Walk parameters
+    count =
+      Enum.reduce(params, count, fn
+        {:pattern, pattern}, c -> walk_statements(pattern, c)
+        {:default, _name, default}, c -> walk_statements(default, c)
+        _simple_param, c -> c
+      end)
+
+    # Walk guards if present
+    count =
+      case Map.get(metadata, :guards) do
+        nil -> count
+        guard -> walk_statements(guard, count)
+      end
+
+    # Walk body
+    walk_statements(body, count)
+  end
+
+  defp walk_statements({:attribute_access, obj, _attr}, count) do
+    walk_statements(obj, count)
+  end
+
+  defp walk_statements({:augmented_assignment, _op, _target, value}, count) do
+    count = count + 1
+    walk_statements(value, count)
+  end
+
+  defp walk_statements({:property, _name, getter, setter, _metadata}, count) do
+    count = count + 1
+    count = if getter, do: walk_statements(getter, count), else: count
+    if setter, do: walk_statements(setter, count), else: count
+  end
+
   defp walk_statements({:async_operation, _, body}, count) do
     count = count + 1
     walk_statements(body, count)
@@ -182,6 +227,46 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
 
   defp walk_returns({:block, stmts}, count) when is_list(stmts) do
     Enum.reduce(stmts, count, fn stmt, c -> walk_returns(stmt, c) end)
+  end
+
+  # M2.2s: Structural/Organizational Types
+
+  defp walk_returns({:container, _type, _name, _metadata, members}, count)
+       when is_list(members) do
+    Enum.reduce(members, count, fn member, c -> walk_returns(member, c) end)
+  end
+
+  defp walk_returns({:function_def, _visibility, _name, params, metadata, body}, count) do
+    # Walk parameters
+    count =
+      Enum.reduce(params, count, fn
+        {:pattern, pattern}, c -> walk_returns(pattern, c)
+        {:default, _name, default}, c -> walk_returns(default, c)
+        _simple_param, c -> c
+      end)
+
+    # Walk guards if present
+    count =
+      case Map.get(metadata, :guards) do
+        nil -> count
+        guard -> walk_returns(guard, count)
+      end
+
+    # Walk body
+    walk_returns(body, count)
+  end
+
+  defp walk_returns({:attribute_access, obj, _attr}, count) do
+    walk_returns(obj, count)
+  end
+
+  defp walk_returns({:augmented_assignment, _op, _target, value}, count) do
+    walk_returns(value, count)
+  end
+
+  defp walk_returns({:property, _name, getter, setter, _metadata}, count) do
+    count = if getter, do: walk_returns(getter, count), else: count
+    if setter, do: walk_returns(setter, count), else: count
   end
 
   defp walk_returns({:async_operation, _, body}, count), do: walk_returns(body, count)

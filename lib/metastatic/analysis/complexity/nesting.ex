@@ -164,6 +164,58 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {current, max}
   end
 
+  # M2.2s: Structural/Organizational Types
+
+  # Container: walk all members at same depth
+  defp walk({:container, _type, _name, _metadata, members}, current, max) when is_list(members) do
+    max = Enum.max([current, max])
+
+    {_, max} =
+      Enum.reduce(members, {current, max}, fn member, {c, m} ->
+        walk(member, c, m)
+      end)
+
+    {current, max}
+  end
+
+  # Function definition: walk parameters, guards, and body
+  defp walk({:function_def, _visibility, _name, params, metadata, body}, current, max) do
+    # Walk parameters
+    {_, max} =
+      Enum.reduce(params, {current, max}, fn
+        {:pattern, pattern}, {c, m} -> walk(pattern, c, m)
+        {:default, _name, default}, {c, m} -> walk(default, c, m)
+        _simple_param, {c, m} -> {c, m}
+      end)
+
+    # Walk guards if present
+    {_, max} =
+      case Map.get(metadata, :guards) do
+        nil -> {current, max}
+        guard -> walk(guard, current, max)
+      end
+
+    # Walk body with incremented depth (function introduces scope)
+    walk(body, current + 1, max)
+  end
+
+  # Attribute access: walk object
+  defp walk({:attribute_access, obj, _attr}, current, max) do
+    walk(obj, current, max)
+  end
+
+  # Augmented assignment: walk value
+  defp walk({:augmented_assignment, _op, _target, value}, current, max) do
+    walk(value, current, max)
+  end
+
+  # Property: walk getter and setter bodies
+  defp walk({:property, _name, getter, setter, _metadata}, current, max) do
+    {_, max} = if getter, do: walk(getter, current + 1, max), else: {current, max}
+    {_, max} = if setter, do: walk(setter, current + 1, max), else: {current, max}
+    {current, max}
+  end
+
   # Collection operations
   defp walk({:collection_op, _, func, coll}, current, max) do
     {_, max} = walk(func, current, max)
