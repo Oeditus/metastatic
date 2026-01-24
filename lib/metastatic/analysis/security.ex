@@ -54,24 +54,24 @@ defmodule Metastatic.Analysis.Security do
   @dangerous_functions %{
     # Python dangerous functions
     python: %{
-      eval: {:unsafe_deserialization, :critical, 95},
-      exec: {:unsafe_deserialization, :critical, 95},
-      "pickle.loads": {:unsafe_deserialization, :critical, 502},
-      "os.system": {:injection, :critical, 78},
-      "subprocess.call": {:injection, :high, 78},
-      "subprocess.run": {:injection, :high, 78},
-      compile: {:unsafe_deserialization, :high, 95}
+      "eval" => {:unsafe_deserialization, :critical, 95},
+      "exec" => {:unsafe_deserialization, :critical, 95},
+      "pickle.loads" => {:unsafe_deserialization, :critical, 502},
+      "os.system" => {:injection, :critical, 78},
+      "subprocess.call" => {:injection, :high, 78},
+      "subprocess.run" => {:injection, :high, 78},
+      "compile" => {:unsafe_deserialization, :high, 95}
     },
     # Elixir dangerous functions
     elixir: %{
-      "Code.eval_string": {:unsafe_deserialization, :critical, 95},
-      ":os.cmd": {:injection, :critical, 78},
-      "System.cmd": {:injection, :high, 78}
+      "Code.eval_string" => {:unsafe_deserialization, :critical, 95},
+      ":os.cmd" => {:injection, :critical, 78},
+      "System.cmd" => {:injection, :high, 78}
     },
     # Erlang dangerous functions
     erlang: %{
-      "erl_eval:expr": {:unsafe_deserialization, :critical, 95},
-      ":os.cmd": {:injection, :critical, 78}
+      "erl_eval:expr" => {:unsafe_deserialization, :critical, 95},
+      ":os.cmd" => {:injection, :critical, 78}
     }
   }
 
@@ -80,10 +80,15 @@ defmodule Metastatic.Analysis.Security do
 
   # Secret patterns (regex-like strings to check)
   @secret_patterns [
-    {"password", ~r/password\s*=\s*["'].+["']/i},
-    {"api_key", ~r/api[_-]?key\s*=\s*["'].+["']/i},
-    {"secret", ~r/secret\s*=\s*["'].+["']/i},
-    {"token", ~r/token\s*=\s*["'].+["']/i}
+    # Patterns matching assignment/declaration syntax
+    {"password", ~r/password[\s:=]+["'].+["']/i},
+    {"api_key", ~r/api[_-]?key[\s:=]+["'].+["']/i},
+    {"secret", ~r/secret[\s:=]+["'].+["']/i},
+    {"token", ~r/token[\s:=]+["'].+["']/i},
+    # Patterns matching secret-like string content
+    {"api_key", ~r/^(sk|pk|Bearer|[A-Za-z0-9_-]{32,}$)/},
+    {"token", ~r/^[A-Za-z0-9_.-]{20,}$/},
+    {"secret", ~r/^[A-Za-z0-9+\/=]{40,}$/}
   ]
 
   use Metastatic.Document.Analyzer,
@@ -125,16 +130,26 @@ defmodule Metastatic.Analysis.Security do
   defp detect_dangerous_functions(vulns, ast, language) do
     dangerous_calls = find_dangerous_calls(ast, language)
 
-    Enum.map(dangerous_calls, fn {func_name, {category, severity, cwe}} ->
-      %{
-        category: category,
-        severity: severity,
-        description: "Dangerous function '#{func_name}' detected",
-        recommendation: get_recommendation(category, func_name),
-        cwe: cwe,
-        context: %{function: func_name}
-      }
-    end) ++ vulns
+    vulns_from_calls =
+      Enum.flat_map(dangerous_calls, fn
+        {func_name, {category, severity, cwe}} when is_binary(func_name) ->
+          [
+            %{
+              category: category,
+              severity: severity,
+              description: "Dangerous function '#{func_name}' detected",
+              recommendation: get_recommendation(category, func_name),
+              cwe: cwe,
+              context: %{function: func_name}
+            }
+          ]
+
+        _other ->
+          # Skip malformed entries
+          []
+      end)
+
+    vulns_from_calls ++ vulns
   end
 
   defp find_dangerous_calls(ast, language) do
@@ -268,13 +283,13 @@ defmodule Metastatic.Analysis.Security do
         Enum.reduce(statements, acc, fn stmt, a -> walk_ast(stmt, a, func) end)
 
       {:conditional, cond, then_br, else_br} ->
-        acc
-        |> walk_ast(cond, func)
-        |> walk_ast(then_br, func)
-        |> walk_ast(else_br, func)
+        acc = walk_ast(cond, acc, func)
+        acc = walk_ast(then_br, acc, func)
+        walk_ast(else_br, acc, func)
 
       {:binary_op, _, _, left, right} ->
-        acc |> walk_ast(left, func) |> walk_ast(right, func)
+        acc = walk_ast(left, acc, func)
+        walk_ast(right, acc, func)
 
       {:unary_op, _, _, operand} ->
         walk_ast(operand, acc, func)
@@ -283,16 +298,31 @@ defmodule Metastatic.Analysis.Security do
         Enum.reduce(args, acc, fn arg, a -> walk_ast(arg, a, func) end)
 
       {:assignment, target, value} ->
-        acc |> walk_ast(target, func) |> walk_ast(value, func)
+        acc = walk_ast(target, acc, func)
+        walk_ast(value, acc, func)
 
       {:loop, :while, cond, body} ->
-        acc |> walk_ast(cond, func) |> walk_ast(body, func)
+        acc = walk_ast(cond, acc, func)
+        walk_ast(body, acc, func)
 
       {:loop, _, _iter, coll, body} ->
-        acc |> walk_ast(coll, func) |> walk_ast(body, func)
+        acc = walk_ast(coll, acc, func)
+        walk_ast(body, acc, func)
 
       {:lambda, _params, body} ->
         walk_ast(body, acc, func)
+
+      {:language_specific, _lang, _native_ast, _node_type, metadata} when is_map(metadata) ->
+        # Walk through metadata values (which contain MetaAST)
+        # Only walk values that are tuples (AST nodes) or lists
+        Enum.reduce(Map.values(metadata), acc, fn
+          value, a when is_tuple(value) or is_list(value) -> walk_ast(value, a, func)
+          _other, a -> a
+        end)
+
+      # Plain list (not wrapped in tuple) - walk each element
+      list when is_list(list) ->
+        Enum.reduce(list, acc, fn elem, a -> walk_ast(elem, a, func) end)
 
       nil ->
         acc
