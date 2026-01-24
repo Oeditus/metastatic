@@ -99,6 +99,8 @@ defmodule Metastatic.MixProject do
         CHANGELOG.md
         THEORETICAL_FOUNDATIONS.md
         SUPPLEMENTAL_MODULES.md
+        ANALYZER_PLUGIN_DESIGN.md
+        METAST_SPEC.md
         LICENSE
       ),
       licenses: ["GPL-3.0", "CC-BY-SA-4.0"],
@@ -140,8 +142,8 @@ defmodule Metastatic.MixProject do
       "GETTING_STARTED.md": [title: "Getting Started"],
       "THEORETICAL_FOUNDATIONS.md": [title: "Theoretical Foundations"],
       "SUPPLEMENTAL_MODULES.md": [title: "Supplemental Modules"],
-      "CONTRIBUTING_SUPPLEMENTALS.md": [title: "Contributing Supplementals"],
       "ANALYZER_PLUGIN_DESIGN.md": [title: "Analyzer Plugin Design"],
+      "METAST_SPEC.md": [title: "MetaAST Informal Specification"],
       "CHANGELOG.md": [title: "Changelog"]
     ]
   end
