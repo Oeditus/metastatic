@@ -29,8 +29,8 @@ defmodule Metastatic.Analysis.Smells do
 
   ## Examples
 
-      # No code smells
-      iex> ast = {:binary_op, :arithmetic, :+, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      # No code smells - using common constants 0, 1, -1
+      iex> ast = {:binary_op, :arithmetic, :+, {:literal, :integer, 1}, {:literal, :integer, 0}}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Smells.analyze(doc)
       iex> result.has_smells?
@@ -337,7 +337,10 @@ defmodule Metastatic.Analysis.Smells do
 
       # Check elixir_meta for line info
       Map.has_key?(metadata, :elixir_meta) ->
-        extract_line_from_elixir_meta(metadata.elixir_meta)
+        case extract_line_from_elixir_meta(metadata.elixir_meta) do
+          nil -> nil
+          line -> %{line: line}
+        end
 
       true ->
         nil
