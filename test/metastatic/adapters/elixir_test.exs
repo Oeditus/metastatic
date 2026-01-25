@@ -344,7 +344,8 @@ defmodule Metastatic.Adapters.ElixirTest do
     test "raises error with invalid map pairs in the AST" do
       # Invalid pair structure - not a {key, value} tuple
       map_var = {:map, [], nil}
-      invalid_pairs = [:invalid_atom]  # Not a proper key-value pair
+      # Not a proper key-value pair
+      invalid_pairs = [:invalid_atom]
       ast = {:%{}, [], [{:|, [], [map_var, invalid_pairs]}]}
 
       # transform_map_pairs should detect this and return an error

@@ -42,7 +42,15 @@ defmodule Metastatic.Analysis.Smells.Result do
           severity: severity(),
           description: String.t(),
           suggestion: String.t(),
-          context: term()
+          context: term(),
+          location: location() | nil
+        }
+
+  @type location :: %{
+          optional(:function) => String.t(),
+          optional(:module) => String.t(),
+          optional(:line) => non_neg_integer(),
+          optional(:arity) => non_neg_integer()
         }
 
   @type smell_type ::

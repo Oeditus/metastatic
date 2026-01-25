@@ -86,11 +86,8 @@ defmodule Metastatic.Analysis.Smells do
       []
       |> detect_long_function(doc, thresholds)
       |> detect_deep_nesting(doc, thresholds)
-
-    magic_smells = detect_magic_numbers(ast, thresholds)
-    complex_smells = detect_complex_conditionals(ast, thresholds)
-
-    smells = smells ++ magic_smells ++ complex_smells
+      |> detect_magic_numbers(ast, thresholds)
+      |> detect_complex_conditionals(ast, thresholds)
 
     {:ok, Result.new(smells)}
   end
@@ -107,13 +104,16 @@ defmodule Metastatic.Analysis.Smells do
     statement_count = Map.get(complexity.function_metrics, :statement_count, 0)
 
     if statement_count > thresholds.max_statements do
+      location = extract_location(doc)
+
       smell = %{
         type: :long_function,
         severity: determine_severity(:long_function, statement_count, thresholds.max_statements),
         description:
           "Function has #{statement_count} statements (threshold: #{thresholds.max_statements})",
         suggestion: "Break this function into smaller, focused functions",
-        context: %{statement_count: statement_count, threshold: thresholds.max_statements}
+        context: %{statement_count: statement_count, threshold: thresholds.max_statements},
+        location: location
       }
 
       [smell | smells]
@@ -127,6 +127,8 @@ defmodule Metastatic.Analysis.Smells do
     {:ok, complexity} = Complexity.analyze(doc)
 
     if complexity.max_nesting > thresholds.max_nesting do
+      location = extract_location(doc)
+
       smell = %{
         type: :deep_nesting,
         severity:
@@ -134,7 +136,8 @@ defmodule Metastatic.Analysis.Smells do
         description:
           "Nesting depth of #{complexity.max_nesting} exceeds threshold of #{thresholds.max_nesting}",
         suggestion: "Reduce nesting by extracting functions or using early returns",
-        context: %{max_nesting: complexity.max_nesting, threshold: thresholds.max_nesting}
+        context: %{max_nesting: complexity.max_nesting, threshold: thresholds.max_nesting},
+        location: location
       }
 
       [smell | smells]
@@ -144,31 +147,32 @@ defmodule Metastatic.Analysis.Smells do
   end
 
   # Detect magic numbers (numeric literals in complex expressions)
-  defp detect_magic_numbers(ast, _thresholds) do
-    magic_numbers = find_magic_numbers(ast, [])
+  defp detect_magic_numbers(smells, ast, _thresholds) do
+    magic_numbers = find_magic_numbers(ast, [], nil)
 
-    Enum.map(magic_numbers, fn {value, context} ->
+    Enum.map(magic_numbers, fn {value, context, line} ->
       %{
         type: :magic_number,
         severity: :low,
         description: "Magic number #{value} should be a named constant",
         suggestion: "Extract #{value} to a named constant",
-        context: context
+        context: context,
+        location: if(line, do: %{line: line}, else: nil)
       }
-    end)
+    end) ++ smells
   end
 
-  defp find_magic_numbers(ast, context) do
+  defp find_magic_numbers(ast, context, current_line) do
     case ast do
       {:binary_op, _, _, left, right} ->
         # Check for numeric literals in binary operations
-        find_magic_numbers(left, [:binary_op | context]) ++
-          find_magic_numbers(right, [:binary_op | context])
+        find_magic_numbers(left, [:binary_op | context], current_line) ++
+          find_magic_numbers(right, [:binary_op | context], current_line)
 
       {:literal, :integer, value} when is_integer(value) and value not in [0, 1, -1] ->
         # Report integers other than 0, 1, -1 in operation context
         if :binary_op in context or :unary_op in context do
-          [{value, %{value: value, in_expression: true}}]
+          [{value, %{value: value, in_expression: true}, current_line}]
         else
           []
         end
@@ -176,81 +180,107 @@ defmodule Metastatic.Analysis.Smells do
       {:literal, :float, value} when is_float(value) ->
         # Report all float literals in operation context
         if :binary_op in context or :unary_op in context do
-          [{value, %{value: value, in_expression: true}}]
+          [{value, %{value: value, in_expression: true}, current_line}]
         else
           []
         end
 
       {:unary_op, _, _, operand} ->
-        find_magic_numbers(operand, [:unary_op | context])
+        find_magic_numbers(operand, [:unary_op | context], current_line)
 
       {:conditional, cond, then_br, else_br} ->
-        find_magic_numbers(cond, context) ++
-          find_magic_numbers(then_br, context) ++
-          find_magic_numbers(else_br, context)
+        find_magic_numbers(cond, context, current_line) ++
+          find_magic_numbers(then_br, context, current_line) ++
+          find_magic_numbers(else_br, context, current_line)
 
       {:block, statements} when is_list(statements) ->
-        Enum.flat_map(statements, &find_magic_numbers(&1, context))
+        Enum.flat_map(statements, &find_magic_numbers(&1, context, current_line))
 
       {:function_call, _name, args} when is_list(args) ->
-        Enum.flat_map(args, &find_magic_numbers(&1, context))
+        Enum.flat_map(args, &find_magic_numbers(&1, context, current_line))
+
+      {:language_specific, _lang, _native, _type, metadata} ->
+        # Extract line information from language-specific wrapper
+        line = extract_line_from_metadata(metadata)
+        find_magic_numbers_in_metadata(metadata, context, line)
 
       _ ->
         []
     end
   end
 
-  # Detect complex conditionals (nested boolean operations)
-  defp detect_complex_conditionals(ast, _thresholds) do
-    complex_conditions = find_complex_conditionals(ast, 0)
+  defp find_magic_numbers_in_metadata(metadata, context, line) when is_map(metadata) do
+    # Check if metadata has a body field to recurse into
+    case Map.get(metadata, :body) do
+      nil -> []
+      body -> find_magic_numbers(body, context, line)
+    end
+  end
 
-    Enum.map(complex_conditions, fn depth ->
+  # Detect complex conditionals (nested boolean operations)
+  defp detect_complex_conditionals(smells, ast, _thresholds) do
+    complex_conditions = find_complex_conditionals(ast, 0, nil)
+
+    Enum.map(complex_conditions, fn {depth, line} ->
       %{
         type: :complex_conditional,
         severity: if(depth > 3, do: :high, else: :medium),
         description: "Complex conditional with #{depth} nested boolean operations",
         suggestion: "Extract condition logic into well-named boolean variables",
-        context: %{complexity_depth: depth}
+        context: %{complexity_depth: depth},
+        location: if(line, do: %{line: line}, else: nil)
       }
-    end)
+    end) ++ smells
   end
 
-  defp find_complex_conditionals(ast, depth) do
+  defp find_complex_conditionals(ast, depth, current_line) do
     case ast do
       {:conditional, cond, then_br, else_br} ->
         cond_depth = count_boolean_depth(cond, 0)
 
         results =
           if cond_depth > 2 do
-            [cond_depth]
+            [{cond_depth, current_line}]
           else
             []
           end
 
         results ++
-          find_complex_conditionals(then_br, depth) ++
-          find_complex_conditionals(else_br, depth)
+          find_complex_conditionals(then_br, depth, current_line) ++
+          find_complex_conditionals(else_br, depth, current_line)
 
       {:block, statements} when is_list(statements) ->
-        Enum.flat_map(statements, &find_complex_conditionals(&1, depth))
+        Enum.flat_map(statements, &find_complex_conditionals(&1, depth, current_line))
 
       {:loop, :while, cond, body} ->
         cond_depth = count_boolean_depth(cond, 0)
 
         results =
           if cond_depth > 2 do
-            [cond_depth]
+            [{cond_depth, current_line}]
           else
             []
           end
 
-        results ++ find_complex_conditionals(body, depth)
+        results ++ find_complex_conditionals(body, depth, current_line)
 
       {:loop, _, _iter, _coll, body} ->
-        find_complex_conditionals(body, depth)
+        find_complex_conditionals(body, depth, current_line)
+
+      {:language_specific, _lang, _native, _type, metadata} ->
+        # Extract line information from language-specific wrapper
+        line = extract_line_from_metadata(metadata)
+        find_complex_conditionals_in_metadata(metadata, depth, line)
 
       _ ->
         []
+    end
+  end
+
+  defp find_complex_conditionals_in_metadata(metadata, depth, line) when is_map(metadata) do
+    case Map.get(metadata, :body) do
+      nil -> []
+      body -> find_complex_conditionals(body, depth, line)
     end
   end
 
@@ -276,6 +306,89 @@ defmodule Metastatic.Analysis.Smells do
       ratio >= 2.0 -> :high
       ratio >= 1.5 -> :medium
       true -> :low
+    end
+  end
+
+  # Extract location information from document metadata
+  defp extract_location(%Document{metadata: metadata, ast: ast}) do
+    # Try to extract from metadata first
+    location = extract_location_from_metadata(metadata)
+
+    # If not in metadata, try to walk AST for language_specific nodes
+    if location do
+      location
+    else
+      extract_location_from_ast(ast)
+    end
+  end
+
+  defp extract_location_from_metadata(metadata) when is_map(metadata) do
+    cond do
+      # Function name and line from metadata
+      Map.has_key?(metadata, :function_name) and Map.has_key?(metadata, :line) ->
+        %{
+          function: metadata.function_name,
+          line: metadata.line
+        }
+
+      # Just line number
+      Map.has_key?(metadata, :line) ->
+        %{line: metadata.line}
+
+      # Check elixir_meta for line info
+      Map.has_key?(metadata, :elixir_meta) ->
+        extract_line_from_elixir_meta(metadata.elixir_meta)
+
+      true ->
+        nil
+    end
+  end
+
+  defp extract_location_from_metadata(_), do: nil
+
+  defp extract_line_from_metadata(metadata) when is_map(metadata) do
+    cond do
+      Map.has_key?(metadata, :line) -> metadata.line
+      Map.has_key?(metadata, :elixir_meta) -> extract_line_from_elixir_meta(metadata.elixir_meta)
+      true -> nil
+    end
+  end
+
+  defp extract_line_from_metadata(_), do: nil
+
+  defp extract_line_from_elixir_meta(elixir_meta) when is_list(elixir_meta) do
+    Keyword.get(elixir_meta, :line)
+  end
+
+  defp extract_line_from_elixir_meta(_), do: nil
+
+  defp extract_location_from_ast(ast) do
+    case find_first_language_specific_node(ast) do
+      {:ok, metadata} -> extract_location_from_metadata(metadata)
+      :not_found -> nil
+    end
+  end
+
+  defp find_first_language_specific_node(ast) do
+    case ast do
+      {:language_specific, _lang, _native, _type, metadata} when is_map(metadata) ->
+        {:ok, metadata}
+
+      tuple when is_tuple(tuple) ->
+        tuple
+        |> Tuple.to_list()
+        |> Enum.find_value(:not_found, &find_first_language_specific_node/1)
+
+      list when is_list(list) ->
+        Enum.find_value(list, :not_found, &find_first_language_specific_node/1)
+
+      %{} = map ->
+        map
+        |> Map.values()
+        |> Enum.find_value(:not_found, &find_first_language_specific_node/1)
+
+      _ ->
+        :not_found
     end
   end
 end
