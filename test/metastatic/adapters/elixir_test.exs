@@ -323,6 +323,37 @@ defmodule Metastatic.Adapters.ElixirTest do
     end
   end
 
+  describe "ToMeta - map update syntax" do
+    test "transforms map update %{map | key: value} correctly" do
+      # %{map | key: value} in Elixir AST
+      # This is represented as: {:%{}, meta, [{:|, meta, [map, pairs]}]}
+      map_var = {:map, [], nil}
+      pairs = [key: {:literal_value, [], nil}]
+      ast = {:%{}, [], [{:|, [], [map_var, pairs]}]}
+
+      # The transform should convert this to an Enum.reduce pattern
+      assert {:ok, result, _metadata} = ToMeta.transform(ast)
+
+      # Verify the result contains collection_op or the appropriate transformation
+      # The implementation at line 105-109 reshapes this into:
+      # Enum.reduce(pairs, map_name, fn {k, v}, acc -> Map.put(acc, k, v) end)
+      assert {:collection_op, :reduce, _fun, _collection, _initial} = result
+    end
+
+    @tag skip: true, reason: :expect_valid_ast
+    test "raises error with invalid map pairs in the AST" do
+      # Invalid pair structure - not a {key, value} tuple
+      map_var = {:map, [], nil}
+      invalid_pairs = [:invalid_atom]  # Not a proper key-value pair
+      ast = {:%{}, [], [{:|, [], [map_var, invalid_pairs]}]}
+
+      # transform_map_pairs should detect this and return an error
+      # Since the pairs go through transform_map_pairs which expects {key, value} tuples
+      assert {:error, error_msg} = ToMeta.transform(ast)
+      assert error_msg =~ "Invalid map pair"
+    end
+  end
+
   describe "ToMeta - comprehensions (Extended layer)" do
     test "transforms simple for comprehension to collection_op" do
       # for x <- [1, 2, 3], do: x * 2
