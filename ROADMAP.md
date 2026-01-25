@@ -1,7 +1,7 @@
 # Metastatic Roadmap
 
-**Last Updated:** 2026-01-21  
-**Current Status:** Phase 6 Partial (Ruby & Haskell Complete)  
+**Last Updated:** 2026-01-25  
+**Current Status:** Business Logic Analyzers Complete (20/20) + Phase 6 Partial (Ruby & Haskell Complete)  
 **Next Phase:** Phase 5 (Oeditus Integration) or Phase 6 continuation (JS/Go/Rust)
 
 ## Project Overview
@@ -926,6 +926,39 @@ Cross-language code clone detection using unified MetaAST representation:
 
 **Key Advantage:** Metastatic can detect semantic clones across different programming languages - something traditional AST-based clone detectors cannot do. For example, `x + 5` in Python and `x + 5` in Elixir produce identical MetaAST, enabling true cross-language duplicate detection.
 
+### Business Logic Analyzers
+
+**Status:** COMPLETE ✅ (January 2026)
+
+20 language-agnostic analyzers ported from `oeditus_credo` custom checks, demonstrating that business logic analysis is fundamentally language-agnostic:
+
+**Tier 1 - Pure MetaAST (9 analyzers):**
+- CallbackHell, MissingErrorHandling, SilentErrorCase, SwallowingException
+- HardcodedValue, NPlusOneQuery, InefficientFilter, UnmanagedTask
+- TelemetryInRecursiveFunction
+
+**Tier 2 - Function Name Heuristics (4 analyzers):**
+- MissingTelemetryForExternalHttp, SyncOverAsync, DirectStructUpdate, MissingHandleAsync
+
+**Tier 3 - Naming Conventions (4 analyzers):**
+- BlockingInPlug, MissingTelemetryInAuthPlug, MissingTelemetryInLiveviewMount, MissingTelemetryInObanWorker
+
+**Tier 4 - Content Analysis (3 analyzers):**
+- MissingPreload, InlineJavascript, MissingThrottle
+
+**Implementation:**
+- ~4,800 lines across 20 analyzer modules
+- Each analyzer includes 7-8 cross-language examples (Python, JavaScript, Elixir, C#, Go, Java, Ruby, Rust)
+- All 1,282 tests passing (142 doctests + 1,140 tests)
+- Integrated with Analysis Runner for batch processing
+
+**Key Insight:** Patterns initially thought to be "Elixir-specific" (N+1 queries, middleware blocking, telemetry gaps, XSS) are universal anti-patterns that manifest across all languages.
+
+**Documentation:**
+- ANALYZER_PORTING_COMPLETE.md - Completion summary and usage guide
+- CREDO_ANALYZERS_PORTING.md - Porting status tracking
+- PORTING_STRATEGY.md - Universal pattern mapping strategy
+
 ### Advanced Analysis Features
 
 **Status:** COMPLETE ✅
@@ -1072,9 +1105,12 @@ All six advanced analyzers are now implemented and operational with CLI tools:
 
 **Current State:**
 - **5 language adapters complete:** Python, Elixir, Erlang, Ruby, Haskell
-- **876 tests passing** (45 doctests + 831 tests), 0 failures
+- **1,282 tests passing** (142 doctests + 1,140 tests), 0 failures
+- **20 business logic analyzers** complete (100%) - all language-agnostic
 - **Benchmarking suite** for all 5 adapters (target: <100ms per 1000 LoC)
 - **Test fixtures** for all languages with realistic code samples
 - **Comprehensive documentation** with examples for each adapter
 - **Purity analysis** working across all 5 languages
 - **Complexity metrics** working across all 5 languages
+- **Code duplication detection** with Type I-IV clone support
+- **Advanced analyzers** (dead code, unused vars, CFG, taint, security, smells)

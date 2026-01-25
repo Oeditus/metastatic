@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Business Logic Analyzers - 20 language-agnostic analyzers ported from oeditus_credo:
+  - **Tier 1 (Pure MetaAST, 9 analyzers)**: CallbackHell, MissingErrorHandling, SilentErrorCase, SwallowingException, HardcodedValue, NPlusOneQuery, InefficientFilter, UnmanagedTask, TelemetryInRecursiveFunction
+  - **Tier 2 (Function Name Heuristics, 4 analyzers)**: MissingTelemetryForExternalHttp, SyncOverAsync, DirectStructUpdate, MissingHandleAsync
+  - **Tier 3 (Naming Conventions, 4 analyzers)**: BlockingInPlug, MissingTelemetryInAuthPlug, MissingTelemetryInLiveviewMount, MissingTelemetryInObanWorker
+  - **Tier 4 (Content Analysis, 3 analyzers)**: MissingPreload, InlineJavascript, MissingThrottle
+  - Each analyzer includes comprehensive cross-language examples (Python, JavaScript, Elixir, C#, Go, Java, Ruby, Rust)
+  - Total: ~4,800 lines across 20 analyzer modules
+  - All 1,282 tests passing (142 doctests + 1,140 tests)
+  - Demonstrates that business logic analysis is fundamentally language-agnostic
 - M2.1 Core Layer enhancements:
   - `list` type for list/array literals (moved from literal collection to first-class core type)
   - `map` type for map/dictionary/object literals (moved from literal collection to first-class core type)

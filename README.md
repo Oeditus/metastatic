@@ -19,6 +19,7 @@ Build tools once, apply them everywhere. Create a universal meta-model for progr
 - **Cross-Language Equivalence**: Semantically equivalent code produces identical MetaAST across languages
 - **Code Duplication Detection**: Find code clones across different programming languages (Type I-IV clones)
 - **Advanced Analysis**: 9 built-in analyzers (purity, complexity, security, dead code, taint, smells, CFG, unused vars)
+- **Business Logic Analyzers**: 20 language-agnostic analyzers detecting anti-patterns across all languages
 
 ## Scope
 
@@ -657,6 +658,85 @@ result.severity        # => :high
 - Complex conditionals (>3 boolean operators)
 
 **Integration:** Leverages existing complexity metrics for detection.
+
+### Business Logic Analyzers
+
+Detect universal anti-patterns and code quality issues across all supported languages using 20 language-agnostic analyzers:
+
+```bash
+# Run specific analyzer
+mix metastatic.analyze --analyzer callback_hell my_file.py
+
+# Run all business logic analyzers
+mix metastatic.analyze --business-logic my_file.ex
+
+# JSON output for CI/CD
+mix metastatic.analyze --format json my_file.rb
+```
+
+```elixir
+alias Metastatic.Analysis.Runner
+alias Metastatic.Document
+
+# Run all analyzers
+ast = {:conditional, {:variable, "x"},
+  {:conditional, {:variable, "y"}, 
+    {:conditional, {:variable, "z"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
+    {:literal, :integer, 3}},
+  {:literal, :integer, 4}}
+doc = Document.new(ast, :python)
+
+{:ok, issues} = Runner.run(doc)
+# Returns issues from all enabled analyzers
+
+# Run specific analyzers
+config = %{analyzers: [:callback_hell, :missing_error_handling]}
+{:ok, issues} = Runner.run(doc, config)
+```
+
+**Available Analyzers (20 total):**
+
+**Tier 1 - Pure MetaAST (9 analyzers):**
+- CallbackHell - Detects deeply nested conditionals
+- MissingErrorHandling - Pattern matching without error cases
+- SilentErrorCase - Conditionals with only success path
+- SwallowingException - Exception handling without logging
+- HardcodedValue - Hardcoded URLs/IPs/secrets in literals
+- NPlusOneQuery - Database queries in collection operations
+- InefficientFilter - Fetch-all then filter anti-pattern
+- UnmanagedTask - Unsupervised async operations
+- TelemetryInRecursiveFunction - Metrics in recursive functions
+
+**Tier 2 - Function Name Heuristics (4 analyzers):**
+- MissingTelemetryForExternalHttp - HTTP calls without observability
+- SyncOverAsync - Blocking operations in async contexts
+- DirectStructUpdate - Struct updates bypassing validation
+- MissingHandleAsync - Fire-and-forget async operations
+
+**Tier 3 - Naming Conventions (4 analyzers):**
+- BlockingInPlug - Blocking I/O in middleware
+- MissingTelemetryInAuthPlug - Auth checks without audit logging
+- MissingTelemetryInLiveviewMount - Component lifecycle without telemetry
+- MissingTelemetryInObanWorker - Background jobs without metrics
+
+**Tier 4 - Content Analysis (3 analyzers):**
+- MissingPreload - Database queries without eager loading (N+1)
+- InlineJavascript - Inline scripts in strings (XSS risk)
+- MissingThrottle - Expensive operations without rate limiting
+
+**Key Features:**
+- Works across Python, JavaScript, Elixir, C#, Go, Java, Ruby, Rust
+- Each analyzer includes 7-8 cross-language examples
+- Configurable severity levels and thresholds
+- Integrated with Analysis Runner for batch processing
+- Comprehensive documentation in ANALYZER_PORTING_COMPLETE.md
+
+**Cross-Language Detection:**
+These analyzers demonstrate that many "language-specific" patterns are actually universal anti-patterns:
+- N+1 queries affect all ORMs (Django, Sequelize, Ecto, Entity Framework, Hibernate)
+- Callback hell exists in JavaScript, Python, Ruby, C#, Java, Go
+- Missing telemetry in auth is critical across all frameworks
+- XSS vulnerabilities appear in all template systems
 
 ## Documentation
 
