@@ -25,10 +25,14 @@ Analyzers are classified into three categories based on the MetaAST layer they o
 | SilentErrorCase | ✅ PORTED | M2.1 Core | `Metastatic.Analysis.BusinessLogic.SilentErrorCase` | Conditionals with only success path |
 | SwallowingException | ✅ PORTED | M2.2 Extended | `Metastatic.Analysis.BusinessLogic.SwallowingException` | Exception handling without logging |
 | HardcodedValue | ✅ PORTED | M2.1 Core | `Metastatic.Analysis.BusinessLogic.HardcodedValue` | Hardcoded URLs/IPs in literals |
+| NPlusOneQuery | ✅ PORTED | M2.2 Extended | `Metastatic.Analysis.BusinessLogic.NPlusOneQuery` | DB queries in collection operations |
+| InefficientFilter | ✅ PORTED | M2.2 Extended | `Metastatic.Analysis.BusinessLogic.InefficientFilter` | Fetch-all then filter pattern |
+| UnmanagedTask | ✅ PORTED | M2.2 Extended | `Metastatic.Analysis.BusinessLogic.UnmanagedTask` | Unsupervised async operations |
+| TelemetryInRecursiveFunction | ✅ PORTED | M2.1 Core | `Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction` | Metrics in recursive functions |
 
-### Elixir/Phoenix-Specific Analyzers (Require language adapter)
+### Remaining Analyzers (11/20 - In Progress)
 
-These analyzers detect patterns specific to Elixir/Phoenix/Ecto ecosystem and require the Elixir adapter (Phase 2+):
+These analyzers are being ported using function name heuristics and naming conventions:
 
 | Original Check | Status | MetaAST Layer | Module | Notes |
 |----------------|--------|---------------|--------|-------|
@@ -55,9 +59,19 @@ These analyzers detect patterns specific to Elixir/Phoenix/Ecto ecosystem and re
 - ⏳ PLANNED: Awaiting Elixir adapter implementation (Phase 2+)
 - ❌ NOT PORTABLE: Cannot be expressed at M2 level
 
+## Current Statistics
+
+**Progress**: 9/20 analyzers complete (45%)
+- Initial batch: 5 analyzers
+- Tier 1 (Pure MetaAST): 4 analyzers  
+- Tier 2-4 (In Progress): 11 analyzers
+
+**Lines of Code**: ~2,500 lines across 9 analyzer modules
+**Test Coverage**: Integration tests with Runner, individual analyzer tests pending
+
 ## Usage in Ragex
 
-The ported analyzers will be integrated into `../ragex` (the mutation testing framework) to provide:
+The ported analyzers will be integrated into `../ragex` (RAG library) to provide:
 
 1. **Language-agnostic business logic checks** that work across all supported languages
 2. **Elixir-specific checks** once the Elixir adapter is implemented
