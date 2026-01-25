@@ -211,10 +211,10 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   end
 
   @impl true
-  def analyze({:function_def, name, _params, _return_type, _opts, body} = node, context)
+  def analyze({:function_def, name, _params, _return_type, _opts, body} = node, _context)
       when is_atom(name) do
     # Check if function is recursive and contains telemetry
-    if is_recursive?(name, body) and contains_telemetry?(body) do
+    if recursive?(name, body) and contains_telemetry?(body) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
@@ -240,7 +240,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   # ----- Private Helpers -----
 
   # Check if function calls itself (direct recursion)
-  defp is_recursive?(func_name, body) do
+  defp recursive?(func_name, body) do
     contains_call_to?(body, func_name)
   end
 
@@ -277,11 +277,11 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   end
 
   defp contains_telemetry?({:function_call, func_name, _args}) when is_atom(func_name) do
-    is_telemetry_function?(func_name)
+    telemetry_function?(func_name)
   end
 
   defp contains_telemetry?({:attribute_access, _obj, method}) when is_atom(method) do
-    is_telemetry_function?(method)
+    telemetry_function?(method)
   end
 
   defp contains_telemetry?({:conditional, _cond, then_branch, else_branch}) do
@@ -301,7 +301,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   defp contains_telemetry?(_), do: false
 
   # Check if function name suggests telemetry/metrics
-  defp is_telemetry_function?(func_name) when is_atom(func_name) do
+  defp telemetry_function?(func_name) when is_atom(func_name) do
     # Direct match
     if func_name in @telemetry_keywords do
       true
@@ -327,5 +327,5 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
     end
   end
 
-  defp is_telemetry_function?(_), do: false
+  defp telemetry_function?(_), do: false
 end

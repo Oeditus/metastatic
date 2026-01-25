@@ -30,27 +30,37 @@ Analyzers are classified into three categories based on the MetaAST layer they o
 | UnmanagedTask | ✅ PORTED | M2.2 Extended | `Metastatic.Analysis.BusinessLogic.UnmanagedTask` | Unsupervised async operations |
 | TelemetryInRecursiveFunction | ✅ PORTED | M2.1 Core | `Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction` | Metrics in recursive functions |
 
-### Remaining Analyzers (11/20 - In Progress)
+### Tier 2: Function Name Heuristics (4/4 - COMPLETE)
 
-These analyzers are being ported using function name heuristics and naming conventions:
+These analyzers use function name patterns to detect issues across languages:
 
 | Original Check | Status | MetaAST Layer | Module | Notes |
 |----------------|--------|---------------|--------|-------|
-| BlockingInPlug | ⏳ PLANNED | M2.3 Native | - | Requires Plug/Conn pattern detection |
-| DirectStructUpdate | ⏳ PLANNED | M2.3 Native | - | Requires Ecto struct detection |
-| InefficientFilter | ⏳ PLANNED | M2.3 Native | - | Requires Repo/Enum pattern detection |
-| InlineJavascript | ⏳ PLANNED | M2.3 Native | - | Template-specific (HEEX/LEEX) |
-| MissingHandleAsync | ⏳ PLANNED | M2.3 Native | - | LiveView-specific |
-| MissingPreload | ⏳ PLANNED | M2.3 Native | - | Ecto-specific |
-| MissingTelemetryForExternalHttp | ⏳ PLANNED | M2.3 Native | - | HTTP client detection |
-| MissingTelemetryInAuthPlug | ⏳ PLANNED | M2.3 Native | - | Plug-specific |
-| MissingTelemetryInLiveViewMount | ⏳ PLANNED | M2.3 Native | - | LiveView-specific |
-| MissingTelemetryInObanWorker | ⏳ PLANNED | M2.3 Native | - | Oban-specific |
-| MissingThrottle | ⏳ PLANNED | M2.3 Native | - | Template-specific (HEEX/LEEX) |
-| NPlusOneQuery | ⏳ PLANNED | M2.3 Native | - | Ecto-specific |
-| SyncOverAsync | ⏳ PLANNED | M2.3 Native | - | LiveView/GenServer-specific |
-| TelemetryInRecursiveFunction | 🔄 PARTIAL | M2.1/M2.3 | - | Recursive detection is M2.1, telemetry is M2.3 |
-| UnmanagedTask | ⏳ PLANNED | M2.3 Native | - | Elixir Task-specific |
+| MissingTelemetryForExternalHttp | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.MissingTelemetryForExternalHttp` | HTTP calls without telemetry |
+| SyncOverAsync | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.SyncOverAsync` | Blocking operations in async contexts |
+| DirectStructUpdate | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.DirectStructUpdate` | Struct updates bypassing validation |
+| MissingHandleAsync | ✅ PORTED | M2.2/Heuristic | `Metastatic.Analysis.BusinessLogic.MissingHandleAsync` | Unmonitored async operations |
+
+### Tier 3: Naming Conventions (4/4 - COMPLETE)
+
+These analyzers detect patterns based on function/module naming:
+
+| Original Check | Status | MetaAST Layer | Module | Notes |
+|----------------|--------|---------------|--------|-------|
+| BlockingInPlug | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.BlockingInPlug` | Blocking I/O in middleware |
+| MissingTelemetryInAuthPlug | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.MissingTelemetryInAuthPlug` | Auth checks without audit logging |
+| MissingTelemetryInLiveviewMount | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.MissingTelemetryInLiveviewMount` | Component lifecycle without metrics |
+| MissingTelemetryInObanWorker | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.MissingTelemetryInObanWorker` | Background jobs without telemetry |
+
+### Tier 4: Content Analysis (3/3 - COMPLETE)
+
+These analyzers examine string content and patterns:
+
+| Original Check | Status | MetaAST Layer | Module | Notes |
+|----------------|--------|---------------|--------|-------|
+| MissingPreload | ✅ PORTED | M2.2/Heuristic | `Metastatic.Analysis.BusinessLogic.MissingPreload` | Database queries without eager loading |
+| InlineJavascript | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.InlineJavascript` | Inline scripts in strings (XSS risk) |
+| MissingThrottle | ✅ PORTED | M2.1/Heuristic | `Metastatic.Analysis.BusinessLogic.MissingThrottle` | Expensive operations without rate limiting |
 
 ## Legend
 
@@ -61,13 +71,15 @@ These analyzers are being ported using function name heuristics and naming conve
 
 ## Current Statistics
 
-**Progress**: 9/20 analyzers complete (45%)
-- Initial batch: 5 analyzers
-- Tier 1 (Pure MetaAST): 4 analyzers  
-- Tier 2-4 (In Progress): 11 analyzers
+**Progress**: 20/20 analyzers complete (100%) ✅
+- Initial batch: 5 analyzers (language-agnostic)
+- Tier 1 (Pure MetaAST): 4 analyzers
+- Tier 2 (Function Name Heuristics): 4 analyzers
+- Tier 3 (Naming Conventions): 4 analyzers
+- Tier 4 (Content Analysis): 3 analyzers
 
-**Lines of Code**: ~2,500 lines across 9 analyzer modules
-**Test Coverage**: Integration tests with Runner, individual analyzer tests pending
+**Lines of Code**: ~4,800 lines across 20 analyzer modules
+**Test Coverage**: Integration tests with Runner verified, comprehensive analyzer tests needed
 
 ## Usage in Ragex
 

@@ -190,7 +190,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnmanagedTask do
   end
 
   def analyze({:function_call, func_name, _args} = node, _context) when is_atom(func_name) do
-    if is_async_spawn?(func_name) do
+    if async_spawn?(func_name) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
@@ -215,7 +215,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnmanagedTask do
   # ----- Private Helpers -----
 
   # Check if function name suggests async spawning
-  defp is_async_spawn?(func_name) when is_atom(func_name) do
+  defp async_spawn?(func_name) when is_atom(func_name) do
     # Direct match
     if func_name in @async_spawn_keywords do
       true
@@ -232,5 +232,5 @@ defmodule Metastatic.Analysis.BusinessLogic.UnmanagedTask do
     end
   end
 
-  defp is_async_spawn?(_), do: false
+  defp async_spawn?(_), do: false
 end

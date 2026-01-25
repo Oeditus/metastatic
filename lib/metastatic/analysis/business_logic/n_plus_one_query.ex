@@ -192,12 +192,12 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   end
 
   defp contains_database_call?({:function_call, func_name, _args}) when is_atom(func_name) do
-    is_database_function?(func_name)
+    database_function?(func_name)
   end
 
   # Check attribute access patterns like: obj.method()
   defp contains_database_call?({:attribute_access, _obj, attr}) when is_atom(attr) do
-    is_database_function?(attr)
+    database_function?(attr)
   end
 
   # Recurse into nested structures
@@ -218,7 +218,7 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   defp contains_database_call?(_), do: false
 
   # Check if function name suggests database operation
-  defp is_database_function?(func_name) when is_atom(func_name) do
+  defp database_function?(func_name) when is_atom(func_name) do
     # Direct match
     if func_name in @database_keywords do
       true
@@ -233,5 +233,5 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
     end
   end
 
-  defp is_database_function?(_), do: false
+  defp database_function?(_), do: false
 end

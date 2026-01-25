@@ -159,7 +159,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
         {:assignment, var, fetch_expr},
         {:collection_op, :filter, _lambda, filter_var}
       ] ->
-        if variables_match?(var, filter_var) and is_fetch_all?(fetch_expr) do
+        if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
           [
             Analyzer.issue(
               analyzer: __MODULE__,
@@ -188,18 +188,18 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
   defp variables_match?(_, _), do: false
 
   # Check if expression is a "fetch all" operation
-  defp is_fetch_all?({:function_call, func_name, _args}) when is_atom(func_name) do
-    is_fetch_all_function?(func_name)
+  defp fetch_all?({:function_call, func_name, _args}) when is_atom(func_name) do
+    fetch_all_function?(func_name)
   end
 
-  defp is_fetch_all?({:attribute_access, _obj, method}) when is_atom(method) do
-    is_fetch_all_function?(method)
+  defp fetch_all?({:attribute_access, _obj, method}) when is_atom(method) do
+    fetch_all_function?(method)
   end
 
-  defp is_fetch_all?(_), do: false
+  defp fetch_all?(_), do: false
 
   # Check if function name suggests "fetch all"
-  defp is_fetch_all_function?(func_name) when is_atom(func_name) do
+  defp fetch_all_function?(func_name) when is_atom(func_name) do
     # Direct match
     if func_name in @fetch_all_keywords do
       true
@@ -214,5 +214,5 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
     end
   end
 
-  defp is_fetch_all_function?(_), do: false
+  defp fetch_all_function?(_), do: false
 end

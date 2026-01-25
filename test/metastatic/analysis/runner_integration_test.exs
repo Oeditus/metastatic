@@ -1,8 +1,8 @@
 defmodule Metastatic.Analysis.RunnerIntegrationTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.Analysis.Runner
   alias Metastatic.Analysis.BusinessLogic.{CallbackHell, HardcodedValue}
+  alias Metastatic.Analysis.Runner
   alias Metastatic.Document
 
   describe "run/2 with business logic analyzers" do
@@ -57,7 +57,7 @@ defmodule Metastatic.Analysis.RunnerIntegrationTest do
           config: %{callback_hell: %{max_nesting: 5}}
         )
 
-      assert length(report1.issues) == 0
+      assert [] == report1.issues
 
       # With max_nesting: 2, should trigger
       {:ok, report2} =
