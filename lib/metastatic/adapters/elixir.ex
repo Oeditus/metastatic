@@ -110,7 +110,9 @@ defmodule Metastatic.Adapters.Elixir do
       {:error, {meta, message, token}} ->
         line = Keyword.get(meta, :line, 0)
         column = Keyword.get(meta, :column, 0)
-        {:error, "Syntax error at line #{line}, column #{column}: #{message}#{token}"}
+
+        {:error,
+         "Syntax error at line #{line}, column #{column}: #{inspect(message)}#{inspect(token)}"}
     end
   end
 

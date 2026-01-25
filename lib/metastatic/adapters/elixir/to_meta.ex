@@ -284,6 +284,17 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Function Calls - M2.1 Core Layer
 
+  # Function capture
+  # &1.field
+  def transform(
+        {{:., _call_meta, [{:&, _capture_meta, capture_args}, func]}, _meta, args} = whole
+      )
+      when is_list(args) do
+    require Logger
+    Logger.notice("Incomplete transform: " <> inspect(whole))
+    {:ok, {:function_capture, {:capture, func}, {:capture_args, capture_args}}, %{args: args}}
+  end
+
   # Map field access
   def transform({{:., _, [{var, _var_meta, nil_or_empty}, field]}, _meta, []})
       when nil_or_empty in [nil, []] do
@@ -291,7 +302,18 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # Remote call (Module.function)
-  def transform({{:., _, [module, func]}, _meta, args}) when is_list(args) do
+  # [TODO] This is simplified, better traverse is needed
+  def transform(
+        {{:., _outer_meta,
+          [{{:., _inner_meta, [_inner_module, _inner_func]}, _, _inner_args} = inner, _fun_or_key]},
+         _, _outer_args} = whole
+      ) do
+    require Logger
+    Logger.notice("Incomplete transform: " <> inspect(whole))
+    transform(inner)
+  end
+
+  def transform({{:., _call_meta, [module, func]}, _meta, args}) when is_list(args) do
     module_name = module_to_string(module)
     func_name = Atom.to_string(func)
     qualified_name = "#{module_name}.#{func_name}"

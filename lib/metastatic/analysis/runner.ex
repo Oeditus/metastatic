@@ -304,12 +304,17 @@ defmodule Metastatic.Analysis.Runner do
       {:variable, _} ->
         []
 
-      # Language-specific nodes - don't traverse
-      {:language_specific, _, _} ->
-        []
+      # Language-specific nodes - use transformed body from metadata if available
+      {:language_specific, _, _original_ast, _tag, metadata} when is_map(metadata) ->
+        # Try to get transformed body from metadata first
+        case Map.get(metadata, :body) do
+          body when not is_nil(body) -> [body]
+          nil -> []
+        end
 
-      {:language_specific, _, _, _} ->
-        []
+      {:language_specific, _, original_ast, _} ->
+        # Fallback: extract children from the original language-specific AST
+        extract_language_specific_children(original_ast)
 
       # List of nodes
       list when is_list(list) ->
@@ -323,6 +328,67 @@ defmodule Metastatic.Analysis.Runner do
 
   defp extract_pattern_children({_pattern, body}), do: [body]
   defp extract_pattern_children(_), do: []
+
+  # Extract children from language-specific AST nodes
+  # These are Elixir/Erlang AST structures that need to be traversed
+  defp extract_language_specific_children(ast) when is_tuple(ast) do
+    case ast do
+      # Module definition: {:defmodule, meta, [name, [do: body]]}
+      {:defmodule, _meta, [_name, [do: body]]} ->
+        [body]
+
+      # Function definition: {:def/:defp, meta, [signature, [do: body]]}
+      {func_type, _meta, [_signature, [do: body]]}
+      when func_type in [:def, :defp, :defmacro, :defmacrop] ->
+        [body]
+
+      # Block: {:__block__, [], statements}
+      {:__block__, _, statements} when is_list(statements) ->
+        statements
+
+      # Pipe operator: {:|>, meta, [left, right]}
+      {:|>, _meta, [left, right]} ->
+        [left, right]
+
+      # Function call: {:function, meta, args}
+      {func, _meta, args} when is_atom(func) and is_list(args) ->
+        args
+
+      # Remote call: {{:., meta1, [module, func]}, meta2, args}
+      {{:., _meta1, [_module, _func]}, _meta2, args} when is_list(args) ->
+        args
+
+      # Match operator: {:=, meta, [left, right]}
+      {:=, _meta, [left, right]} ->
+        [left, right]
+
+      # Try/rescue: {:try, meta, [[do: body, rescue: handlers]]}
+      {:try, _meta, [[do: body, rescue: handlers]]} when is_list(handlers) ->
+        [body | Enum.map(handlers, fn {:->, _, [_pattern, handler_body]} -> handler_body end)]
+
+      # Module attribute: {:@, meta, [{name, meta2, [value]}]}
+      {:@, _meta, [{_name, _meta2, [value]}]} ->
+        [value]
+
+      # List
+      list when is_list(list) ->
+        list
+
+      # Literal or unknown - no children
+      _ when is_atom(ast) or is_number(ast) or is_binary(ast) ->
+        []
+
+      # Other tuples - try to extract all elements except metadata
+      {_tag, _meta, elements} when is_list(elements) ->
+        elements
+
+      _ ->
+        []
+    end
+  end
+
+  defp extract_language_specific_children(list) when is_list(list), do: list
+  defp extract_language_specific_children(_), do: []
 
   defp extract_catches(catches) when is_list(catches) do
     Enum.flat_map(catches, fn
