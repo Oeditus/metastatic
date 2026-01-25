@@ -1,4 +1,4 @@
-defmodule Metastatic.Analysis.Analyzers.SimplifyConditional do
+defmodule Metastatic.Analysis.SimplifyConditional do
   @moduledoc """
   Suggests simplification of redundant conditionals.
 
@@ -27,11 +27,10 @@ defmodule Metastatic.Analysis.Analyzers.SimplifyConditional do
       not is_valid
   """
 
-  @behaviour Metastatic.Analysis.Analyzer
-
   alias Metastatic.Analysis.Analyzer
+  @behaviour Analyzer
 
-  @impl true
+  @impl Analyzer
   def info do
     %{
       name: :simplify_conditional,
@@ -49,7 +48,7 @@ defmodule Metastatic.Analysis.Analyzers.SimplifyConditional do
     }
   end
 
-  @impl true
+  @impl Analyzer
   def analyze(
         {:conditional, condition, {:literal, :boolean, true}, {:literal, :boolean, false}},
         _context
@@ -100,7 +99,10 @@ defmodule Metastatic.Analysis.Analyzers.SimplifyConditional do
     ]
   end
 
-  def analyze({:conditional, condition, cond_duplicate, {:literal, :boolean, false}}, _context)
+  def analyze(
+        {:conditional, condition, cond_duplicate, {:literal, :boolean, false}},
+        _context
+      )
       when condition == cond_duplicate do
     # Pattern: if condition then condition else false => condition
     [
@@ -122,7 +124,10 @@ defmodule Metastatic.Analysis.Analyzers.SimplifyConditional do
     ]
   end
 
-  def analyze({:conditional, condition, {:literal, :boolean, true}, cond_duplicate}, _context)
+  def analyze(
+        {:conditional, condition, {:literal, :boolean, true}, cond_duplicate},
+        _context
+      )
       when condition == cond_duplicate do
     # Pattern: if condition then true else condition => condition
     [

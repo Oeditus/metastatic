@@ -6,6 +6,10 @@ defmodule Metastatic.Analysis.UnusedVariables do
   function parameters, loop iterators, and pattern matches. Works across
   all supported languages by operating on the unified MetaAST representation.
 
+  This module implements both:
+  - **Standalone API** - Direct analysis via `analyze/2` returning structured results
+  - **Analyzer behaviour** - Plugin integration for batch analysis via Runner
+
   ## Detection Categories
 
   - **Local variables** - Assigned but never referenced
@@ -13,7 +17,7 @@ defmodule Metastatic.Analysis.UnusedVariables do
   - **Loop iterators** - Loop variables never accessed
   - **Pattern matches** - Variables bound in patterns but not used
 
-  ## Usage
+  ## Standalone Usage
 
       alias Metastatic.{Document, Analysis.UnusedVariables}
 
@@ -28,6 +32,21 @@ defmodule Metastatic.Analysis.UnusedVariables do
       result.has_unused?       # => true
       result.total_unused      # => 1
       result.unused_variables  # => [%{name: "x", category: :local, ...}]
+
+  ## Plugin Usage
+
+      alias Metastatic.Analysis.{Registry, Runner}
+
+      # Register as analyzer plugin
+      Registry.register(UnusedVariables)
+
+      # Run via Runner
+      {:ok, report} = Runner.run(doc)
+
+  ## Configuration (when used as plugin)
+
+  - `:ignore_prefix` - Ignore variables starting with this prefix (default: `"_"`)
+  - `:ignore_names` - List of variable names to ignore (default: `[]`)
 
   ## Examples
 
@@ -77,6 +96,23 @@ defmodule Metastatic.Analysis.UnusedVariables do
         false
     """
 
+  def info do
+    %{
+      name: :unused_variables,
+      category: :correctness,
+      description: "Detects variables that are assigned but never used",
+      severity: :warning,
+      explanation: """
+      Variables that are assigned but never referenced add noise to the code
+      and may indicate bugs, incomplete code, or forgotten cleanup.
+
+      Consider removing unused variables or prefixing them with underscore
+      if they must exist for API compatibility.
+      """,
+      configurable: true
+    }
+  end
+
   @impl Metastatic.Document.Analyzer
   def handle_analyze(%Document{ast: ast} = _doc, opts) do
     ignore_underscore = Keyword.get(opts, :ignore_underscore, true)
@@ -96,8 +132,6 @@ defmodule Metastatic.Analysis.UnusedVariables do
 
     {:ok, Result.new(unused)}
   end
-
-  # Private implementation
 
   defp build_symbol_table(ast, ctx) do
     case ast do
