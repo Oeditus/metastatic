@@ -1082,9 +1082,21 @@ defmodule Metastatic.AST do
     # Collect from parameters (including patterns and defaults)
     acc =
       Enum.reduce(params, acc, fn
-        param, a when is_binary(param) -> MapSet.put(a, param)
-        {:pattern, pattern}, a -> collect_variables(pattern, a)
-        {:default, name, default}, a -> collect_variables(default, MapSet.put(a, name))
+        param, a when is_binary(param) ->
+          MapSet.put(a, param)
+
+        # New format: {:param, name, pattern, default}
+        {:param, name, pattern, default}, a ->
+          a = MapSet.put(a, name)
+          a = if pattern, do: collect_variables(pattern, a), else: a
+          if default, do: collect_variables(default, a), else: a
+
+        # Old format compatibility
+        {:pattern, pattern}, a ->
+          collect_variables(pattern, a)
+
+        {:default, name, default}, a ->
+          collect_variables(default, MapSet.put(a, name))
       end)
 
     # Collect from guards in opts if opts is a map
