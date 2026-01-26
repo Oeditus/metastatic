@@ -261,7 +261,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     with {:ok, body_meta, _} <- transform(body) do
       module_name = module_to_string(name)
       # Use container type for module
-      {:ok, {:container, :module, module_name, [], nil, [], body_meta},
+      # Format: {:container, type, name, parent, type_params, implements, body}
+      {:ok, {:container, :module, module_name, nil, [], [], body_meta},
        %{elixir_meta: meta, original_name: name}}
     end
   end
