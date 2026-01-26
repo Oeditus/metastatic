@@ -195,14 +195,22 @@ defmodule Metastatic.Analysis.Complexity do
   end
 
   # M2.2s: Structural types - extract members/body for analysis
-  defp extract_analyzable_ast({:container, _type, _name, _metadata, members}, _doc_metadata)
-       when is_list(members) do
+  # NEW format: {:container, type, name, parent, type_params, implements, body}
+  defp extract_analyzable_ast(
+         {:container, _type, _name, _parent, _type_params, _implements, body},
+         _doc_metadata
+       ) do
     # For containers, analyze the aggregate complexity of all members
-    {:block, members}
+    if is_list(body) do
+      {:block, body}
+    else
+      body
+    end
   end
 
+  # NEW format: {:function_def, name, params, ret_type, opts, body}
   defp extract_analyzable_ast(
-         {:function_def, _visibility, _name, _params, _metadata, body},
+         {:function_def, _name, _params, _ret_type, _opts, body},
          _doc_metadata
        ) do
     # For function definitions, analyze the body
@@ -225,8 +233,13 @@ defmodule Metastatic.Analysis.Complexity do
   end
 
   # M2.2s: Extract functions from container members
-  defp extract_per_function_metrics({:container, _type, _name, _metadata, members}, _doc_metadata)
-       when is_list(members) do
+  # NEW format: {:container, type, name, parent, type_params, implements, body}
+  defp extract_per_function_metrics(
+         {:container, _type, _name, _parent, _type_params, _implements, body},
+         _doc_metadata
+       ) do
+    members = if is_list(body), do: body, else: []
+
     members
     |> Enum.filter(fn
       {:function_def, _, _, _, _, _} -> true
@@ -278,7 +291,8 @@ defmodule Metastatic.Analysis.Complexity do
   defp analyze_function(_), do: nil
 
   # M2.2s: Analyze function_def structural type
-  defp analyze_function_def({:function_def, _visibility, name, _params, _metadata, body}) do
+  # NEW format: {:function_def, name, params, ret_type, opts, body}
+  defp analyze_function_def({:function_def, name, _params, _ret_type, _opts, body}) do
     variables = Metastatic.AST.variables(body)
 
     %{

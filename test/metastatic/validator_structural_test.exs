@@ -5,7 +5,7 @@ defmodule Metastatic.ValidatorStructuralTest do
 
   describe "structural layer validation" do
     test "container validates as extended level" do
-      ast = {:container, :module, "Math", %{}, []}
+      ast = {:container, :module, "Math", nil, [], [], []}
       doc = %Document{ast: ast, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -14,7 +14,7 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "function_def validates as extended level" do
-      ast = {:function_def, :public, "add", ["x", "y"], %{}, {:variable, "x"}}
+      ast = {:function_def, "add", ["x", "y"], nil, %{visibility: :public}, {:variable, "x"}}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -39,7 +39,7 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "property validates as extended level" do
-      getter = {:function_def, :public, "name", [], %{}, {:variable, "@name"}}
+      getter = {:function_def, "name", [], nil, %{visibility: :public}, {:variable, "@name"}}
       ast = {:property, "name", getter, nil, %{}}
       doc = %Document{ast: ast, language: :ruby, metadata: %{}}
 
@@ -49,10 +49,10 @@ defmodule Metastatic.ValidatorStructuralTest do
 
     test "container with core-only members validates as extended" do
       add_method =
-        {:function_def, :public, "add", ["x", "y"], %{},
+        {:function_def, "add", ["x", "y"], nil, %{visibility: :public},
          {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
 
-      ast = {:container, :class, "Calculator", %{}, [add_method]}
+      ast = {:container, :class, "Calculator", nil, [], [], [add_method]}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -60,7 +60,7 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "container passes strict mode validation" do
-      ast = {:container, :module, "Math", %{}, []}
+      ast = {:container, :module, "Math", nil, [], [], []}
       doc = %Document{ast: ast, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc, mode: :strict)
@@ -69,7 +69,7 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "function_def passes strict mode validation" do
-      ast = {:function_def, :public, "func", [], %{}, {:literal, :integer, 42}}
+      ast = {:function_def, "func", [], nil, %{visibility: :public}, {:literal, :integer, 42}}
       doc = %Document{ast: ast, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc, mode: :strict)
@@ -80,10 +80,10 @@ defmodule Metastatic.ValidatorStructuralTest do
   describe "variable extraction in validation" do
     test "extracts variables from container" do
       function_def =
-        {:function_def, :public, "add", ["x", "y"], %{},
+        {:function_def, "add", ["x", "y"], nil, %{visibility: :public},
          {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
 
-      container = {:container, :module, "Math", %{}, [function_def]}
+      container = {:container, :module, "Math", nil, [], [], [function_def]}
       doc = %Document{ast: container, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -92,7 +92,7 @@ defmodule Metastatic.ValidatorStructuralTest do
 
     test "extracts variables from function_def" do
       ast =
-        {:function_def, :public, "func", ["param"], %{},
+        {:function_def, "func", ["param"], nil, %{visibility: :public},
          {:function_call, "process", [{:variable, "param"}, {:variable, "global"}]}}
 
       doc = %Document{ast: ast, language: :python, metadata: %{}}
@@ -120,10 +120,10 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "extracts variables from property" do
-      getter = {:function_def, :public, "value", [], %{}, {:variable, "_value"}}
+      getter = {:function_def, "value", [], nil, %{visibility: :public}, {:variable, "_value"}}
 
       setter =
-        {:function_def, :public, "value", ["v"], %{},
+        {:function_def, "value", ["v"], nil, %{visibility: :public},
          {:assignment, {:variable, "_value"}, {:variable, "v"}}}
 
       ast = {:property, "value", getter, setter, %{}}
@@ -136,8 +136,10 @@ defmodule Metastatic.ValidatorStructuralTest do
 
   describe "depth calculation for structural types" do
     test "container depth includes members" do
-      inner_func = {:function_def, :public, "inner", [], %{}, {:literal, :integer, 1}}
-      container = {:container, :module, "Outer", %{}, [inner_func]}
+      inner_func =
+        {:function_def, "inner", [], nil, %{visibility: :public}, {:literal, :integer, 1}}
+
+      container = {:container, :module, "Outer", nil, [], [], [inner_func]}
       doc = %Document{ast: container, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -150,7 +152,7 @@ defmodule Metastatic.ValidatorStructuralTest do
          {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
          {:literal, :integer, 3}}
 
-      ast = {:function_def, :public, "nested", ["x", "y"], %{}, nested_conditional}
+      ast = {:function_def, "nested", ["x", "y"], nil, %{visibility: :public}, nested_conditional}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -159,11 +161,11 @@ defmodule Metastatic.ValidatorStructuralTest do
 
     test "property depth includes getter and setter" do
       getter =
-        {:function_def, :public, "temp", [], %{},
+        {:function_def, "temp", [], nil, %{visibility: :public},
          {:conditional, {:variable, "_cached"}, {:variable, "_cached"},
           {:function_call, "calculate", []}}}
 
-      setter = {:function_def, :public, "temp", ["v"], %{}, {:variable, "v"}}
+      setter = {:function_def, "temp", ["v"], nil, %{visibility: :public}, {:variable, "v"}}
       ast = {:property, "temp", getter, setter, %{}}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
@@ -174,9 +176,9 @@ defmodule Metastatic.ValidatorStructuralTest do
 
   describe "node counting for structural types" do
     test "container nodes include all members" do
-      func1 = {:function_def, :public, "f1", [], %{}, {:literal, :integer, 1}}
-      func2 = {:function_def, :public, "f2", [], %{}, {:literal, :integer, 2}}
-      container = {:container, :module, "Math", %{}, [func1, func2]}
+      func1 = {:function_def, "f1", [], nil, %{visibility: :public}, {:literal, :integer, 1}}
+      func2 = {:function_def, "f2", [], nil, %{visibility: :public}, {:literal, :integer, 2}}
+      container = {:container, :module, "Math", nil, [], [], [func1, func2]}
       doc = %Document{ast: container, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -193,7 +195,7 @@ defmodule Metastatic.ValidatorStructuralTest do
            {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
          ]}
 
-      ast = {:function_def, :public, "func", [], %{}, body}
+      ast = {:function_def, "func", [], nil, %{visibility: :public}, body}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -202,10 +204,10 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "property nodes include getter and setter" do
-      getter = {:function_def, :public, "x", [], %{}, {:variable, "_x"}}
+      getter = {:function_def, "x", [], nil, %{visibility: :public}, {:variable, "_x"}}
 
       setter =
-        {:function_def, :public, "x", ["v"], %{},
+        {:function_def, "x", ["v"], nil, %{visibility: :public},
          {:assignment, {:variable, "_x"}, {:variable, "v"}}}
 
       ast = {:property, "x", getter, setter, %{}}
@@ -219,10 +221,15 @@ defmodule Metastatic.ValidatorStructuralTest do
 
   describe "complex structural scenarios" do
     test "nested containers validate correctly" do
-      inner_func = {:function_def, :public, "inner", [], %{}, {:literal, :integer, 42}}
-      inner_container = {:container, :class, "Inner", %{}, [inner_func]}
-      outer_func = {:function_def, :public, "outer", [], %{}, {:variable, "result"}}
-      outer_container = {:container, :module, "Outer", %{}, [inner_container, outer_func]}
+      inner_func =
+        {:function_def, "inner", [], nil, %{visibility: :public}, {:literal, :integer, 42}}
+
+      inner_container = {:container, :class, "Inner", nil, [], [], [inner_func]}
+
+      outer_func =
+        {:function_def, "outer", [], nil, %{visibility: :public}, {:variable, "result"}}
+
+      outer_container = {:container, :module, "Outer", nil, [], [], [inner_container, outer_func]}
       doc = %Document{ast: outer_container, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -239,7 +246,7 @@ defmodule Metastatic.ValidatorStructuralTest do
       ]
 
       body = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
-      ast = {:function_def, :public, "complex", params, %{}, body}
+      ast = {:function_def, "complex", params, nil, %{visibility: :public}, body}
       doc = %Document{ast: ast, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -247,14 +254,14 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "class with methods and properties validates" do
-      getter = {:function_def, :public, "name", [], %{}, {:variable, "_name"}}
+      getter = {:function_def, "name", [], nil, %{visibility: :public}, {:variable, "_name"}}
       property = {:property, "name", getter, nil, %{}}
 
       method =
-        {:function_def, :public, "greet", [], %{},
+        {:function_def, "greet", [], nil, %{visibility: :public},
          {:function_call, "print", [{:variable, "_name"}]}}
 
-      class_ast = {:container, :class, "Person", %{}, [property, method]}
+      class_ast = {:container, :class, "Person", nil, [], [], [property, method]}
       doc = %Document{ast: class_ast, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -266,7 +273,8 @@ defmodule Metastatic.ValidatorStructuralTest do
       guard = {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}}
 
       ast =
-        {:function_def, :public, "positive", ["x"], %{guards: guard}, {:literal, :boolean, true}}
+        {:function_def, "positive", ["x"], nil, %{visibility: :public, guards: guard},
+         {:literal, :boolean, true}}
 
       doc = %Document{ast: ast, language: :elixir, metadata: %{}}
 
@@ -275,8 +283,9 @@ defmodule Metastatic.ValidatorStructuralTest do
     end
 
     test "container with decorators in metadata validates" do
+      # Decorator should be part of the container body to be extracted
       decorator = {:function_call, "decorator", [{:variable, "config"}]}
-      container = {:container, :class, "Decorated", %{decorators: [decorator]}, []}
+      container = {:container, :class, "Decorated", nil, [], [], [decorator]}
       doc = %Document{ast: container, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -292,8 +301,11 @@ defmodule Metastatic.ValidatorStructuralTest do
       # Extended construct
       loop_body = {:loop, :while, {:variable, "running"}, {:variable, "x"}}
 
-      func = {:function_def, :public, "run", [], %{}, {:block, [literal_assign, loop_body]}}
-      container = {:container, :module, "Runner", %{}, [func]}
+      func =
+        {:function_def, "run", [], nil, %{visibility: :public},
+         {:block, [literal_assign, loop_body]}}
+
+      container = {:container, :module, "Runner", nil, [], [], [func]}
       doc = %Document{ast: container, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -306,7 +318,7 @@ defmodule Metastatic.ValidatorStructuralTest do
          {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}}
 
       body = {:function_call, "map", [lambda, {:variable, "list"}]}
-      ast = {:function_def, :public, "double_all", ["list"], %{}, body}
+      ast = {:function_def, "double_all", ["list"], nil, %{visibility: :public}, body}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -317,8 +329,8 @@ defmodule Metastatic.ValidatorStructuralTest do
     test "container with native construct in member" do
       native_construct = {:language_specific, :python, %{construct: :list_comprehension}}
 
-      func = {:function_def, :public, "native_func", [], %{}, native_construct}
-      container = {:container, :class, "Mixed", %{}, [func]}
+      func = {:function_def, "native_func", [], nil, %{visibility: :public}, native_construct}
+      container = {:container, :class, "Mixed", nil, [], [], [func]}
       doc = %Document{ast: container, language: :python, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -329,8 +341,8 @@ defmodule Metastatic.ValidatorStructuralTest do
 
     test "structural with native fails strict mode" do
       native_construct = {:language_specific, :python, %{construct: :decorator}}
-      func = {:function_def, :public, "func", [], %{}, native_construct}
-      container = {:container, :module, "Module", %{}, [func]}
+      func = {:function_def, "func", [], nil, %{visibility: :public}, native_construct}
+      container = {:container, :module, "Module", nil, [], [], [func]}
       doc = %Document{ast: container, language: :python, metadata: %{}}
 
       assert {:error, :native_constructs_not_allowed} = Validator.validate(doc, mode: :strict)
@@ -345,7 +357,7 @@ defmodule Metastatic.ValidatorStructuralTest do
           {:conditional, {:variable, "x"}, acc, acc}
         end)
 
-      ast = {:function_def, :public, "deep", ["x"], %{}, deep_body}
+      ast = {:function_def, "deep", ["x"], nil, %{visibility: :public}, deep_body}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert {:error, {:max_depth_exceeded, _, _}} = Validator.validate(doc, max_depth: 10)
@@ -355,7 +367,7 @@ defmodule Metastatic.ValidatorStructuralTest do
       # Create function with many variables
       params = Enum.map(1..15, fn i -> "var#{i}" end)
       body = {:literal, :integer, 0}
-      ast = {:function_def, :public, "many_params", params, %{}, body}
+      ast = {:function_def, "many_params", params, nil, %{visibility: :public}, body}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert {:error, {:too_many_variables, _, _}} = Validator.validate(doc, max_variables: 10)
@@ -365,10 +377,10 @@ defmodule Metastatic.ValidatorStructuralTest do
       # Create container with many function members
       members =
         Enum.map(1..1500, fn i ->
-          {:function_def, :public, "func#{i}", [], %{}, {:literal, :integer, i}}
+          {:function_def, "func#{i}", [], nil, %{visibility: :public}, {:literal, :integer, i}}
         end)
 
-      container = {:container, :module, "Large", %{}, members}
+      container = {:container, :module, "Large", nil, [], [], members}
       doc = %Document{ast: container, language: :elixir, metadata: %{}}
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -382,21 +394,21 @@ defmodule Metastatic.ValidatorStructuralTest do
 
   describe "validate_ast/2 with structural types" do
     test "validates container AST directly" do
-      ast = {:container, :module, "Math", %{}, []}
+      ast = {:container, :module, "Math", nil, [], [], []}
 
       assert {:ok, meta} = Validator.validate_ast(ast)
       assert meta.level == :extended
     end
 
     test "validates function_def AST directly" do
-      ast = {:function_def, :public, "add", ["x", "y"], %{}, {:variable, "x"}}
+      ast = {:function_def, "add", ["x", "y"], nil, %{visibility: :public}, {:variable, "x"}}
 
       assert {:ok, meta} = Validator.validate_ast(ast)
       assert meta.level == :extended
     end
 
     test "validates property AST directly" do
-      getter = {:function_def, :public, "x", [], %{}, {:variable, "_x"}}
+      getter = {:function_def, "x", [], nil, %{visibility: :public}, {:variable, "_x"}}
       ast = {:property, "x", getter, nil, %{}}
 
       assert {:ok, meta} = Validator.validate_ast(ast)
@@ -406,21 +418,21 @@ defmodule Metastatic.ValidatorStructuralTest do
 
   describe "valid?/2 helper with structural types" do
     test "returns true for valid container" do
-      ast = {:container, :module, "Math", %{}, []}
+      ast = {:container, :module, "Math", nil, [], [], []}
       doc = %Document{ast: ast, language: :elixir, metadata: %{}}
 
       assert Validator.valid?(doc)
     end
 
     test "returns true for valid function_def" do
-      ast = {:function_def, :public, "func", [], %{}, {:literal, :integer, 42}}
+      ast = {:function_def, "func", [], nil, %{visibility: :public}, {:literal, :integer, 42}}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       assert Validator.valid?(doc)
     end
 
     test "returns false for invalid structural type" do
-      ast = {:container, :invalid_type, "Name", %{}, []}
+      ast = {:container, :invalid_type, "Name", nil, [], [], []}
       doc = %Document{ast: ast, language: :python, metadata: %{}}
 
       refute Validator.valid?(doc)

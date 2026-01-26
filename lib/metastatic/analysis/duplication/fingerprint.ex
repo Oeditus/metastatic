@@ -252,7 +252,14 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   defp normalize_ast({:function_def, _name, params, _ret_type, opts, body})
        when is_list(params) do
     normalized_params = Enum.map(params, &normalize_param/1)
-    normalized_opts = if is_map(opts), do: :_, else: []
+    # Preserve visibility in opts as it's semantically significant
+    normalized_opts =
+      if is_map(opts) and Map.has_key?(opts, :visibility) do
+        %{visibility: opts.visibility}
+      else
+        if is_map(opts), do: %{}, else: []
+      end
+
     {:function_def, :_, normalized_params, :_, normalized_opts, normalize_ast(body)}
   end
 
@@ -280,6 +287,11 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
 
   defp normalize_ast({:language_specific, lang, _native}) do
     {:language_specific, lang, :_}
+  end
+
+  # Handle plain lists (e.g., container bodies)
+  defp normalize_ast(list) when is_list(list) do
+    Enum.map(list, &normalize_ast/1)
   end
 
   # Wildcard and other atoms pass through
@@ -417,9 +429,13 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   end
 
   # {:function_def, name, params, ret_type, opts, body}
-  defp extract_tokens({:function_def, _name, params, _ret_type, _opts, body}, acc)
+  defp extract_tokens({:function_def, _name, params, _ret_type, opts, body}, acc)
        when is_list(params) do
     acc = [:function_def | acc]
+
+    acc =
+      if is_map(opts) and Map.has_key?(opts, :visibility), do: [opts.visibility | acc], else: acc
+
     acc = Enum.reduce(params, acc, fn param, a -> extract_param_tokens(param, a) end)
     extract_tokens(body, acc)
   end
@@ -452,6 +468,11 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
 
   defp extract_tokens({:language_specific, lang, _native}, acc) do
     [lang, :language_specific | acc]
+  end
+
+  # Handle plain lists (e.g., container bodies)
+  defp extract_tokens(list, acc) when is_list(list) do
+    Enum.reduce(list, acc, fn elem, a -> extract_tokens(elem, a) end)
   end
 
   defp extract_tokens(:_, acc), do: [:wildcard | acc]

@@ -190,7 +190,9 @@ defmodule Metastatic.Validator do
       {:exception_handling, _, _, _}, _acc -> true
       {:async_operation, _, _}, _acc -> true
       # M2.2s: Structural/Organizational layer
-      {:container, _, _, _, _}, _acc -> true
+      # NEW format: {:container, type, name, parent, type_params, implements, body}
+      {:container, _, _, _, _, _, _}, _acc -> true
+      # NEW format: {:function_def, name, params, ret_type, opts, body}
       {:function_def, _, _, _, _, _}, _acc -> true
       {:attribute_access, _, _}, _acc -> true
       {:augmented_assignment, _, _, _}, _acc -> true

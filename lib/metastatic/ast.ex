@@ -478,48 +478,44 @@ defmodule Metastatic.AST do
   - Elixir: `defmodule`
   - Ruby: `class`, `module`
 
-  ## Metadata Structure
+  ## Structure
 
-  The metadata map contains language-specific organizational information:
+  The container tuple has the following elements:
 
-  - `:source_language` - atom identifying source language (`:python`, `:elixir`, etc.)
-  - `:has_state` - boolean indicating if container manages mutable state (classes typically true)
-  - `:visibility` - visibility map: `%{public: [{name, arity}], private: [{name, arity}], protected: [{name, arity}]}`
-  - `:superclass` - string name of direct superclass (nil for no inheritance)
-    Note: Currently only stores direct superclass. TODO: Full inheritance chain would be better in future.
-  - `:organizational_model` - `:oop` or `:fp` to indicate programming paradigm
-  - `:original_ast` - the original M1 AST for 100% round-trip fidelity
-  - `:decorators` - list of decorator MetaAST nodes (Python `@decorator`, etc.)
-  - `:type_params` - list of generic type parameters for generic classes
-  - `:module_attributes` - module-level attributes (@moduledoc in Elixir, etc.)
-  - `:constructor` - reference to constructor function (by name)
-  - `:is_nested` - boolean indicating if this is a nested container
+  1. `:container` - type tag
+  2. `type` - container type (`:module`, `:class`, or `:namespace`)
+  3. `name` - string name of the container
+  4. `parent` - string name of parent/superclass (nil if none)
+  5. `type_params` - list of string generic type parameter names (e.g. `["T", "U"]`)
+  6. `implements` - list of string interface/protocol names this implements
+  7. `body` - either a single MetaAST node (typically `:block`) or a list of MetaAST nodes (members)
+
+  Note: Additional metadata (visibility, organizational_model, etc.) can be stored in
+  member function_def opts maps or in separate analysis metadata, not in the core AST structure.
+  This keeps the core AST simple and focused on structure.
 
   ## Examples
 
-      # Python class
-      {:container, :class, "Calculator",
-       %{source_language: :python,
-         has_state: true,
-         visibility: %{public: [{"add", 2}, {"subtract", 2}], private: [{"_validate", 1}], protected: []},
-         superclass: "BaseCalculator",
-         organizational_model: :oop,
-         original_ast: python_class_ast},
+      # Python class with superclass
+      {:container, :class, "Calculator", "BaseCalculator", [], [],
        [function_def1, function_def2]}
 
-      # Elixir module
-      {:container, :module, "MyApp.Calculator",
-       %{source_language: :elixir,
-         has_state: false,
-         visibility: %{public: [{"add", 2}], private: [{"validate", 1}], protected: []},
-         superclass: nil,
-         organizational_model: :fp,
-         original_ast: elixir_module_ast},
+      # Elixir module (no parent, no type params, no implements)
+      {:container, :module, "MyApp.Calculator", nil, [], [],
        [function_def1, function_def2]}
+
+      # Generic class with type parameters
+      {:container, :class, "List", nil, ["T"], [],
+       [function_def1]}
+
+      # Class implementing interfaces
+      {:container, :class, "MyClass", nil, [], ["Comparable", "Serializable"],
+       [function_def1]}
   """
   @type container ::
-          {:container, container_type(), name :: String.t(), metadata :: map(),
-           members :: [meta_ast()]}
+          {:container, container_type(), name :: String.t(), parent :: String.t() | nil,
+           type_params :: [String.t()], implements :: [String.t()],
+           body :: meta_ast() | [meta_ast()]}
 
   @typedoc """
   Container type classification.
@@ -565,28 +561,33 @@ defmodule Metastatic.AST do
   ## Examples
 
       # Simple function: def add(x, y), do: x + y
-      {:function_def, :public, "add", ["x", "y"],
-       %{arity: 2, guards: nil},
+      {:function_def, "add", ["x", "y"], nil,
+       %{arity: 2, visibility: :public},
        {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
 
       # Function with guard: def positive?(x) when x > 0
-      {:function_def, :public, "positive?", ["x"],
-       %{arity: 1, guards: {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}}},
+      {:function_def, "positive?", ["x"], nil,
+       %{arity: 1, visibility: :public, guards: {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}}},
        {:literal, :boolean, true}}
 
       # Function with pattern matching parameter
-      {:function_def, :public, "get_first", [{:pattern, {:tuple, [{:variable, "x"}, :_]}}],
-       %{arity: 1},
+      {:function_def, "get_first", [{:pattern, {:tuple, [{:variable, "x"}, :_]}}], nil,
+       %{arity: 1, visibility: :public},
        {:variable, "x"}}
 
       # Function with default parameter
-      {:function_def, :public, "greet", [{:default, "name", {:literal, :string, "World"}}],
-       %{arity: 1},
+      {:function_def, "greet", [{:default, "name", {:literal, :string, "World"}}], nil,
+       %{arity: 1, visibility: :public},
        {:function_call, "puts", [{:literal, :string, "Hello"}]}}
+
+      # Function with return type annotation
+      {:function_def, "calculate", ["x"], "number",
+       %{visibility: :public},
+       {:variable, "x"}}
   """
   @type function_def ::
-          {:function_def, visibility(), name :: String.t(), params :: [param()],
-           metadata :: map(), body :: meta_ast()}
+          {:function_def, name :: String.t(), params :: [param()], ret_type :: String.t() | nil,
+           opts :: map() | [], body :: meta_ast()}
 
   @typedoc """
   Visibility classification for functions and members.
@@ -680,14 +681,14 @@ defmodule Metastatic.AST do
 
       # Python property with getter and setter
       {:property, "temperature",
-       {:function_def, :public, "temperature", [], %{}, {:variable, "_temp"}},
-       {:function_def, :public, "temperature", ["value"], %{},
+       {:function_def, "temperature", [], nil, %{visibility: :public}, {:variable, "_temp"}},
+       {:function_def, "temperature", ["value"], nil, %{visibility: :public},
         {:assignment, {:variable, "_temp"}, {:variable, "value"}}},
        %{is_read_only: false}}
 
       # Ruby attr_reader (read-only)
       {:property, "name",
-       {:function_def, :public, "name", [], %{}, {:variable, "@name"}},
+       {:function_def, "name", [], nil, %{visibility: :public}, {:variable, "@name"}},
        nil,
        %{is_read_only: true}}
   """
@@ -823,7 +824,11 @@ defmodule Metastatic.AST do
       {:container, type, name, _parent, type_params, implements, body}
       when type in [:module, :class, :namespace] and is_binary(name) and is_list(type_params) and
              is_list(implements) ->
-        conforms?(body)
+        if is_list(body) do
+          Enum.all?(body, &conforms?/1)
+        else
+          conforms?(body)
+        end
 
       # New format: {:function_def, name, params, ret_type, opts, body}
       {:function_def, name, params, _ret_type, _opts, body}
@@ -884,7 +889,7 @@ defmodule Metastatic.AST do
 
   ## Examples
 
-      iex> ast = {:container, :module, "MyApp.Math", nil, [], [], {:block, []}}
+      iex> ast = {:container, :module, "MyApp.Math", nil, [], [], []}
       iex> Metastatic.AST.container_name(ast)
       "MyApp.Math"
   """
@@ -897,7 +902,7 @@ defmodule Metastatic.AST do
 
   ## Examples
 
-      iex> ast = {:function_def, "add", ["x", "y"], nil, [], {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+      iex> ast = {:function_def, "add", ["x", "y"], nil, %{}, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
       iex> Metastatic.AST.function_name(ast)
       "add"
   """
@@ -925,11 +930,11 @@ defmodule Metastatic.AST do
 
   ## Examples
 
-      iex> ast = {:container, :class, "Counter", nil, [], [], {:block, []}}
+      iex> ast = {:container, :class, "Counter", nil, [], [], []}
       iex> Metastatic.AST.has_state?(ast)
       true
 
-      iex> ast = {:container, :module, "Math", nil, [], [], {:block, []}}
+      iex> ast = {:container, :module, "Math", nil, [], [], []}
       iex> Metastatic.AST.has_state?(ast)
       false
   """
@@ -1064,18 +1069,16 @@ defmodule Metastatic.AST do
   end
 
   # M2.2s: Structural/Organizational
-  defp collect_variables({:container, _, _, metadata, members}, acc) do
-    # Collect variables from members
-    acc = Enum.reduce(members, acc, fn member, a -> collect_variables(member, a) end)
-
-    # Also check decorators in metadata if present
-    case Map.get(metadata, :decorators) do
-      nil -> acc
-      decorators -> Enum.reduce(decorators, acc, fn dec, a -> collect_variables(dec, a) end)
+  defp collect_variables({:container, _, _, _parent, _type_params, _implements, body}, acc) do
+    # Collect variables from body (can be single node or list of members)
+    if is_list(body) do
+      Enum.reduce(body, acc, fn member, a -> collect_variables(member, a) end)
+    else
+      collect_variables(body, acc)
     end
   end
 
-  defp collect_variables({:function_def, _, _, params, metadata, body}, acc) do
+  defp collect_variables({:function_def, _name, params, _ret_type, opts, body}, acc) do
     # Collect from parameters (including patterns and defaults)
     acc =
       Enum.reduce(params, acc, fn
@@ -1084,18 +1087,26 @@ defmodule Metastatic.AST do
         {:default, name, default}, a -> collect_variables(default, MapSet.put(a, name))
       end)
 
-    # Collect from guards in metadata
+    # Collect from guards in opts if opts is a map
     acc =
-      case Map.get(metadata, :guards) do
-        nil -> acc
-        guards -> collect_variables(guards, acc)
+      if is_map(opts) do
+        case Map.get(opts, :guards) do
+          nil -> acc
+          guards -> collect_variables(guards, acc)
+        end
+      else
+        acc
       end
 
-    # Collect from decorators in metadata
+    # Collect from decorators in opts if present
     acc =
-      case Map.get(metadata, :decorators) do
-        nil -> acc
-        decorators -> Enum.reduce(decorators, acc, fn dec, a -> collect_variables(dec, a) end)
+      if is_map(opts) do
+        case Map.get(opts, :decorators) do
+          nil -> acc
+          decorators -> Enum.reduce(decorators, acc, fn dec, a -> collect_variables(dec, a) end)
+        end
+      else
+        acc
       end
 
     # Collect from body

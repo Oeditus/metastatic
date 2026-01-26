@@ -5,7 +5,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
   describe "complexity analysis for containers" do
     test "empty container has base complexity" do
-      ast = {:container, :module, "Empty", %{}, []}
+      ast = {:container, :module, "Empty", nil, [], [], []}
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -16,8 +16,8 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
     end
 
     test "container with simple function" do
-      func = {:function_def, :public, "add", ["x", "y"], %{}, {:variable, "x"}}
-      ast = {:container, :module, "Math", %{}, [func]}
+      func = {:function_def, "add", ["x", "y"], nil, %{visibility: :public}, {:variable, "x"}}
+      ast = {:container, :module, "Math", nil, [], [], [func]}
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -35,14 +35,14 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
     test "container with multiple functions aggregates complexity" do
       func1 =
-        {:function_def, :public, "add", ["x", "y"], %{},
+        {:function_def, "add", ["x", "y"], nil, %{visibility: :public},
          {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
 
       func2 =
-        {:function_def, :public, "sub", ["x", "y"], %{},
+        {:function_def, "sub", ["x", "y"], nil, %{visibility: :public},
          {:binary_op, :arithmetic, :-, {:variable, "x"}, {:variable, "y"}}}
 
-      ast = {:container, :module, "Math", %{}, [func1, func2]}
+      ast = {:container, :module, "Math", nil, [], [], [func1, func2]}
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -53,8 +53,8 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
     test "container with conditional function" do
       body = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-      func = {:function_def, :public, "check", ["x"], %{}, body}
-      ast = {:container, :module, "Checker", %{}, [func]}
+      func = {:function_def, "check", ["x"], nil, %{visibility: :public}, body}
+      ast = {:container, :module, "Checker", nil, [], [], [func]}
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -67,7 +67,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
   describe "complexity analysis for function_def" do
     test "simple function has base complexity" do
-      ast = {:function_def, :public, "noop", [], %{}, {:literal, :integer, 0}}
+      ast = {:function_def, "noop", [], nil, %{visibility: :public}, {:literal, :integer, 0}}
       doc = Document.new(ast, :python)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -78,7 +78,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
     test "function with conditional" do
       body = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-      ast = {:function_def, :public, "check", ["x"], %{}, body}
+      ast = {:function_def, "check", ["x"], nil, %{visibility: :public}, body}
       doc = Document.new(ast, :python)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -89,7 +89,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
     test "function with pattern parameter" do
       param = {:pattern, {:tuple, [{:variable, "x"}, {:variable, "y"}]}}
-      ast = {:function_def, :public, "first", [param], %{}, {:variable, "x"}}
+      ast = {:function_def, "first", [param], nil, %{visibility: :public}, {:variable, "x"}}
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -102,7 +102,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
     test "function with guard increases complexity" do
       guard = {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}}
       body = {:literal, :boolean, true}
-      ast = {:function_def, :public, "positive?", ["x"], %{guards: guard}, body}
+      ast = {:function_def, "positive?", ["x"], nil, %{visibility: :public, guards: guard}, body}
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -115,7 +115,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
     test "function with nested conditionals" do
       inner = {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
       outer = {:conditional, {:variable, "x"}, inner, {:literal, :integer, 3}}
-      ast = {:function_def, :public, "nested", ["x", "y"], %{}, outer}
+      ast = {:function_def, "nested", ["x", "y"], nil, %{visibility: :public}, outer}
       doc = Document.new(ast, :python)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -170,7 +170,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
   describe "complexity analysis for property" do
     test "read-only property" do
-      getter = {:function_def, :public, "value", [], %{}, {:variable, "_value"}}
+      getter = {:function_def, "value", [], nil, %{visibility: :public}, {:variable, "_value"}}
       ast = {:property, "value", getter, nil, %{}}
       doc = Document.new(ast, :python)
 
@@ -180,10 +180,10 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
     end
 
     test "property with getter and setter" do
-      getter = {:function_def, :public, "value", [], %{}, {:variable, "_value"}}
+      getter = {:function_def, "value", [], nil, %{visibility: :public}, {:variable, "_value"}}
 
       setter =
-        {:function_def, :public, "value", ["v"], %{},
+        {:function_def, "value", ["v"], nil, %{visibility: :public},
          {:assignment, {:variable, "_value"}, {:variable, "v"}}}
 
       ast = {:property, "value", getter, setter, %{}}
@@ -199,7 +199,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
         {:conditional, {:variable, "_cached"}, {:variable, "_cached"},
          {:function_call, "calculate", []}}
 
-      getter = {:function_def, :public, "expensive", [], %{}, body}
+      getter = {:function_def, "expensive", [], nil, %{visibility: :public}, body}
       ast = {:property, "expensive", getter, nil, %{}}
       doc = Document.new(ast, :python)
 
@@ -211,19 +211,19 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
 
   describe "complex integration scenarios" do
     test "class with methods and properties" do
-      getter = {:function_def, :public, "name", [], %{}, {:variable, "@name"}}
+      getter = {:function_def, "name", [], nil, %{visibility: :public}, {:variable, "@name"}}
       property = {:property, "name", getter, nil, %{}}
 
       init_body = {:assignment, {:variable, "@name"}, {:variable, "n"}}
-      init = {:function_def, :public, "initialize", ["n"], %{}, init_body}
+      init = {:function_def, "initialize", ["n"], nil, %{visibility: :public}, init_body}
 
       method_body =
         {:conditional, {:variable, "@name"}, {:function_call, "greet", [{:variable, "@name"}]},
          {:literal, :string, "Hello"}}
 
-      method = {:function_def, :public, "greet_user", [], %{}, method_body}
+      method = {:function_def, "greet_user", [], nil, %{visibility: :public}, method_body}
 
-      ast = {:container, :class, "Person", %{}, [property, init, method]}
+      ast = {:container, :class, "Person", nil, [], [], [property, init, method]}
       doc = Document.new(ast, :ruby)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -235,15 +235,17 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
     end
 
     test "nested containers with functions" do
-      inner_func = {:function_def, :private, "helper", [], %{}, {:literal, :integer, 42}}
-      inner_container = {:container, :class, "Inner", %{}, [inner_func]}
+      inner_func =
+        {:function_def, "helper", [], nil, %{visibility: :private}, {:literal, :integer, 42}}
+
+      inner_container = {:container, :class, "Inner", nil, [], [], [inner_func]}
 
       outer_body =
         {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
 
-      outer_func = {:function_def, :public, "process", ["x"], %{}, outer_body}
+      outer_func = {:function_def, "process", ["x"], nil, %{visibility: :public}, outer_body}
 
-      outer_container = {:container, :module, "Outer", %{}, [inner_container, outer_func]}
+      outer_container = {:container, :module, "Outer", nil, [], [], [inner_container, outer_func]}
       doc = Document.new(outer_container, :python)
 
       {:ok, result} = Complexity.analyze(doc)
@@ -264,9 +266,9 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
          {:early_return, {:literal, :boolean, true}}, aug_assign}
 
       body = {:block, [condition, {:variable, "self"}]}
-      func = {:function_def, :public, "process", [], %{}, body}
+      func = {:function_def, "process", [], nil, %{visibility: :public}, body}
 
-      ast = {:container, :class, "Processor", %{}, [func]}
+      ast = {:container, :class, "Processor", nil, [], [], [func]}
       doc = Document.new(ast, :python)
 
       {:ok, result} = Complexity.analyze(doc)

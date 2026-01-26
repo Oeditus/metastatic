@@ -213,29 +213,47 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
       # M2.2s: Structural/Organizational Types
 
       # Container: walk all members, count container type as operator
-      {:container, type, name, _metadata, members} when is_list(members) ->
+      # NEW format: {:container, type, name, parent, type_params, implements, body}
+      {:container, type, name, _parent, _type_params, _implements, body} ->
         acc = %{acc | operators: [to_string(type) | acc.operators]}
         acc = %{acc | operands: [name | acc.operands]}
+
+        members = if is_list(body), do: body, else: [body]
         Enum.reduce(members, acc, fn member, a -> walk(member, a) end)
 
       # Function definition: count as operator, walk parameters, guards, and body
-      {:function_def, visibility, name, params, metadata, body} ->
+      # NEW format: {:function_def, name, params, ret_type, opts, body}
+      {:function_def, name, params, _ret_type, opts, body} ->
+        visibility = if is_map(opts), do: Map.get(opts, :visibility, :public), else: :public
         acc = %{acc | operators: ["def", to_string(visibility) | acc.operators]}
         acc = %{acc | operands: [name | acc.operands]}
 
-        # Walk parameters
+        # Walk parameters (handle old and new formats)
         acc =
           Enum.reduce(params, acc, fn
-            {:pattern, pattern}, a -> walk(pattern, a)
-            {:default, name, default}, a -> a |> walk({:variable, name}) |> walk(default)
-            simple_param, a -> walk(simple_param, a)
+            {:param, _name, pattern, default}, a ->
+              a = if pattern, do: walk(pattern, a), else: a
+              if default, do: walk(default, a), else: a
+
+            {:pattern, pattern}, a ->
+              walk(pattern, a)
+
+            {:default, name, default}, a ->
+              a |> walk({:variable, name}) |> walk(default)
+
+            simple_param, a ->
+              walk(simple_param, a)
           end)
 
-        # Walk guards if present
+        # Walk guards if present (now in opts map)
         acc =
-          case Map.get(metadata, :guards) do
-            nil -> acc
-            guard -> walk(guard, acc)
+          if is_map(opts) do
+            case Map.get(opts, :guards) do
+              nil -> acc
+              guard -> walk(guard, acc)
+            end
+          else
+            acc
           end
 
         # Walk body
