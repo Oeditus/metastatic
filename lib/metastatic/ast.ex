@@ -819,14 +819,15 @@ defmodule Metastatic.AST do
         conforms?(operation)
 
       # M2.2s: Structural/Organizational
-      {:container, type, name, metadata, members}
-      when type in [:module, :class, :namespace] and is_binary(name) and is_map(metadata) and
-             is_list(members) ->
-        Enum.all?(members, &conforms?/1)
+      # New format: {:container, type, name, parent, type_params, implements, body}
+      {:container, type, name, _parent, type_params, implements, body}
+      when type in [:module, :class, :namespace] and is_binary(name) and is_list(type_params) and
+             is_list(implements) ->
+        conforms?(body)
 
-      {:function_def, visibility, name, params, metadata, body}
-      when visibility in [:public, :private, :protected] and is_binary(name) and
-             is_list(params) and is_map(metadata) ->
+      # New format: {:function_def, name, params, ret_type, opts, body}
+      {:function_def, name, params, _ret_type, _opts, body}
+      when is_binary(name) and is_list(params) ->
         Enum.all?(params, &valid_param?/1) and conforms?(body)
 
       {:attribute_access, receiver, attribute} when is_binary(attribute) ->
@@ -883,60 +884,68 @@ defmodule Metastatic.AST do
 
   ## Examples
 
-      iex> ast = {:container, :module, "MyApp.Math", %{}, []}
+      iex> ast = {:container, :module, "MyApp.Math", nil, [], [], {:block, []}}
       iex> Metastatic.AST.container_name(ast)
       "MyApp.Math"
   """
   @spec container_name(container()) :: String.t()
-  def container_name({:container, _type, name, _metadata, _members}), do: name
+  def container_name({:container, _type, name, _parent, _type_params, _implements, _body}),
+    do: name
 
   @doc """
   Extract the function name from a function_def node.
 
   ## Examples
 
-      iex> ast = {:function_def, :public, "add", ["x", "y"], %{}, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+      iex> ast = {:function_def, "add", ["x", "y"], nil, [], {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
       iex> Metastatic.AST.function_name(ast)
       "add"
   """
   @spec function_name(function_def()) :: String.t()
-  def function_name({:function_def, _visibility, name, _params, _metadata, _body}), do: name
+  def function_name({:function_def, name, _params, _ret_type, _opts, _body}), do: name
 
   @doc """
-  Get the visibility of a function_def.
+  Get the visibility of a function_def from opts.
 
   ## Examples
 
-      iex> ast = {:function_def, :public, "add", [], %{}, {:literal, :integer, 0}}
+      iex> ast = {:function_def, "add", [], nil, %{visibility: :public}, {:literal, :integer, 0}}
       iex> Metastatic.AST.function_visibility(ast)
       :public
   """
   @spec function_visibility(function_def()) :: visibility()
-  def function_visibility({:function_def, visibility, _name, _params, _metadata, _body}),
-    do: visibility
+  def function_visibility({:function_def, _name, _params, _ret_type, opts, _body}) do
+    if is_map(opts), do: Map.get(opts, :visibility, :public), else: :public
+  end
 
   @doc """
   Check if a container has state (mutable or immutable).
 
-  Looks at the `:has_state` metadata key.
+  Looks at the container type - classes typically have state.
 
   ## Examples
 
-      iex> ast = {:container, :class, "Counter", %{has_state: true}, []}
+      iex> ast = {:container, :class, "Counter", nil, [], [], {:block, []}}
       iex> Metastatic.AST.has_state?(ast)
       true
 
-      iex> ast = {:container, :module, "Math", %{has_state: false}, []}
+      iex> ast = {:container, :module, "Math", nil, [], [], {:block, []}}
       iex> Metastatic.AST.has_state?(ast)
       false
   """
   @spec has_state?(container()) :: boolean()
-  def has_state?({:container, _type, _name, metadata, _members}) do
-    Map.get(metadata, :has_state, false)
+  def has_state?({:container, type, _name, _parent, _type_params, _implements, _body}) do
+    type == :class
   end
 
   # Validate parameter structure for function_def
   defp valid_param?(param) when is_binary(param), do: true
+  # New format: {:param, name, pattern, default}
+  defp valid_param?({:param, name, pattern, default}) when is_binary(name) do
+    (is_nil(pattern) or conforms?(pattern)) and (is_nil(default) or conforms?(default))
+  end
+
+  # Old format compatibility
   defp valid_param?({:pattern, ast}), do: conforms?(ast)
   defp valid_param?({:default, name, default}) when is_binary(name), do: conforms?(default)
   defp valid_param?(_), do: false
