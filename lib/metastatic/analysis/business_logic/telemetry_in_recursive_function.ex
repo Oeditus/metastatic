@@ -212,7 +212,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
 
   @impl true
   def analyze({:function_def, name, _params, _return_type, _opts, body} = node, _context)
-      when is_atom(name) do
+      when is_atom(name) or is_binary(name) do
     # Check if function is recursive and contains telemetry
     if recursive?(name, body) and contains_telemetry?(body) do
       [
@@ -249,9 +249,8 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
     Enum.any?(statements, &contains_call_to?(&1, target_name))
   end
 
-  defp contains_call_to?({:function_call, name, _args}, target_name)
-       when is_atom(name) and is_atom(target_name) do
-    name == target_name
+  defp contains_call_to?({:function_call, name, _args}, target_name) do
+    normalize_name(name) == normalize_name(target_name)
   end
 
   defp contains_call_to?({:conditional, _cond, then_branch, else_branch}, target_name) do
@@ -276,7 +275,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
     Enum.any?(statements, &contains_telemetry?/1)
   end
 
-  defp contains_telemetry?({:function_call, func_name, _args}) when is_atom(func_name) do
+  defp contains_telemetry?({:function_call, func_name, _args}) do
     telemetry_function?(func_name)
   end
 
@@ -308,24 +307,38 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
     else
       # Pattern match
       func_str = Atom.to_string(func_name) |> String.downcase()
-
-      Enum.any?(
-        [
-          "telemetry",
-          "metric",
-          "statsd",
-          "emit",
-          "record",
-          "increment",
-          "gauge",
-          "counter",
-          "timing",
-          "observe"
-        ],
-        &String.contains?(func_str, &1)
-      )
+      check_telemetry_patterns(func_str)
     end
   end
 
+  defp telemetry_function?(func_name) when is_binary(func_name) do
+    # String function names (e.g. "telemetry.execute")
+    func_str = String.downcase(func_name)
+    check_telemetry_patterns(func_str)
+  end
+
   defp telemetry_function?(_), do: false
+
+  defp check_telemetry_patterns(func_str) do
+    Enum.any?(
+      [
+        "telemetry",
+        "metric",
+        "statsd",
+        "emit",
+        "record",
+        "increment",
+        "gauge",
+        "counter",
+        "timing",
+        "observe"
+      ],
+      &String.contains?(func_str, &1)
+    )
+  end
+
+  # Normalize function names for comparison (atom or string)
+  defp normalize_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp normalize_name(name) when is_binary(name), do: name
+  defp normalize_name(_), do: ""
 end

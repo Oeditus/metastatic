@@ -149,6 +149,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Variables - M2.1 Core Layer
 
+  # Module aliases: User, MyApp.User, etc.
+  def transform({:__aliases__, _meta, parts}) when is_list(parts) do
+    # __aliases__ represents module names like User, MyApp.User
+    # Treat as a variable reference to the module
+    module_name = Enum.join(parts, ".")
+    {:ok, {:variable, module_name}, %{}}
+  end
+
   def transform({var, meta, context}) when is_atom(var) and is_atom(context) do
     # Variable reference
     # Check if it's a special form or actual variable
@@ -246,40 +254,40 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
-  # Module Definitions - M2.3 Native Layer
+  # Module Definitions - M2.2s Structural Layer
 
-  # defmodule
+  # defmodule - maps to container
   def transform({:defmodule, meta, [name, [do: body]]}) do
     with {:ok, body_meta, _} <- transform(body) do
       module_name = module_to_string(name)
-      metadata = %{module_name: module_name, body: body_meta}
-
-      # Store metadata as 5th element to preserve it through the pipeline
-      {:ok,
-       {:language_specific, :elixir, {:defmodule, meta, [name, [do: body]]}, :module_definition,
-        metadata}, metadata}
+      # Use container type for module
+      {:ok, {:container, :module, module_name, [], nil, [], body_meta},
+       %{elixir_meta: meta, original_name: name}}
     end
   end
 
-  # def / defp (function definitions)
+  # def / defp (function definitions) - maps to function_def
   def transform({func_type, meta, [signature, [do: body]]})
       when func_type in [:def, :defp, :defmacro, :defmacrop] do
     with {:ok, body_meta, _} <- transform(body) do
       func_name = extract_function_name(signature)
-      metadata = %{function_name: func_name, function_type: func_type, body: body_meta}
+      params = extract_function_params(signature)
 
-      # Store metadata as 5th element to preserve it through the pipeline
-      {:ok,
-       {:language_specific, :elixir, {func_type, meta, [signature, [do: body]]},
-        :function_definition, metadata}, metadata}
+      # Use function_def type
+      {:ok, {:function_def, func_name, params, nil, [], body_meta},
+       %{elixir_meta: meta, function_type: func_type}}
     end
   end
 
   # Module attributes (@moduledoc, @doc, etc.)
   def transform({:@, meta, [{attr_name, attr_meta, [value]}]}) do
-    {:ok,
-     {:language_specific, :elixir, {:@, meta, [{attr_name, attr_meta, [value]}]},
-      :module_attribute}, %{attribute: attr_name, value: value}}
+    # Transform the value so literals can be analyzed
+    with {:ok, value_meta, _} <- transform(value) do
+      # Use assignment to represent module attribute
+      # @attr value becomes an assignment
+      {:ok, {:assignment, {:variable, "@" <> Atom.to_string(attr_name)}, value_meta},
+       %{elixir_meta: meta, attribute_meta: attr_meta, attribute_type: :module_attribute}}
+    end
   end
 
   # Function Calls - M2.1 Core Layer
@@ -366,6 +374,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       # with expressions
       {:with, _} ->
         transform_with(args)
+
+      # try/rescue/catch
+      {:try, _} ->
+        transform_try(args)
 
       # Blocks
       {:__block__, _} ->
@@ -812,6 +824,60 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {:ok, {:language_specific, :elixir, {:with, nil, args}, :with}, %{}}
   end
 
+  # try/rescue/catch - M2.2 Extended Layer
+  defp transform_try(args) do
+    # try/rescue in Elixir: try do ... rescue ... end
+    # args is [[do: try_block, rescue: rescue_clauses]]
+    clauses = List.first(args, [])
+    try_block = Keyword.get(clauses, :do)
+    rescue_clauses = Keyword.get(clauses, :rescue, [])
+    catch_clauses = Keyword.get(clauses, :catch, [])
+    else_block = Keyword.get(clauses, :else)
+    after_block = Keyword.get(clauses, :after)
+
+    with {:ok, try_meta, _} <- transform(try_block),
+         {:ok, catch_list} <- transform_rescue_clauses(rescue_clauses ++ catch_clauses),
+         {:ok, else_meta, _} <- transform_or_nil(else_block) do
+      # Transform to exception_handling node
+      # Note: ignoring after_block for now as it doesn't fit MetaAST model
+      {:ok, {:exception_handling, try_meta, catch_list, else_meta}, %{after: after_block}}
+    end
+  end
+
+  defp transform_rescue_clauses(clauses) do
+    clauses
+    |> Enum.reduce_while({:ok, []}, fn clause, {:ok, acc} ->
+      case clause do
+        # Match on exception pattern: Exception -> body
+        # or: _ -> body (catch-all)
+        {:->, _, [[pattern], body]} ->
+          with {:ok, pattern_meta, _} <- transform_pattern(pattern),
+               {:ok, body_meta, _} <- transform(body) do
+            # MetaAST spec requires 3-tuple: {exception_pattern, var, body}
+            # In Elixir, the pattern IS the binding, so we use the pattern as both
+            # For _ pattern, use :_ atom
+            exception_type = extract_exception_type(pattern_meta)
+            {:cont, {:ok, [{exception_type, pattern_meta, body_meta} | acc]}}
+          else
+            error -> {:halt, error}
+          end
+
+        _ ->
+          {:halt, {:error, "Invalid rescue clause: #{inspect(clause)}"}}
+      end
+    end)
+    |> case do
+      {:ok, clauses} -> {:ok, Enum.reverse(clauses)}
+      error -> error
+    end
+  end
+
+  # Extract exception type from pattern
+  # _ -> :_, Variable name -> :error, specific exception -> exception name
+  defp extract_exception_type(:_), do: :_
+  defp extract_exception_type({:variable, name}), do: String.to_atom(name)
+  defp extract_exception_type(_), do: :error
+
   # Helper to extract function name from signature
   # Handle guarded functions: def foo(x) when guard -> body
   # The signature is {:when, _, [{:foo, _, args}, guard]}
@@ -823,6 +889,22 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp extract_function_name({name, _, _args}) when is_atom(name), do: Atom.to_string(name)
   defp extract_function_name(nil), do: "anonymous"
   defp extract_function_name(_), do: "unknown"
+
+  # Helper to extract function parameters from signature
+  defp extract_function_params({:when, _, [{_name, _, args}, _guard]}), do: params_to_meta(args)
+  defp extract_function_params({_name, _, args}) when is_list(args), do: params_to_meta(args)
+  defp extract_function_params({_name, _, nil}), do: []
+  defp extract_function_params(_), do: []
+
+  defp params_to_meta(nil), do: []
+  defp params_to_meta([]), do: []
+
+  defp params_to_meta(args) when is_list(args) do
+    Enum.map(args, fn
+      {name, _, _} when is_atom(name) -> {:param, Atom.to_string(name), nil, nil}
+      _ -> {:param, "_", nil, nil}
+    end)
+  end
 
   # Helper to transform map key-value pairs
   defp transform_map_pairs(pairs) do

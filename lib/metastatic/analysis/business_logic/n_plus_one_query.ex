@@ -175,7 +175,13 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   # ----- Private Helpers -----
 
   # Check if AST contains database operations
+  defp contains_database_operation?({:lambda, _params, _captures, body}) do
+    # Lambda is {:lambda, params, captures, body}
+    contains_database_call?(body)
+  end
+
   defp contains_database_operation?({:lambda, _params, body}) do
+    # Old 3-tuple format for backwards compat
     contains_database_call?(body)
   end
 
@@ -192,6 +198,10 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   end
 
   defp contains_database_call?({:function_call, func_name, _args}) when is_atom(func_name) do
+    database_function?(func_name)
+  end
+
+  defp contains_database_call?({:function_call, func_name, _args}) when is_binary(func_name) do
     database_function?(func_name)
   end
 
@@ -231,6 +241,16 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
         &String.contains?(func_str, &1)
       )
     end
+  end
+
+  defp database_function?(func_name) when is_binary(func_name) do
+    # String function names (e.g., "Repo.get", "User.find")
+    func_str = String.downcase(func_name)
+
+    Enum.any?(
+      ["get", "find", "query", "fetch", "load", "select", "repo", "objects", "repository"],
+      &String.contains?(func_str, &1)
+    )
   end
 
   defp database_function?(_), do: false

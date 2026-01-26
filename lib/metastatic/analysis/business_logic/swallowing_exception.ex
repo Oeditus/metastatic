@@ -119,12 +119,13 @@ defmodule Metastatic.Analysis.BusinessLogic.SwallowingException do
   end
 
   @impl true
-  def analyze({:exception_handling, _try_block, catch_clauses} = node, _context)
+  def analyze({:exception_handling, _try_block, catch_clauses, _finally_block} = node, _context)
       when is_list(catch_clauses) do
     # Check if any catch clause swallows exceptions
+    # MetaAST catch clauses are 3-tuples: {exception_type, exception_var, handler_body}
     silent_catches =
       Enum.filter(catch_clauses, fn
-        {_exception_pattern, handler_body} ->
+        {_exception_type, _exception_var, handler_body} ->
           not has_logging_or_reraise?(handler_body)
       end)
 

@@ -178,6 +178,30 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
           []
         end
 
+      # Inline match (Elixir pattern matching) followed by filter
+      [
+        {:inline_match, var, fetch_expr},
+        {:collection_op, :filter, _lambda, filter_var}
+      ] ->
+        if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+          [
+            Analyzer.issue(
+              analyzer: __MODULE__,
+              category: :performance,
+              severity: :warning,
+              message:
+                "Inefficient filter: fetching all data then filtering in memory - push filter to data source",
+              node: {:block, [fetch_expr, filter_var]},
+              metadata: %{
+                suggestion:
+                  "Use database query filters (WHERE clause) instead of fetching all then filtering"
+              }
+            )
+          ]
+        else
+          []
+        end
+
       _ ->
         []
     end)
@@ -189,6 +213,10 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
 
   # Check if expression is a "fetch all" operation
   defp fetch_all?({:function_call, func_name, _args}) when is_atom(func_name) do
+    fetch_all_function?(func_name)
+  end
+
+  defp fetch_all?({:function_call, func_name, _args}) when is_binary(func_name) do
     fetch_all_function?(func_name)
   end
 
@@ -212,6 +240,16 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
         &String.contains?(func_str, &1)
       )
     end
+  end
+
+  defp fetch_all_function?(func_name) when is_binary(func_name) do
+    # String function names (e.g., "Repo.all", "User.findAll")
+    func_str = String.downcase(func_name)
+
+    Enum.any?(
+      ["all", "findall", "getall", "fetchall", "tolist", "toarray", "list", "repo"],
+      &String.contains?(func_str, &1)
+    )
   end
 
   defp fetch_all_function?(_), do: false

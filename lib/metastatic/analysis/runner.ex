@@ -158,11 +158,12 @@ defmodule Metastatic.Analysis.Runner do
   defp run_before_hooks(analyzers, base_context) do
     {ready, contexts} =
       Enum.reduce(analyzers, {[], %{}}, fn analyzer, {ready, contexts} ->
-        if function_exported?(analyzer, :run_before, 1) do
-          # Get analyzer-specific config
-          analyzer_config = Map.get(base_context.config, analyzer.info().name, %{})
-          context_with_config = Map.put(base_context, :config, analyzer_config)
+        # Get analyzer-specific config
+        analyzer_config = Map.get(base_context.config, analyzer.info().name, %{})
+        context_with_config = Map.put(base_context, :config, analyzer_config)
 
+        # Try to call run_before - it may or may not be defined
+        try do
           case analyzer.run_before(context_with_config) do
             {:ok, ctx} ->
               {ready ++ [analyzer], Map.put(contexts, analyzer, ctx)}
@@ -171,11 +172,10 @@ defmodule Metastatic.Analysis.Runner do
               Logger.debug("Analyzer #{inspect(analyzer)} skipped: #{inspect(reason)}")
               {ready, contexts}
           end
-        else
-          # No run_before, use base context with analyzer-specific config
-          analyzer_config = Map.get(base_context.config, analyzer.info().name, %{})
-          context_with_config = Map.put(base_context, :config, analyzer_config)
-          {ready ++ [analyzer], Map.put(contexts, analyzer, context_with_config)}
+        rescue
+          UndefinedFunctionError ->
+            # No run_before defined, use context as-is
+            {ready ++ [analyzer], Map.put(contexts, analyzer, context_with_config)}
         end
       end)
 
@@ -277,7 +277,8 @@ defmodule Metastatic.Analysis.Runner do
       {:loop, _, iter, coll, body} ->
         [iter, coll, body]
 
-      {:lambda, _params, body} ->
+      {:lambda, _params, _captures, body} ->
+        # Lambda is {:lambda, params, captures, body}
         [body]
 
       {:collection_op, _, func, coll} ->
@@ -296,8 +297,9 @@ defmodule Metastatic.Analysis.Runner do
         [expr]
 
       # M2.2s Structural layer
-      {:container, _type, _name, _opts, body} when is_list(body) ->
-        body
+      {:container, _type, _name, _parent, _type_params, _implements, body} ->
+        # container: type, name, parent, type_params, implements, body
+        if is_list(body), do: body, else: [body]
 
       {:function_def, _name, _params, _ret_type, _opts, body} ->
         [body]
@@ -407,10 +409,26 @@ defmodule Metastatic.Analysis.Runner do
     end)
   end
 
-  defp update_contexts(contexts, _ast) do
-    # Context updates happen in walk_children for depth/parent_stack
-    # This is a hook for future extensions
-    contexts
+  defp update_contexts(contexts, ast) do
+    # Update context based on current AST node
+    # Track function names, module names, etc. for analyzers that need them
+    case ast do
+      {:container, _type, name, _, _, _, _} ->
+        # Entering a module/class/namespace
+        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
+          Map.put(acc, analyzer, Map.put(ctx, :module_name, name))
+        end)
+
+      {:function_def, name, _params, _ret_type, _opts, _body} ->
+        # Entering a function definition
+        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
+          Map.put(acc, analyzer, Map.put(ctx, :function_name, name))
+        end)
+
+      _ ->
+        # No context update for other nodes
+        contexts
+    end
   end
 
   defp should_halt?(issues, opts) do
