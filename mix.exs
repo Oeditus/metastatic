@@ -99,7 +99,6 @@ defmodule Metastatic.MixProject do
         CHANGELOG.md
         THEORETICAL_FOUNDATIONS.md
         SUPPLEMENTAL_MODULES.md
-        ANALYZER_PLUGIN_DESIGN.md
         METAST_SPEC.md
         LICENSE
       ),
