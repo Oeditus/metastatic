@@ -312,6 +312,19 @@ defmodule Metastatic.Analysis.Security do
       {:lambda, _params, body} ->
         walk_ast(body, acc, func)
 
+      # M2.2s Structural layer
+      {:container, _type, _name, _parent, _type_params, _implements, body} ->
+        # Walk container body (modules, classes, etc.)
+        if is_list(body) do
+          Enum.reduce(body, acc, fn child, a -> walk_ast(child, a, func) end)
+        else
+          walk_ast(body, acc, func)
+        end
+
+      {:function_def, _name, _params, _ret_type, _opts, body} ->
+        # Walk function body
+        walk_ast(body, acc, func)
+
       {:language_specific, _lang, _native_ast, _node_type, metadata} when is_map(metadata) ->
         # Walk through metadata values (which contain MetaAST)
         # Only walk values that are tuples (AST nodes) or lists
