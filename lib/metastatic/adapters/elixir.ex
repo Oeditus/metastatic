@@ -137,4 +137,64 @@ defmodule Metastatic.Adapters.Elixir do
   def file_extensions do
     [".ex", ".exs"]
   end
+
+  @impl true
+  def extract_children(ast) when is_tuple(ast) do
+    case ast do
+      # Module definition: {:defmodule, meta, [name, [do: body]]}
+      {:defmodule, _meta, [_name, [do: body]]} ->
+        [body]
+
+      # Function definition: {:def/:defp, meta, [signature, [do: body]]}
+      {func_type, _meta, [_signature, [do: body]]}
+      when func_type in [:def, :defp, :defmacro, :defmacrop] ->
+        [body]
+
+      # Block: {:__block__, [], statements}
+      {:__block__, _, statements} when is_list(statements) ->
+        statements
+
+      # Pipe operator: {:|>, meta, [left, right]}
+      {:|>, _meta, [left, right]} ->
+        [left, right]
+
+      # Function call: {:function, meta, args}
+      {func, _meta, args} when is_atom(func) and is_list(args) ->
+        args
+
+      # Remote call: {{:., meta1, [module, func]}, meta2, args}
+      {{:., _meta1, [_module, _func]}, _meta2, args} when is_list(args) ->
+        args
+
+      # Match operator: {:=, meta, [left, right]}
+      {:=, _meta, [left, right]} ->
+        [left, right]
+
+      # Try/rescue: {:try, meta, [[do: body, rescue: handlers]]}
+      {:try, _meta, [[do: body, rescue: handlers]]} when is_list(handlers) ->
+        [body | Enum.map(handlers, fn {:->, _, [_pattern, handler_body]} -> handler_body end)]
+
+      # Module attribute: {:@, meta, [{name, meta2, [value]}]}
+      {:@, _meta, [{_name, _meta2, [value]}]} ->
+        [value]
+
+      # List
+      list when is_list(list) ->
+        list
+
+      # Literal or unknown - no children
+      _ when is_atom(ast) or is_number(ast) or is_binary(ast) ->
+        []
+
+      # Other tuples - try to extract all elements except metadata
+      {_tag, _meta, elements} when is_list(elements) ->
+        elements
+
+      _ ->
+        []
+    end
+  end
+
+  def extract_children(list) when is_list(list), do: list
+  def extract_children(_), do: []
 end

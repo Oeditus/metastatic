@@ -251,7 +251,33 @@ defmodule Metastatic.Adapter do
   @callback validate_mutation(meta_ast, metadata) ::
               :ok | {:error, validation_error :: String.t()}
 
-  @optional_callbacks validate_mutation: 2
+  @doc """
+  Extract children from a language-specific AST node.
+
+  Given a language-specific AST node (M1), return a list of its child nodes
+  that should be traversed during analysis.
+
+  This is used by analyzers that need to traverse language-specific nodes
+  embedded in `:language_specific` MetaAST nodes.
+
+  ## Default Implementation
+
+  If not implemented, the runner will use a generic fallback that attempts
+  to extract children based on common AST patterns.
+
+  ## Examples
+
+      # Elixir adapter
+      extract_children({:defmodule, _meta, [_name, [do: body]]})
+      # => [body]
+
+      # Python adapter  
+      extract_children(%{"_type" => "FunctionDef", "body" => statements})
+      # => statements
+  """
+  @callback extract_children(native_ast) :: [native_ast]
+
+  @optional_callbacks validate_mutation: 2, extract_children: 1
 
   # ----- Helper Functions -----
 

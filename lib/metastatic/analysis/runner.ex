@@ -34,8 +34,8 @@ defmodule Metastatic.Analysis.Runner do
   - `:timing` - Performance metrics (if enabled)
   """
 
+  alias Metastatic.{Adapter, Document}
   alias Metastatic.Analysis.{Analyzer, Registry}
-  alias Metastatic.Document
 
   require Logger
 
@@ -183,11 +183,19 @@ defmodule Metastatic.Analysis.Runner do
   end
 
   defp traverse(ast, analyzers, contexts, opts) do
+    # Get document language from context (use first analyzer's context)
+    language =
+      case Map.values(contexts) do
+        [first_context | _] -> first_context.document.language
+        # Default fallback when no analyzers
+        [] -> :elixir
+      end
+
     # Single-pass traversal calling all analyzers
-    walk(ast, analyzers, contexts, [], opts)
+    walk(ast, analyzers, contexts, [], opts, language)
   end
 
-  defp walk(ast, analyzers, contexts, issues, opts) do
+  defp walk(ast, analyzers, contexts, issues, opts, language) do
     # Update contexts with current node info
     contexts = update_contexts(contexts, ast)
 
@@ -205,13 +213,13 @@ defmodule Metastatic.Analysis.Runner do
       {all_issues, contexts}
     else
       # Recurse into children
-      walk_children(ast, analyzers, contexts, all_issues, opts)
+      walk_children(ast, analyzers, contexts, all_issues, opts, language)
     end
   end
 
-  defp walk_children(ast, analyzers, contexts, issues, opts) do
+  defp walk_children(ast, analyzers, contexts, issues, opts, language) do
     # Extract child nodes
-    children = extract_children(ast)
+    children = extract_children(ast, language)
 
     # Update context depth and parent stack
     contexts =
@@ -225,11 +233,11 @@ defmodule Metastatic.Analysis.Runner do
 
     # Traverse each child
     Enum.reduce(children, {issues, contexts}, fn child, {acc_issues, acc_contexts} ->
-      walk(child, analyzers, acc_contexts, acc_issues, opts)
+      walk(child, analyzers, acc_contexts, acc_issues, opts, language)
     end)
   end
 
-  defp extract_children(ast) do
+  defp extract_children(ast, language) do
     case ast do
       # M2.1 Core layer
       {:binary_op, _, _, left, right} ->
@@ -314,7 +322,7 @@ defmodule Metastatic.Analysis.Runner do
 
       {:language_specific, _, original_ast, _} ->
         # Fallback: extract children from the original language-specific AST
-        extract_language_specific_children(original_ast)
+        extract_language_specific_children(original_ast, language)
 
       # List of nodes
       list when is_list(list) ->
@@ -330,65 +338,42 @@ defmodule Metastatic.Analysis.Runner do
   defp extract_pattern_children(_), do: []
 
   # Extract children from language-specific AST nodes
-  # These are Elixir/Erlang AST structures that need to be traversed
-  defp extract_language_specific_children(ast) when is_tuple(ast) do
-    case ast do
-      # Module definition: {:defmodule, meta, [name, [do: body]]}
-      {:defmodule, _meta, [_name, [do: body]]} ->
-        [body]
+  # Delegates to the adapter for the specified language
+  defp extract_language_specific_children(ast, language) do
+    case Adapter.for_language(language) do
+      {:ok, adapter} ->
+        # Use adapter's extract_children if available
+        if function_exported?(adapter, :extract_children, 1) do
+          adapter.extract_children(ast)
+        else
+          # Fallback to generic extraction
+          generic_extract_children(ast)
+        end
 
-      # Function definition: {:def/:defp, meta, [signature, [do: body]]}
-      {func_type, _meta, [_signature, [do: body]]}
-      when func_type in [:def, :defp, :defmacro, :defmacrop] ->
-        [body]
+      {:error, :no_adapter_found} ->
+        # No adapter found, use generic extraction
+        generic_extract_children(ast)
+    end
+  end
 
-      # Block: {:__block__, [], statements}
-      {:__block__, _, statements} when is_list(statements) ->
-        statements
+  # Generic fallback for extracting children from unknown AST structures
+  defp generic_extract_children(ast) when is_list(ast), do: ast
 
-      # Pipe operator: {:|>, meta, [left, right]}
-      {:|>, _meta, [left, right]} ->
-        [left, right]
-
-      # Function call: {:function, meta, args}
-      {func, _meta, args} when is_atom(func) and is_list(args) ->
-        args
-
-      # Remote call: {{:., meta1, [module, func]}, meta2, args}
-      {{:., _meta1, [_module, _func]}, _meta2, args} when is_list(args) ->
-        args
-
-      # Match operator: {:=, meta, [left, right]}
-      {:=, _meta, [left, right]} ->
-        [left, right]
-
-      # Try/rescue: {:try, meta, [[do: body, rescue: handlers]]}
-      {:try, _meta, [[do: body, rescue: handlers]]} when is_list(handlers) ->
-        [body | Enum.map(handlers, fn {:->, _, [_pattern, handler_body]} -> handler_body end)]
-
-      # Module attribute: {:@, meta, [{name, meta2, [value]}]}
-      {:@, _meta, [{_name, _meta2, [value]}]} ->
-        [value]
-
-      # List
-      list when is_list(list) ->
-        list
-
-      # Literal or unknown - no children
-      _ when is_atom(ast) or is_number(ast) or is_binary(ast) ->
-        []
-
-      # Other tuples - try to extract all elements except metadata
-      {_tag, _meta, elements} when is_list(elements) ->
-        elements
+  defp generic_extract_children(ast) when is_tuple(ast) do
+    # Try to extract tuple elements, assuming common pattern {tag, meta, children}
+    case tuple_size(ast) do
+      3 ->
+        case elem(ast, 2) do
+          children when is_list(children) -> children
+          _ -> []
+        end
 
       _ ->
         []
     end
   end
 
-  defp extract_language_specific_children(list) when is_list(list), do: list
-  defp extract_language_specific_children(_), do: []
+  defp generic_extract_children(_), do: []
 
   defp extract_catches(catches) when is_list(catches) do
     Enum.flat_map(catches, fn
