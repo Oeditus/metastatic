@@ -243,14 +243,17 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   end
 
   # M2.2s Structural/Organizational layer
-  defp normalize_ast({:container, type, _name, _metadata, members}) when is_list(members) do
-    {:container, type, :_, :_, Enum.map(members, &normalize_ast/1)}
+  # {:container, type, name, parent, type_params, implements, body}
+  defp normalize_ast({:container, type, _name, _parent, _type_params, _implements, body}) do
+    {:container, type, :_, :_, :_, :_, normalize_ast(body)}
   end
 
-  defp normalize_ast({:function_def, visibility, _name, params, _metadata, body})
+  # {:function_def, name, params, ret_type, opts, body}
+  defp normalize_ast({:function_def, _name, params, _ret_type, opts, body})
        when is_list(params) do
     normalized_params = Enum.map(params, &normalize_param/1)
-    {:function_def, visibility, :_, normalized_params, :_, normalize_ast(body)}
+    normalized_opts = if is_map(opts), do: :_, else: []
+    {:function_def, :_, normalized_params, :_, normalized_opts, normalize_ast(body)}
   end
 
   defp normalize_ast({:attribute_access, receiver, _attribute}) do
@@ -286,6 +289,13 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
 
   # Helper for normalizing function parameters
   defp normalize_param(param) when is_binary(param), do: :_
+  # New format: {:param, name, pattern, default}
+  defp normalize_param({:param, _name, pattern, default}) do
+    {:param, :_, if(pattern, do: normalize_ast(pattern), else: nil),
+     if(default, do: normalize_ast(default), else: nil)}
+  end
+
+  # Old format compatibility
   defp normalize_param({:pattern, pattern}), do: {:pattern, normalize_ast(pattern)}
   defp normalize_param({:default, _name, default}), do: {:default, :_, normalize_ast(default)}
 
@@ -400,14 +410,16 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   end
 
   # M2.2s Structural/Organizational
-  defp extract_tokens({:container, type, _name, _metadata, members}, acc) when is_list(members) do
+  # {:container, type, name, parent, type_params, implements, body}
+  defp extract_tokens({:container, type, _name, _parent, _type_params, _implements, body}, acc) do
     acc = [type, :container | acc]
-    Enum.reduce(members, acc, fn member, a -> extract_tokens(member, a) end)
+    extract_tokens(body, acc)
   end
 
-  defp extract_tokens({:function_def, visibility, _name, params, _metadata, body}, acc)
+  # {:function_def, name, params, ret_type, opts, body}
+  defp extract_tokens({:function_def, _name, params, _ret_type, _opts, body}, acc)
        when is_list(params) do
-    acc = [visibility, :function_def | acc]
+    acc = [:function_def | acc]
     acc = Enum.reduce(params, acc, fn param, a -> extract_param_tokens(param, a) end)
     extract_tokens(body, acc)
   end
@@ -449,6 +461,14 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   # Helper for extracting tokens from function parameters
   defp extract_param_tokens(param, acc) when is_binary(param), do: [:param | acc]
 
+  # New format: {:param, name, pattern, default}
+  defp extract_param_tokens({:param, _name, pattern, default}, acc) do
+    acc = [:param | acc]
+    acc = if pattern, do: extract_tokens(pattern, acc), else: acc
+    if default, do: extract_tokens(default, acc), else: acc
+  end
+
+  # Old format compatibility
   defp extract_param_tokens({:pattern, pattern}, acc),
     do: extract_tokens(pattern, [:pattern_param | acc])
 

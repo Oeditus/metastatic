@@ -233,6 +233,34 @@ defmodule Metastatic.Analysis.Duplication.Similarity do
     1 + count_nodes(func) + count_nodes(coll) + count_nodes(init)
   end
 
+  # M2.2s: Structural/Organizational types
+  defp count_nodes({:container, _type, _name, _parent, _type_params, _implements, body}) do
+    1 + count_nodes(body)
+  end
+
+  defp count_nodes({:function_def, _name, params, _ret_type, opts, body}) when is_list(params) do
+    param_count = Enum.sum(Enum.map(params, &count_nodes/1))
+
+    guard_count =
+      if is_map(opts) && Map.get(opts, :guards), do: count_nodes(Map.get(opts, :guards)), else: 0
+
+    1 + param_count + guard_count + count_nodes(body)
+  end
+
+  defp count_nodes({:attribute_access, obj, _attr}) do
+    1 + count_nodes(obj)
+  end
+
+  defp count_nodes({:augmented_assignment, _op, target, value}) do
+    1 + count_nodes(target) + count_nodes(value)
+  end
+
+  defp count_nodes({:property, _name, getter, setter, _metadata}) do
+    getter_count = if getter, do: count_nodes(getter), else: 0
+    setter_count = if setter, do: count_nodes(setter), else: 0
+    1 + getter_count + setter_count
+  end
+
   defp count_nodes(_), do: 1
 
   # Count matching nodes between two ASTs
@@ -290,6 +318,70 @@ defmodule Metastatic.Analysis.Duplication.Similarity do
 
   defp count_matching_nodes({:assignment, t1, v1}, {:assignment, t2, v2}) do
     1 + count_matching_nodes(t1, t2) + count_matching_nodes(v1, v2)
+  end
+
+  # M2.2s: Structural/Organizational types
+  defp count_matching_nodes(
+         {:container, type1, _name1, _parent1, _type_params1, _implements1, body1},
+         {:container, type2, _name2, _parent2, _type_params2, _implements2, body2}
+       ) do
+    base = if type1 == type2, do: 1, else: 0
+    base + count_matching_nodes(body1, body2)
+  end
+
+  defp count_matching_nodes(
+         {:function_def, _name1, params1, _ret_type1, opts1, body1},
+         {:function_def, _name2, params2, _ret_type2, opts2, body2}
+       )
+       when is_list(params1) and is_list(params2) do
+    param_matches =
+      if length(params1) == length(params2) do
+        Enum.zip(params1, params2)
+        |> Enum.map(fn {p1, p2} -> count_matching_nodes(p1, p2) end)
+        |> Enum.sum()
+      else
+        0
+      end
+
+    guard_matches =
+      case {is_map(opts1) && Map.get(opts1, :guards), is_map(opts2) && Map.get(opts2, :guards)} do
+        {g1, g2} when g1 != nil and g2 != nil -> count_matching_nodes(g1, g2)
+        _ -> 0
+      end
+
+    1 + param_matches + guard_matches + count_matching_nodes(body1, body2)
+  end
+
+  defp count_matching_nodes({:attribute_access, obj1, attr1}, {:attribute_access, obj2, attr2}) do
+    base = if attr1 == attr2, do: 1, else: 0
+    base + count_matching_nodes(obj1, obj2)
+  end
+
+  defp count_matching_nodes(
+         {:augmented_assignment, op1, target1, value1},
+         {:augmented_assignment, op2, target2, value2}
+       ) do
+    base = if op1 == op2, do: 1, else: 0
+    base + count_matching_nodes(target1, target2) + count_matching_nodes(value1, value2)
+  end
+
+  defp count_matching_nodes(
+         {:property, _name1, getter1, setter1, _metadata1},
+         {:property, _name2, getter2, setter2, _metadata2}
+       ) do
+    getter_matches =
+      case {getter1, getter2} do
+        {g1, g2} when g1 != nil and g2 != nil -> count_matching_nodes(g1, g2)
+        _ -> 0
+      end
+
+    setter_matches =
+      case {setter1, setter2} do
+        {s1, s2} when s1 != nil and s2 != nil -> count_matching_nodes(s1, s2)
+        _ -> 0
+      end
+
+    1 + getter_matches + setter_matches
   end
 
   defp count_matching_nodes({:literal, type, _}, {:literal, type, _}), do: 1
