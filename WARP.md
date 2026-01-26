@@ -6,16 +6,18 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
-**Current Status:** Phase 1 Complete (v0.1.0-dev)  
-- Core MetaAST foundation implemented with 1356 passing tests (100% coverage)
-- Language adapters: Python and Elixir implemented and fully tested
-- Additional language adapters (JavaScript, Ruby, etc.) coming in Phase 2+
+**Current Status:** Phase 2 Complete - Structural Layer Implemented (v0.2.0-dev)  
+- Core MetaAST foundation implemented with 1458 passing tests (100% coverage)
+- M2.2s Structural/Organizational Layer: container, function_def, attribute_access, augmented_assignment, property
+- Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented
+- All 9 analysis tools support structural types
+- Business Logic Analyzers: 20 language-agnostic analyzers operational
 
 ## Essential Commands
 
 ### Testing
 ```bash
-# Run all tests (1356 tests: 131 doctests + 1225 tests, all passing)
+# Run all tests (1458 tests: 143 doctests + 1315 tests, all passing)
 mix test
 
 # Run specific test file
@@ -83,6 +85,11 @@ flowchart TD
 - Normalized with hints to preserve language-specific nuances
 - Examples: loops (while/for), map/filter/reduce operations
 
+**M2.2s Structural/Organizational Layer** - Top-level constructs for modules and classes
+- Types: `container`, `function_def`, `attribute_access`, `augmented_assignment`, `property`
+- Enables cross-language structural analysis and architectural transformations
+- Examples: modules, classes, function definitions, method signatures
+
 **M2.3 Native Layer** - Language-specific escape hatches
 - Type: `language_specific` (embeds M1 directly when needed)
 - Preserved as-is for language-unique features
@@ -109,7 +116,7 @@ flowchart TD
   - `from_meta/2`: M2 → M1 (reification)
   - `unparse/1`: M1 → Source
 - Helper functions: `round_trip/2`, `abstract/3`, `reify/2`
-- Note: No adapters implemented yet (Phase 2+)
+- Adapters: Python, Elixir, Ruby, Erlang, Haskell all fully implemented
 
 **lib/metastatic/builder.ex** (278 lines)
 - High-level API for users
@@ -152,10 +159,12 @@ flowchart TD
 ## Development Workflow
 
 ### Phase Context
-Phase 1 (Core Foundation) is **complete**. All work going forward should understand:
-- Core MetaAST types are stable and fully tested
-- Language adapters don't exist yet (coming in Phase 2: Python, then Phase 3: JavaScript/Elixir)
-- Mutation engine and purity analyzer are planned for Phase 3
+Phase 2 (Structural Layer) is **complete**. Current state:
+- Core MetaAST types (M2.1 Core + M2.2 Extended + M2.2s Structural) fully implemented and tested
+- All 5 language adapters operational: Python, Elixir, Ruby, Erlang, Haskell
+- Full structural support: containers, function definitions, properties
+- All 9 analysis tools work with structural types
+- 20 business logic analyzers implemented (language-agnostic)
 
 ### Working with MetaAST
 

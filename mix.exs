@@ -155,9 +155,9 @@ defmodule Metastatic.MixProject do
       "GETTING_STARTED.md": [title: "Getting Started"],
       "THEORETICAL_FOUNDATIONS.md": [title: "Theoretical Foundations"],
       "SUPPLEMENTAL_MODULES.md": [title: "Supplemental Modules"],
-      "/lib/metastatic/analysis/ANALYZER_PLUGIN_SYSTEM.md": [title: "Analyzer Plugin System"],
-      "/lib/metastatic/analysis/ANALYZER_PLUGIN_DESIGN.md": [title: "Analyzer Plugin Design"],
-      "/lib/metastatic/analysis/CUSTOM_ANALYZER_GUIDE.md": [title: "Custom Analyzer Guide"],
+      "lib/metastatic/analysis/ANALYZER_PLUGIN_SYSTEM.md": [title: "Analyzer Plugin System"],
+      "lib/metastatic/analysis/ANALYZER_PLUGIN_DESIGN.md": [title: "Analyzer Plugin Design"],
+      "lib/metastatic/analysis/CUSTOM_ANALYZER_GUIDE.md": [title: "Custom Analyzer Guide"],
       "METAST_SPEC.md": [title: "MetaAST Informal Specification"],
       "CHANGELOG.md": [title: "Changelog"]
     ]
