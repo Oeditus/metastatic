@@ -175,27 +175,41 @@ defmodule Metastatic.Analysis.Complexity.LoC do
 
   # M2.2s: Structural/Organizational Types
 
-  defp walk({:container, _type, _name, _metadata, members}, count) when is_list(members) do
+  # Container: walk body (7-tuple format)
+  defp walk({:container, _type, _name, _parent, _type_params, _implements, body}, count) do
     count = count + 1
-    Enum.reduce(members, count, fn member, c -> walk(member, c) end)
+
+    if is_list(body) do
+      Enum.reduce(body, count, fn member, c -> walk(member, c) end)
+    else
+      walk(body, count)
+    end
   end
 
-  defp walk({:function_def, _visibility, _name, params, metadata, body}, count) do
+  # Function definition: walk body (6-tuple format)
+  defp walk({:function_def, _name, params, _ret_type, opts, body}, count) do
     count = count + 1
 
     # Walk parameters
     count =
       Enum.reduce(params, count, fn
-        {:pattern, pattern}, c -> walk_expr(pattern, c)
-        {:default, _name, default}, c -> walk_expr(default, c)
-        _simple_param, c -> c
+        {:param, _name, pattern, default}, c ->
+          c = if pattern, do: walk_expr(pattern, c), else: c
+          if default, do: walk_expr(default, c), else: c
+
+        _simple_param, c ->
+          c
       end)
 
     # Walk guards if present
     count =
-      case Map.get(metadata, :guards) do
-        nil -> count
-        guard -> walk_expr(guard, count)
+      if is_map(opts) do
+        case Map.get(opts, :guards) do
+          nil -> count
+          guard -> walk_expr(guard, count)
+        end
+      else
+        count
       end
 
     # Walk body

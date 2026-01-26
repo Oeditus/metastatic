@@ -214,23 +214,36 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   end
 
   # M2.2s: Structural/Organizational types
-  defp walk({:container, _type, _name, _metadata, members}, nesting, acc) when is_list(members) do
-    Enum.reduce(members, acc, fn member, a -> walk(member, nesting, a) end)
+  # Container: walk body (7-tuple format)
+  defp walk({:container, _type, _name, _parent, _type_params, _implements, body}, nesting, acc) do
+    if is_list(body) do
+      Enum.reduce(body, acc, fn member, a -> walk(member, nesting, a) end)
+    else
+      walk(body, nesting, acc)
+    end
   end
 
-  defp walk({:function_def, _visibility, _name, params, metadata, body}, nesting, acc)
+  # Function definition: walk body (6-tuple format)
+  defp walk({:function_def, _name, params, _ret_type, opts, body}, nesting, acc)
        when is_list(params) do
     acc =
       Enum.reduce(params, acc, fn
-        {:pattern, pattern}, a -> walk(pattern, nesting, a)
-        {:default, _name, default}, a -> walk(default, nesting, a)
-        _simple_param, a -> a
+        {:param, _name, pattern, default}, a ->
+          a = if pattern, do: walk(pattern, nesting, a), else: a
+          if default, do: walk(default, nesting, a), else: a
+
+        _simple_param, a ->
+          a
       end)
 
     acc =
-      case Map.get(metadata, :guards) do
-        nil -> acc
-        guard -> walk(guard, nesting, acc)
+      if is_map(opts) do
+        case Map.get(opts, :guards) do
+          nil -> acc
+          guard -> walk(guard, nesting, acc)
+        end
+      else
+        acc
       end
 
     walk(body, nesting, acc)

@@ -205,27 +205,38 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
   end
 
   # M2.2s: Structural/Organizational types
-  # Container: walk all members
-  defp walk({:container, _type, _name, _metadata, members}, count) when is_list(members) do
-    Enum.reduce(members, count, fn member, c -> walk(member, c) end)
+  # Container: walk body (7-tuple format)
+  defp walk({:container, _type, _name, _parent, _type_params, _implements, body}, count) do
+    if is_list(body) do
+      Enum.reduce(body, count, fn member, c -> walk(member, c) end)
+    else
+      walk(body, count)
+    end
   end
 
-  # Function definition: walk body (guards may add decision points)
-  defp walk({:function_def, _visibility, _name, params, metadata, body}, count)
+  # Function definition: walk body (6-tuple format)
+  defp walk({:function_def, _name, params, _ret_type, opts, body}, count)
        when is_list(params) do
     # Walk parameters (for pattern params with embedded conditionals)
     count =
       Enum.reduce(params, count, fn
-        {:pattern, pattern}, c -> walk(pattern, c)
-        {:default, _name, default}, c -> walk(default, c)
-        _simple_param, c -> c
+        {:param, _name, pattern, default}, c ->
+          c = if pattern, do: walk(pattern, c), else: c
+          if default, do: walk(default, c), else: c
+
+        _simple_param, c ->
+          c
       end)
 
-    # Walk guards if present
+    # Walk guards if present in opts
     count =
-      case Map.get(metadata, :guards) do
-        nil -> count
-        guard -> walk(guard, count)
+      if is_map(opts) do
+        case Map.get(opts, :guards) do
+          nil -> count
+          guard -> walk(guard, count)
+        end
+      else
+        count
       end
 
     # Walk body

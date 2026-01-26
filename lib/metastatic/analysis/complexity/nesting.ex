@@ -166,33 +166,44 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
 
   # M2.2s: Structural/Organizational Types
 
-  # Container: walk all members at same depth
-  defp walk({:container, _type, _name, _metadata, members}, current, max) when is_list(members) do
+  # Container: walk body at same depth (7-tuple format)
+  defp walk({:container, _type, _name, _parent, _type_params, _implements, body}, current, max) do
     max = Enum.max([current, max])
 
     {_, max} =
-      Enum.reduce(members, {current, max}, fn member, {c, m} ->
-        walk(member, c, m)
-      end)
+      if is_list(body) do
+        Enum.reduce(body, {current, max}, fn member, {c, m} ->
+          walk(member, c, m)
+        end)
+      else
+        walk(body, current, max)
+      end
 
     {current, max}
   end
 
-  # Function definition: walk parameters, guards, and body
-  defp walk({:function_def, _visibility, _name, params, metadata, body}, current, max) do
+  # Function definition: walk parameters, guards, and body (6-tuple format)
+  defp walk({:function_def, _name, params, _ret_type, opts, body}, current, max) do
     # Walk parameters
     {_, max} =
       Enum.reduce(params, {current, max}, fn
-        {:pattern, pattern}, {c, m} -> walk(pattern, c, m)
-        {:default, _name, default}, {c, m} -> walk(default, c, m)
-        _simple_param, {c, m} -> {c, m}
+        {:param, _name, pattern, default}, {c, m} ->
+          {_, m} = if pattern, do: walk(pattern, c, m), else: {c, m}
+          if default, do: walk(default, c, m), else: {c, m}
+
+        _simple_param, {c, m} ->
+          {c, m}
       end)
 
     # Walk guards if present
     {_, max} =
-      case Map.get(metadata, :guards) do
-        nil -> {current, max}
-        guard -> walk(guard, current, max)
+      if is_map(opts) do
+        case Map.get(opts, :guards) do
+          nil -> {current, max}
+          guard -> walk(guard, current, max)
+        end
+      else
+        {current, max}
       end
 
     # Walk body with incremented depth (function introduces scope)

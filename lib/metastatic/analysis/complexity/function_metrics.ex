@@ -123,28 +123,39 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
 
   # M2.2s: Structural/Organizational Types
 
-  defp walk_statements({:container, _type, _name, _metadata, members}, count)
-       when is_list(members) do
+  # {:container, type, name, parent, type_params, implements, body}
+  defp walk_statements(
+         {:container, _type, _name, _parent, _type_params, _implements, body},
+         count
+       ) do
     count = count + 1
-    Enum.reduce(members, count, fn member, c -> walk_statements(member, c) end)
+    walk_statements(body, count)
   end
 
-  defp walk_statements({:function_def, _visibility, _name, params, metadata, body}, count) do
+  # {:function_def, name, params, ret_type, opts, body}
+  defp walk_statements({:function_def, _name, params, _ret_type, opts, body}, count) do
     count = count + 1
 
-    # Walk parameters
+    # Walk parameters (new format: {:param, name, pattern, default})
     count =
       Enum.reduce(params, count, fn
-        {:pattern, pattern}, c -> walk_statements(pattern, c)
-        {:default, _name, default}, c -> walk_statements(default, c)
-        _simple_param, c -> c
+        {:param, _name, pattern, default}, c ->
+          c = if pattern, do: walk_statements(pattern, c), else: c
+          if default, do: walk_statements(default, c), else: c
+
+        _simple_param, c ->
+          c
       end)
 
-    # Walk guards if present
+    # Walk guards if present (now in opts map)
     count =
-      case Map.get(metadata, :guards) do
-        nil -> count
-        guard -> walk_statements(guard, count)
+      if is_map(opts) do
+        case Map.get(opts, :guards) do
+          nil -> count
+          guard -> walk_statements(guard, count)
+        end
+      else
+        count
       end
 
     # Walk body
@@ -231,25 +242,33 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
 
   # M2.2s: Structural/Organizational Types
 
-  defp walk_returns({:container, _type, _name, _metadata, members}, count)
-       when is_list(members) do
-    Enum.reduce(members, count, fn member, c -> walk_returns(member, c) end)
+  # {:container, type, name, parent, type_params, implements, body}
+  defp walk_returns({:container, _type, _name, _parent, _type_params, _implements, body}, count) do
+    walk_returns(body, count)
   end
 
-  defp walk_returns({:function_def, _visibility, _name, params, metadata, body}, count) do
-    # Walk parameters
+  # {:function_def, name, params, ret_type, opts, body}
+  defp walk_returns({:function_def, _name, params, _ret_type, opts, body}, count) do
+    # Walk parameters (new format: {:param, name, pattern, default})
     count =
       Enum.reduce(params, count, fn
-        {:pattern, pattern}, c -> walk_returns(pattern, c)
-        {:default, _name, default}, c -> walk_returns(default, c)
-        _simple_param, c -> c
+        {:param, _name, pattern, default}, c ->
+          c = if pattern, do: walk_returns(pattern, c), else: c
+          if default, do: walk_returns(default, c), else: c
+
+        _simple_param, c ->
+          c
       end)
 
-    # Walk guards if present
+    # Walk guards if present (now in opts map)
     count =
-      case Map.get(metadata, :guards) do
-        nil -> count
-        guard -> walk_returns(guard, count)
+      if is_map(opts) do
+        case Map.get(opts, :guards) do
+          nil -> count
+          guard -> walk_returns(guard, count)
+        end
+      else
+        count
       end
 
     # Walk body
