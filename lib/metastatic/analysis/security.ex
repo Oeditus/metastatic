@@ -79,17 +79,20 @@ defmodule Metastatic.Analysis.Security do
   @weak_crypto ["md5", "MD5", "sha1", "SHA1", "des", "DES"]
 
   # Secret patterns (regex-like strings to check)
-  @secret_patterns [
-    # Patterns matching assignment/declaration syntax
-    {"password", ~r/password[\s:=]+["'].+["']/i},
-    {"api_key", ~r/api[_-]?key[\s:=]+["'].+["']/i},
-    {"secret", ~r/secret[\s:=]+["'].+["']/i},
-    {"token", ~r/token[\s:=]+["'].+["']/i},
-    # Patterns matching secret-like string content
-    {"api_key", ~r/^(sk|pk|Bearer|[A-Za-z0-9_-]{32,}$)/},
-    {"token", ~r/^[A-Za-z0-9_.-]{20,}$/},
-    {"secret", ~r/^[A-Za-z0-9+\/=]{40,}$/}
-  ]
+  # Note: These are defined as a function to avoid Elixir 1.18 attribute escaping issues
+  defp secret_patterns do
+    [
+      # Patterns matching assignment/declaration syntax
+      {"password", ~r/password[\s:=]+["'].+["']/i},
+      {"api_key", ~r/api[_-]?key[\s:=]+["'].+["']/i},
+      {"secret", ~r/secret[\s:=]+["'].+["']/i},
+      {"token", ~r/token[\s:=]+["'].+["']/i},
+      # Patterns matching secret-like string content
+      {"api_key", ~r/^(sk|pk|Bearer|[A-Za-z0-9_-]{32,}$)/},
+      {"token", ~r/^[A-Za-z0-9_.-]{20,}$/},
+      {"secret", ~r/^[A-Za-z0-9+\/=]{40,}$/}
+    ]
+  end
 
   use Metastatic.Document.Analyzer,
     doc: """
@@ -189,7 +192,7 @@ defmodule Metastatic.Analysis.Security do
     walk_ast(ast, [], fn node, acc ->
       case node do
         {:literal, :string, value} when is_binary(value) ->
-          Enum.reduce(@secret_patterns, acc, fn {type, pattern}, a ->
+          Enum.reduce(secret_patterns(), acc, fn {type, pattern}, a ->
             if Regex.match?(pattern, value) do
               [{type, value} | a]
             else
