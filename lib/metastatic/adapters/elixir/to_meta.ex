@@ -44,6 +44,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   This enables high-fidelity round-trips (M1 → M2 → M1).
   """
 
+  alias Metastatic.AST
+
   @doc """
   Transform Elixir AST to MetaAST.
 
@@ -94,6 +96,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # List literals - M2.1 Core Layer
+  # Note: List literals don't have metadata in Elixir AST, so no location added
   def transform(list) when is_list(list) do
     # Lists in Elixir can be literal lists like [1, 2, 3]
     with {:ok, items_meta} <- transform_list(list) do
@@ -109,10 +112,11 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     transform(reshaped)
   end
 
-  def transform({:%{}, _meta, pairs}) when is_list(pairs) do
+  def transform({:%{}, meta, pairs}) when is_list(pairs) do
     # Map literal: %{key => value, ...}
     with {:ok, pairs_meta} <- transform_map_pairs(pairs) do
-      {:ok, {:map, pairs_meta}, %{}}
+      ast = {:map, pairs_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
@@ -164,47 +168,53 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
     if special_form?(var) do
       # This is a special form or keyword, treat differently
-      {:ok, {:literal, :symbol, var}, %{elixir_meta: meta}}
+      ast = {:literal, :symbol, var}
+      {:ok, add_location(ast, meta), %{elixir_meta: meta}}
     else
       # Regular variable
+      ast = {:variable, var_str}
       metadata = %{context: context}
       metadata = if meta != [], do: Map.put(metadata, :elixir_meta, meta), else: metadata
-      {:ok, {:variable, var_str}, metadata}
+      {:ok, add_location(ast, meta), metadata}
     end
   end
 
   # Binary Operators - M2.1 Core Layer
 
   # Arithmetic operators
-  def transform({op, _meta, [left, right]}) when op in [:+, :-, :*, :/, :rem, :div] do
+  def transform({op, meta, [left, right]}) when op in [:+, :-, :*, :/, :rem, :div] do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :arithmetic, op, left_meta, right_meta}, %{}}
+      ast = {:binary_op, :arithmetic, op, left_meta, right_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
   # Comparison operators
-  def transform({op, _meta, [left, right]})
+  def transform({op, meta, [left, right]})
       when op in [:==, :!=, :<, :>, :<=, :>=, :===, :!==] do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :comparison, op, left_meta, right_meta}, %{}}
+      ast = {:binary_op, :comparison, op, left_meta, right_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
   # Boolean operators
-  def transform({op, _meta, [left, right]}) when op in [:and, :or] do
+  def transform({op, meta, [left, right]}) when op in [:and, :or] do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :boolean, op, left_meta, right_meta}, %{}}
+      ast = {:binary_op, :boolean, op, left_meta, right_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
   # String concatenation
-  def transform({:<>, _meta, [left, right]}) do
+  def transform({:<>, meta, [left, right]}) do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :arithmetic, :<>, left_meta, right_meta}, %{}}
+      ast = {:binary_op, :arithmetic, :<>, left_meta, right_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
@@ -236,21 +246,24 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Unary Operators - M2.1 Core Layer
 
-  def transform({:not, _meta, [operand]}) do
+  def transform({:not, meta, [operand]}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :boolean, :not, operand_meta}, %{}}
+      ast = {:unary_op, :boolean, :not, operand_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
-  def transform({:-, _meta, [operand]}) do
+  def transform({:-, meta, [operand]}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :arithmetic, :-, operand_meta}, %{}}
+      ast = {:unary_op, :arithmetic, :-, operand_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
-  def transform({:+, _meta, [operand]}) do
+  def transform({:+, meta, [operand]}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :arithmetic, :+, operand_meta}, %{}}
+      ast = {:unary_op, :arithmetic, :+, operand_meta}
+      {:ok, add_location(ast, meta), %{}}
     end
   end
 
@@ -930,4 +943,16 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       error -> error
     end
   end
+
+  # Helper to add location information to MetaAST nodes
+  # Elixir AST metadata is a keyword list with :line key
+  defp add_location(ast, metadata) when is_list(metadata) do
+    case Keyword.get(metadata, :line) do
+      nil -> ast
+      line when is_integer(line) -> AST.with_location(ast, %{line: line})
+      _ -> ast
+    end
+  end
+
+  defp add_location(ast, _), do: ast
 end

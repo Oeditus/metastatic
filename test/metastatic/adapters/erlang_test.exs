@@ -314,8 +314,72 @@ defmodule Metastatic.Adapters.ErlangTest do
 
       # Both should produce semantically equivalent MetaAST (ignoring variable name case)
       # Elixir uses lowercase 'x', Erlang uses uppercase 'X' - this is expected
-      assert {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}} = elixir_meta
-      assert {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}} = erlang_meta
+      # Handle optional location metadata
+      assert match?(
+               {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}},
+               elixir_meta
+             ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}},
+                 elixir_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}},
+                 elixir_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}},
+                 elixir_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}, _},
+                 elixir_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}, _},
+                 elixir_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}, _},
+                 elixir_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}, _},
+                 elixir_meta
+               )
+
+      assert match?(
+               {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}},
+               erlang_meta
+             ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}},
+                 erlang_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}},
+                 erlang_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}},
+                 erlang_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}, _},
+                 erlang_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}, _},
+                 erlang_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}, _},
+                 erlang_meta
+               ) or
+               match?(
+                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}, _},
+                 erlang_meta
+               )
     end
   end
 end

@@ -57,18 +57,18 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   # Literals - M2.1 Core Layer
 
   # Integer literal
-  def transform(%{"type" => "int", "children" => [value]}) when is_integer(value) do
-    {:ok, {:literal, :integer, value}, %{}}
+  def transform(%{"type" => "int", "children" => [value]} = ast) when is_integer(value) do
+    {:ok, add_location({:literal, :integer, value}, ast), %{}}
   end
 
   # Float literal
-  def transform(%{"type" => "float", "children" => [value]}) when is_float(value) do
-    {:ok, {:literal, :float, value}, %{}}
+  def transform(%{"type" => "float", "children" => [value]} = ast) when is_float(value) do
+    {:ok, add_location({:literal, :float, value}, ast), %{}}
   end
 
   # String literal
-  def transform(%{"type" => "str", "children" => [value]}) when is_binary(value) do
-    {:ok, {:literal, :string, value}, %{}}
+  def transform(%{"type" => "str", "children" => [value]} = ast) when is_binary(value) do
+    {:ok, add_location({:literal, :string, value}, ast), %{}}
   end
 
   # Symbol literal
@@ -138,10 +138,10 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   # Variables - M2.1 Core Layer
 
   # Local variable
-  def transform(%{"type" => "lvar", "children" => [name]})
+  def transform(%{"type" => "lvar", "children" => [name]} = ast)
       when is_binary(name) or is_atom(name) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
-    {:ok, {:variable, var_name}, %{scope: :local}}
+    {:ok, add_location({:variable, var_name}, ast), %{scope: :local}}
   end
 
   # Instance variable (@var)
@@ -170,14 +170,15 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # Arithmetic operators: +, -, *, /, %, **
   # Operators can be either atoms or strings from JSON
-  def transform(%{"type" => "send", "children" => [left, op, right]}) when not is_nil(right) do
+  def transform(%{"type" => "send", "children" => [left, op, right]} = ast)
+      when not is_nil(right) do
     cond do
       is_arithmetic_op?(op) ->
         op_atom = normalize_op(op)
 
         with {:ok, left_meta, _} <- transform(left),
              {:ok, right_meta, _} <- transform(right) do
-          {:ok, {:binary_op, :arithmetic, op_atom, left_meta, right_meta}, %{}}
+          {:ok, add_location({:binary_op, :arithmetic, op_atom, left_meta, right_meta}, ast), %{}}
         end
 
       is_comparison_op?(op) ->
@@ -185,7 +186,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
         with {:ok, left_meta, _} <- transform(left),
              {:ok, right_meta, _} <- transform(right) do
-          {:ok, {:binary_op, :comparison, op_atom, left_meta, right_meta}, %{}}
+          {:ok, add_location({:binary_op, :comparison, op_atom, left_meta, right_meta}, ast), %{}}
         end
 
       true ->
@@ -828,4 +829,27 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       error -> error
     end
   end
+
+  # Location extraction helper
+  @doc false
+  @spec add_location(term(), map()) :: map() | nil
+  defp add_location(meta_ast, %{"location" => loc}) when is_map(loc) do
+    location =
+      %{}
+      |> maybe_put(:line, loc["begin_line"])
+      |> maybe_put(:col, loc["begin_column"])
+      |> maybe_put(:end_line, loc["begin_line"])
+      |> maybe_put(:end_col, nil)
+
+    if map_size(location) > 0 do
+      Tuple.insert_at(meta_ast, tuple_size(meta_ast), location)
+    else
+      meta_ast
+    end
+  end
+
+  defp add_location(meta_ast, _ast_node), do: meta_ast
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

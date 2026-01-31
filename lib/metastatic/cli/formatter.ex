@@ -54,8 +54,17 @@ defmodule Metastatic.CLI.Formatter do
     format_tree_node(ast, indent, depth)
   end
 
+  # Handle location-aware nodes by stripping location and recursing
+  defp format_tree_node({:literal, type, value, _loc}, indent, depth) do
+    format_tree_node({:literal, type, value}, indent, depth)
+  end
+
   defp format_tree_node({:literal, type, value}, indent, _depth) do
     "#{indent}literal (#{type}): #{inspect(value)}"
+  end
+
+  defp format_tree_node({:variable, name, _loc}, indent, depth) do
+    format_tree_node({:variable, name}, indent, depth)
   end
 
   defp format_tree_node({:variable, name}, indent, _depth) do
@@ -83,6 +92,10 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
+  defp format_tree_node({:binary_op, category, op, left, right, _loc}, indent, depth) do
+    format_tree_node({:binary_op, category, op, left, right}, indent, depth)
+  end
+
   defp format_tree_node({:binary_op, category, op, left, right}, indent, depth) do
     lines = [
       "#{indent}binary_op (#{category}: #{op})",
@@ -91,6 +104,10 @@ defmodule Metastatic.CLI.Formatter do
     ]
 
     Enum.join(lines, "\n")
+  end
+
+  defp format_tree_node({:unary_op, category, op, operand, _loc}, indent, depth) do
+    format_tree_node({:unary_op, category, op, operand}, indent, depth)
   end
 
   defp format_tree_node({:unary_op, category, op, operand}, indent, depth) do
@@ -102,12 +119,20 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
+  defp format_tree_node({:function_call, name, args, _loc}, indent, depth) do
+    format_tree_node({:function_call, name, args}, indent, depth)
+  end
+
   defp format_tree_node({:function_call, name, args}, indent, depth) do
     arg_lines = Enum.map(args, &format_tree(&1, depth + 1))
 
     lines = ["#{indent}function_call: #{name}" | arg_lines]
 
     Enum.join(lines, "\n")
+  end
+
+  defp format_tree_node({:conditional, condition, then_branch, else_branch, _loc}, indent, depth) do
+    format_tree_node({:conditional, condition, then_branch, else_branch}, indent, depth)
   end
 
   defp format_tree_node({:conditional, condition, then_branch, else_branch}, indent, depth) do
@@ -133,10 +158,18 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
+  defp format_tree_node({:block, statements, _loc}, indent, depth) do
+    format_tree_node({:block, statements}, indent, depth)
+  end
+
   defp format_tree_node({:block, statements}, indent, depth) do
     statement_lines = Enum.map(statements, &format_tree(&1, depth + 1))
     lines = ["#{indent}block" | statement_lines]
     Enum.join(lines, "\n")
+  end
+
+  defp format_tree_node({:early_return, kind, value, _loc}, indent, depth) do
+    format_tree_node({:early_return, kind, value}, indent, depth)
   end
 
   defp format_tree_node({:early_return, kind, value}, indent, depth) do
@@ -154,6 +187,10 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
+  defp format_tree_node({:loop, :while, condition, body, _loc}, indent, depth) do
+    format_tree_node({:loop, :while, condition, body}, indent, depth)
+  end
+
   defp format_tree_node({:loop, :while, condition, body}, indent, depth) do
     lines = [
       "#{indent}loop (while)",
@@ -164,6 +201,11 @@ defmodule Metastatic.CLI.Formatter do
     ]
 
     Enum.join(lines, "\n")
+  end
+
+  defp format_tree_node({:loop, kind, iterator, collection, body, _loc}, indent, depth)
+       when kind in [:for, :for_each] do
+    format_tree_node({:loop, kind, iterator, collection, body}, indent, depth)
   end
 
   defp format_tree_node({:loop, kind, iterator, collection, body}, indent, depth)
@@ -181,6 +223,10 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
+  defp format_tree_node({:lambda, params, captures, body, _loc}, indent, depth) do
+    format_tree_node({:lambda, params, captures, body}, indent, depth)
+  end
+
   defp format_tree_node({:lambda, params, captures, body}, indent, depth) do
     param_str = Enum.map_join(params, ", ", &format_param/1)
 
@@ -192,6 +238,11 @@ defmodule Metastatic.CLI.Formatter do
     ]
 
     Enum.join(lines, "\n")
+  end
+
+  defp format_tree_node({:collection_op, op, lambda, collection, _loc}, indent, depth)
+       when op in [:map, :filter] do
+    format_tree_node({:collection_op, op, lambda, collection}, indent, depth)
   end
 
   defp format_tree_node({:collection_op, op, lambda, collection}, indent, depth)
@@ -207,6 +258,14 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
+  defp format_tree_node(
+         {:collection_op, :reduce, lambda, collection, initial, _loc},
+         indent,
+         depth
+       ) do
+    format_tree_node({:collection_op, :reduce, lambda, collection, initial}, indent, depth)
+  end
+
   defp format_tree_node({:collection_op, :reduce, lambda, collection, initial}, indent, depth) do
     lines = [
       "#{indent}collection_op (reduce)",
@@ -219,6 +278,14 @@ defmodule Metastatic.CLI.Formatter do
     ]
 
     Enum.join(lines, "\n")
+  end
+
+  defp format_tree_node(
+         {:exception_handling, body, rescue_clauses, finally_clause, _loc},
+         indent,
+         depth
+       ) do
+    format_tree_node({:exception_handling, body, rescue_clauses, finally_clause}, indent, depth)
   end
 
   defp format_tree_node(
@@ -300,8 +367,16 @@ defmodule Metastatic.CLI.Formatter do
     |> Jason.encode!(pretty: true)
   end
 
+  defp ast_to_map({:literal, type, value, _loc}) do
+    ast_to_map({:literal, type, value})
+  end
+
   defp ast_to_map({:literal, type, value}) do
     %{type: "literal", semantic_type: type, value: value}
+  end
+
+  defp ast_to_map({:variable, name, _loc}) do
+    ast_to_map({:variable, name})
   end
 
   defp ast_to_map({:variable, name}) do
@@ -319,6 +394,10 @@ defmodule Metastatic.CLI.Formatter do
     }
   end
 
+  defp ast_to_map({:binary_op, category, op, left, right, _loc}) do
+    ast_to_map({:binary_op, category, op, left, right})
+  end
+
   defp ast_to_map({:binary_op, category, op, left, right}) do
     %{
       type: "binary_op",
@@ -327,6 +406,10 @@ defmodule Metastatic.CLI.Formatter do
       left: ast_to_map(left),
       right: ast_to_map(right)
     }
+  end
+
+  defp ast_to_map({:unary_op, category, op, operand, _loc}) do
+    ast_to_map({:unary_op, category, op, operand})
   end
 
   defp ast_to_map({:unary_op, category, op, operand}) do
@@ -338,12 +421,20 @@ defmodule Metastatic.CLI.Formatter do
     }
   end
 
+  defp ast_to_map({:function_call, name, args, _loc}) do
+    ast_to_map({:function_call, name, args})
+  end
+
   defp ast_to_map({:function_call, name, args}) do
     %{
       type: "function_call",
       name: name,
       args: Enum.map(args, &ast_to_map/1)
     }
+  end
+
+  defp ast_to_map({:conditional, condition, then_branch, else_branch, _loc}) do
+    ast_to_map({:conditional, condition, then_branch, else_branch})
   end
 
   defp ast_to_map({:conditional, condition, then_branch, else_branch}) do
@@ -353,6 +444,10 @@ defmodule Metastatic.CLI.Formatter do
       then_branch: ast_to_map(then_branch),
       else_branch: if(else_branch, do: ast_to_map(else_branch), else: nil)
     }
+  end
+
+  defp ast_to_map({:block, statements, _loc}) do
+    ast_to_map({:block, statements})
   end
 
   defp ast_to_map({:block, statements}) do
@@ -377,20 +472,40 @@ defmodule Metastatic.CLI.Formatter do
   # Plain format - simple text representation
 
   @spec format_plain(meta_ast()) :: String.t()
+  defp format_plain({:literal, type, value, _loc}) do
+    format_plain({:literal, type, value})
+  end
+
   defp format_plain({:literal, type, value}) do
     "literal(#{type}, #{inspect(value)})"
+  end
+
+  defp format_plain({:variable, name, _loc}) do
+    format_plain({:variable, name})
   end
 
   defp format_plain({:variable, name}) do
     "variable(#{name})"
   end
 
+  defp format_plain({:binary_op, category, op, left, right, _loc}) do
+    format_plain({:binary_op, category, op, left, right})
+  end
+
   defp format_plain({:binary_op, category, op, left, right}) do
     "binary_op(#{category}, #{op}, #{format_plain(left)}, #{format_plain(right)})"
   end
 
+  defp format_plain({:unary_op, category, op, operand, _loc}) do
+    format_plain({:unary_op, category, op, operand})
+  end
+
   defp format_plain({:unary_op, category, op, operand}) do
     "unary_op(#{category}, #{op}, #{format_plain(operand)})"
+  end
+
+  defp format_plain({:function_call, name, args, _loc}) do
+    format_plain({:function_call, name, args})
   end
 
   defp format_plain({:function_call, name, args}) do

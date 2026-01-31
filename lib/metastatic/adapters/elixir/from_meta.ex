@@ -45,6 +45,11 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   # Literals - M2.1 Core Layer
 
+  # Location-aware literals (strip location and delegate)
+  def transform({:literal, subtype, value, _loc}, metadata) do
+    transform({:literal, subtype, value}, metadata)
+  end
+
   def transform({:literal, :integer, value}, _metadata) do
     {:ok, value}
   end
@@ -70,6 +75,8 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   end
 
   # Lists - M2.1 Core Layer
+  def transform({:list, items, _loc}, metadata), do: transform({:list, items}, metadata)
+
   def transform({:list, items}, metadata) do
     case transform_list(items, metadata) do
       {:ok, transformed_items} ->
@@ -81,6 +88,8 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   end
 
   # Maps - M2.1 Core Layer
+  def transform({:map, pairs, _loc}, metadata), do: transform({:map, pairs}, metadata)
+
   def transform({:map, pairs}, metadata) do
     with {:ok, pairs_ex} <- transform_map_pairs(pairs, metadata) do
       {:ok, {:%{}, [], pairs_ex}}
@@ -88,6 +97,8 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   end
 
   # Variables - M2.1 Core Layer
+
+  def transform({:variable, name, _loc}, metadata), do: transform({:variable, name}, metadata)
 
   def transform({:variable, name}, metadata) when is_binary(name) do
     var_atom = String.to_atom(name)
@@ -100,6 +111,10 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   # Binary Operators - M2.1 Core Layer
 
+  def transform({:binary_op, category, op, left, right, _loc}, metadata) do
+    transform({:binary_op, category, op, left, right}, metadata)
+  end
+
   def transform({:binary_op, _category, op, left, right}, metadata) do
     with {:ok, left_ex} <- transform(left, metadata),
          {:ok, right_ex} <- transform(right, metadata) do
@@ -109,6 +124,10 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   # Unary Operators - M2.1 Core Layer
 
+  def transform({:unary_op, category, op, operand, _loc}, metadata) do
+    transform({:unary_op, category, op, operand}, metadata)
+  end
+
   def transform({:unary_op, _category, op, operand}, metadata) do
     with {:ok, operand_ex} <- transform(operand, metadata) do
       {:ok, {op, [], [operand_ex]}}
@@ -116,6 +135,10 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   end
 
   # Function Calls - M2.1 Core Layer
+
+  def transform({:function_call, name, args, _loc}, metadata) do
+    transform({:function_call, name, args}, metadata)
+  end
 
   def transform({:function_call, name, args}, metadata) do
     with {:ok, args_ex} <- transform_list(args, metadata) do
@@ -138,6 +161,10 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   end
 
   # Conditionals - M2.1 Core Layer
+
+  def transform({:conditional, condition, then_branch, else_branch, _loc}, metadata) do
+    transform({:conditional, condition, then_branch, else_branch}, metadata)
+  end
 
   def transform({:conditional, condition, then_branch, else_branch}, metadata) do
     with {:ok, cond_ex} <- transform(condition, metadata),
@@ -166,6 +193,10 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   # Blocks - M2.1 Core Layer
 
+  def transform({:block, expressions, _loc}, metadata) do
+    transform({:block, expressions}, metadata)
+  end
+
   def transform({:block, expressions}, metadata) do
     with {:ok, exprs_ex} <- transform_list(expressions, metadata) do
       case exprs_ex do
@@ -178,6 +209,10 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   # Inline Match (=) - M2.1 Core Layer
   # Reconstruct Elixir pattern matching syntax
+
+  def transform({:inline_match, pattern, value, _loc}, metadata) do
+    transform({:inline_match, pattern, value}, metadata)
+  end
 
   def transform({:inline_match, pattern, value}, metadata) do
     pattern_metadata = Map.get(metadata, :pattern_metadata, %{})

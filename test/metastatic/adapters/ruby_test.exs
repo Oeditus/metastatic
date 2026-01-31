@@ -851,13 +851,24 @@ defmodule Metastatic.Adapters.RubyTest do
     test "parses and transforms simple assignment" do
       {:ok, ast} = Ruby.parse("x = 42")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:assignment, {:variable, "x"}, {:literal, :integer, 42}} = meta_ast
+
+      # Match with optional location
+      case meta_ast do
+        {:assignment, {:variable, "x", _loc}, {:literal, :integer, 42, _lit_loc}} -> :ok
+        {:assignment, {:variable, "x"}, {:literal, :integer, 42, _lit_loc}} -> :ok
+        {:assignment, {:variable, "x", _loc}, {:literal, :integer, 42}} -> :ok
+        {:assignment, {:variable, "x"}, {:literal, :integer, 42}} -> :ok
+        other -> flunk("Expected assignment, got: #{inspect(other)}")
+      end
     end
 
     test "parses and transforms arithmetic" do
       {:ok, ast} = Ruby.parse("5 + 3")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:binary_op, :arithmetic, :+, _, _} = meta_ast
+
+      # Match with optional location (5 or 6-tuple)
+      assert match?({:binary_op, :arithmetic, :+, _, _}, meta_ast) or
+               match?({:binary_op, :arithmetic, :+, _, _, _}, meta_ast)
     end
 
     test "parses and transforms method call" do

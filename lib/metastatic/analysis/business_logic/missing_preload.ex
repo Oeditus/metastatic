@@ -84,6 +84,27 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
   end
 
   @impl true
+  # Handle location-aware nodes
+  def analyze({:collection_op, :map, _fn, collection, _loc} = node, _context) do
+    # Check if collection comes from DB query
+    if from_database_query?(collection) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :performance,
+          severity: :warning,
+          message: "Mapping over database results without eager loading - potential N+1 queries",
+          node: node,
+          metadata: %{
+            suggestion: "Use preload/include/select_related to eager load associations"
+          }
+        )
+      ]
+    else
+      []
+    end
+  end
+
   def analyze({:collection_op, :map, _fn, collection} = node, _context) do
     # Check if collection comes from DB query
     if from_database_query?(collection) do
@@ -126,9 +147,28 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
 
   def analyze(_node, _context), do: []
 
+  # Handle location-aware nodes
+  defp from_database_query?({:function_call, fn_name, _args, _loc}) when is_binary(fn_name) do
+    fn_lower = String.downcase(fn_name)
+    String.contains?(fn_lower, @query_functions)
+  end
+
   defp from_database_query?({:function_call, fn_name, _args}) when is_binary(fn_name) do
     fn_lower = String.downcase(fn_name)
     String.contains?(fn_lower, @query_functions)
+  end
+
+  defp from_database_query?({:variable, name, _loc}) when is_binary(name) do
+    name_lower = String.downcase(name)
+
+    String.contains?(name_lower, [
+      "user",
+      "post",
+      "item",
+      "record",
+      "result",
+      "data"
+    ])
   end
 
   defp from_database_query?({:variable, name}) when is_binary(name) do

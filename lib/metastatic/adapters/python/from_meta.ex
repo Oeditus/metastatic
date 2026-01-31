@@ -35,6 +35,10 @@ defmodule Metastatic.Adapters.Python.FromMeta do
 
   # Literals - M2.1 Core Layer
 
+  # Literals with location (4-tuple) - delegate to 3-tuple version
+  def transform({:literal, type, value, _loc}, metadata),
+    do: transform({:literal, type, value}, metadata)
+
   def transform({:literal, :integer, value}, _metadata) do
     {:ok, %{"_type" => "Constant", "value" => value, "kind" => nil}}
   end
@@ -56,6 +60,9 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Lists - M2.1 Core Layer
+  # Lists with location
+  def transform({:list, elements, _loc}, metadata), do: transform({:list, elements}, metadata)
+
   def transform({:list, elements}, metadata) do
     with {:ok, elements_py} <- transform_list(elements, metadata) do
       {:ok, %{"_type" => "List", "elts" => elements_py, "ctx" => %{"_type" => "Load"}}}
@@ -63,6 +70,9 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Maps (Dicts) - M2.1 Core Layer
+  # Maps with location
+  def transform({:map, pairs, _loc}, metadata), do: transform({:map, pairs}, metadata)
+
   def transform({:map, pairs}, metadata) do
     {keys, values} = Enum.unzip(pairs)
 
@@ -73,12 +83,18 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Variables - M2.1 Core Layer
+  # Variables with location
+  def transform({:variable, name, _loc}, metadata), do: transform({:variable, name}, metadata)
 
   def transform({:variable, name}, _metadata) when is_binary(name) do
     {:ok, %{"_type" => "Name", "id" => name, "ctx" => %{"_type" => "Load"}}}
   end
 
   # Binary Operators - M2.1 Core Layer
+  # Binary operators with location
+  def transform({:binary_op, category, op, left, right, _loc}, metadata) do
+    transform({:binary_op, category, op, left, right}, metadata)
+  end
 
   def transform({:binary_op, category, op, left, right}, metadata) do
     case category do
@@ -94,6 +110,10 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Unary Operators - M2.1 Core Layer
+  # Unary operators with location
+  def transform({:unary_op, category, op, operand, _loc}, metadata) do
+    transform({:unary_op, category, op, operand}, metadata)
+  end
 
   def transform({:unary_op, category, op, operand}, metadata) do
     with {:ok, operand_py} <- transform(operand, metadata),
@@ -103,6 +123,10 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Function Calls - M2.1 Core Layer
+  # Function calls with location
+  def transform({:function_call, name, args, _loc}, metadata) do
+    transform({:function_call, name, args}, metadata)
+  end
 
   def transform({:function_call, name, args}, metadata) do
     with {:ok, func_py} <- build_function_ref(name),
@@ -112,6 +136,10 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Conditionals - M2.1 Core Layer
+  # Conditionals with location
+  def transform({:conditional, condition, then_branch, else_branch, _loc}, metadata) do
+    transform({:conditional, condition, then_branch, else_branch}, metadata)
+  end
 
   def transform({:conditional, condition, then_branch, else_branch}, metadata) do
     with {:ok, cond_py} <- transform(condition, metadata),
@@ -133,6 +161,9 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Blocks - M2.1 Core Layer
+  # Blocks with location
+  def transform({:block, statements, _loc}, metadata),
+    do: transform({:block, statements}, metadata)
 
   def transform({:block, statements}, metadata) do
     with {:ok, stmts_py} <- transform_list(statements, metadata) do
@@ -145,7 +176,15 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Early Returns - M2.1 Core Layer
+  # Early returns with location (3-tuple: type, value, location)
+  def transform({:early_return, value, _loc}, metadata) when not is_atom(value) do
+    # New format without kind - delegate to internal handler
+    with {:ok, value_py} <- transform_or_nil(value, metadata) do
+      {:ok, %{"_type" => "Return", "value" => value_py}}
+    end
+  end
 
+  # Legacy format with kind (4-tuple)
   def transform({:early_return, :return, value}, metadata) do
     with {:ok, value_py} <- transform_or_nil(value, metadata) do
       {:ok, %{"_type" => "Return", "value" => value_py}}
@@ -161,6 +200,10 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   # Assignments - M2.1 Core Layer
+  # Assignments with location
+  def transform({:assignment, target, value, _loc}, metadata) do
+    transform({:assignment, target, value}, metadata)
+  end
 
   def transform({:assignment, target, value}, metadata) do
     with {:ok, target_py} <- transform_assignment_target(target, metadata),
@@ -179,11 +222,21 @@ defmodule Metastatic.Adapters.Python.FromMeta do
 
   # Loops - M2.2 Extended Layer
 
+  # Handle loops with location (6-tuple)
+  def transform({:loop, :while, condition, body, _loc}, metadata) do
+    transform({:loop, :while, condition, body}, metadata)
+  end
+
   def transform({:loop, :while, condition, body}, metadata) do
     with {:ok, test_py} <- transform(condition, metadata),
          {:ok, body_py} <- transform_to_body(body, metadata) do
       {:ok, %{"_type" => "While", "test" => test_py, "body" => body_py, "orelse" => []}}
     end
+  end
+
+  # Handle for loops with location (6-tuple)
+  def transform({:loop, :for_each, iterator, collection, body, _loc}, metadata) do
+    transform({:loop, :for_each, iterator, collection, body}, metadata)
   end
 
   def transform({:loop, :for_each, iterator, collection, body}, metadata) do
@@ -320,8 +373,16 @@ defmodule Metastatic.Adapters.Python.FromMeta do
 
   # Helper Functions
 
+  defp transform_assignment_target({:variable, name, _loc}, metadata) do
+    transform_assignment_target({:variable, name}, metadata)
+  end
+
   defp transform_assignment_target({:variable, name}, _metadata) when is_binary(name) do
     {:ok, %{"_type" => "Name", "id" => name, "ctx" => %{"_type" => "Store"}}}
+  end
+
+  defp transform_assignment_target({:tuple, elements, _loc}, metadata) do
+    transform_assignment_target({:tuple, elements}, metadata)
   end
 
   defp transform_assignment_target({:tuple, elements}, metadata) do

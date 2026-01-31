@@ -44,9 +44,41 @@ defmodule Metastatic.AST do
   # ----- M2 Node Type Definition -----
 
   @typedoc """
+  Source location information from the original source code.
+
+  Preserves line and column information to enable precise error reporting
+  and code analysis. All fields use 1-indexed line numbers and 0-indexed
+  column offsets to match common editor conventions.
+
+  ## Fields
+
+  - `:line` - 1-indexed line number (required)
+  - `:col` - 0-indexed column offset (optional)
+  - `:end_line` - 1-indexed end line number (optional)
+  - `:end_col` - 0-indexed end column offset (optional)
+
+  ## Examples
+
+      %{line: 10}
+      %{line: 10, col: 5}
+      %{line: 10, col: 5, end_line: 10, end_col: 15}
+  """
+  @type location :: %{
+          required(:line) => pos_integer(),
+          optional(:col) => non_neg_integer(),
+          optional(:end_line) => pos_integer(),
+          optional(:end_col) => non_neg_integer()
+        }
+
+  @typedoc """
   A MetaAST represents a programming language construct at the meta-level (M2).
 
   This is the union of all meta-types across the three layers.
+
+  ## Location Information
+
+  All MetaAST nodes can optionally carry source location information as the
+  final element of the tuple. This enables precise error reporting and analysis.
   """
   # M2.1: Core layer - Universal programming concepts
   @type meta_ast ::
@@ -97,8 +129,11 @@ defmodule Metastatic.AST do
       {:literal, :string, "hello"}
       {:literal, :boolean, true}
       {:literal, :null, nil}
+      {:literal, :integer, 42, %{line: 10}}
   """
-  @type literal :: {:literal, semantic_type(), value :: term()}
+  @type literal ::
+          {:literal, semantic_type(), value :: term()}
+          | {:literal, semantic_type(), value :: term(), location()}
 
   @typedoc """
   Semantic type classification for literals.
@@ -129,8 +164,11 @@ defmodule Metastatic.AST do
 
       {:variable, "x"}
       {:variable, "userName"}
+      {:variable, "x", %{line: 5}}
   """
-  @type variable :: {:variable, name :: String.t()}
+  @type variable ::
+          {:variable, name :: String.t()}
+          | {:variable, name :: String.t(), location()}
 
   @typedoc """
   M2 meta-type: List collection.
@@ -150,8 +188,11 @@ defmodule Metastatic.AST do
       {:list, []}
       {:list, [{:literal, :integer, 1}, {:literal, :integer, 2}]}
       {:list, [{:variable, "x"}, {:variable, "y"}]}
+      {:list, [{:literal, :integer, 1}], %{line: 3}}
   """
-  @type list_literal :: {:list, elements :: [meta_ast()]}
+  @type list_literal ::
+          {:list, elements :: [meta_ast()]}
+          | {:list, elements :: [meta_ast()], location()}
 
   @typedoc """
   M2 meta-type: Map/Dictionary collection.
@@ -171,8 +212,11 @@ defmodule Metastatic.AST do
       {:map, []}
       {:map, [{{:literal, :string, "name"}, {:literal, :string, "Alice"}}]}
       {:map, [{{:variable, "key"}, {:variable, "value"}}]}
+      {:map, [], %{line: 7}}
   """
-  @type map_literal :: {:map, pairs :: [{key :: meta_ast(), value :: meta_ast()}]}
+  @type map_literal ::
+          {:map, pairs :: [{key :: meta_ast(), value :: meta_ast()}]}
+          | {:map, pairs :: [{key :: meta_ast(), value :: meta_ast()}], location()}
 
   @typedoc """
   M2 meta-type: Binary operation.
@@ -191,10 +235,13 @@ defmodule Metastatic.AST do
       {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
       {:binary_op, :comparison, :>, {:variable, "age"}, {:literal, :integer, 18}}
       {:binary_op, :boolean, :and, condition1, condition2}
+      {:binary_op, :arithmetic, :+, left, right, %{line: 10}}
   """
   @type binary_op ::
           {:binary_op, :arithmetic | :comparison | :boolean, op :: atom(), left :: meta_ast(),
            right :: meta_ast()}
+          | {:binary_op, :arithmetic | :comparison | :boolean, op :: atom(), left :: meta_ast(),
+             right :: meta_ast(), location()}
 
   @typedoc """
   M2 meta-type: Unary operation.
@@ -205,9 +252,11 @@ defmodule Metastatic.AST do
 
       {:unary_op, :arithmetic, :-, {:variable, "x"}}
       {:unary_op, :boolean, :not, {:variable, "flag"}}
+      {:unary_op, :arithmetic, :-, {:variable, "x"}, %{line: 15}}
   """
   @type unary_op ::
           {:unary_op, :arithmetic | :boolean, op :: atom(), operand :: meta_ast()}
+          | {:unary_op, :arithmetic | :boolean, op :: atom(), operand :: meta_ast(), location()}
 
   @typedoc """
   M2 meta-type: Function call.
@@ -223,8 +272,11 @@ defmodule Metastatic.AST do
 
       {:function_call, "add", [{:variable, "x"}, {:variable, "y"}]}
       {:function_call, "max", [a, b]}
+      {:function_call, "print", [arg], %{line: 20}}
   """
-  @type function_call :: {:function_call, name :: String.t(), args :: [meta_ast()]}
+  @type function_call ::
+          {:function_call, name :: String.t(), args :: [meta_ast()]}
+          | {:function_call, name :: String.t(), args :: [meta_ast()], location()}
 
   @typedoc """
   M2 meta-type: Conditional expression.
@@ -242,10 +294,13 @@ defmodule Metastatic.AST do
        {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
        {:literal, :string, "positive"},
        {:literal, :string, "non-positive"}}
+      {:conditional, cond, then_br, else_br, %{line: 25}}
   """
   @type conditional ::
           {:conditional, condition :: meta_ast(), then_branch :: meta_ast(),
            else_branch :: meta_ast() | nil}
+          | {:conditional, condition :: meta_ast(), then_branch :: meta_ast(),
+             else_branch :: meta_ast() | nil, location()}
 
   @typedoc """
   M2 meta-type: Early return.
@@ -255,8 +310,11 @@ defmodule Metastatic.AST do
   ## Examples
 
       {:early_return, {:variable, "result"}}
+      {:early_return, {:variable, "result"}, %{line: 30}}
   """
-  @type early_return :: {:early_return, value :: meta_ast()}
+  @type early_return ::
+          {:early_return, value :: meta_ast()}
+          | {:early_return, value :: meta_ast(), location()}
 
   @typedoc """
   M2 meta-type: Block of statements.
@@ -266,8 +324,11 @@ defmodule Metastatic.AST do
   ## Examples
 
       {:block, [stmt1, stmt2, stmt3]}
+      {:block, [stmt1, stmt2], %{line: 35}}
   """
-  @type block :: {:block, statements :: [meta_ast()]}
+  @type block ::
+          {:block, statements :: [meta_ast()]}
+          | {:block, statements :: [meta_ast()], location()}
 
   @typedoc """
   M2 meta-type: Assignment (imperative binding/mutation).
@@ -299,8 +360,11 @@ defmodule Metastatic.AST do
       # Augmented assignment: x += 1 (desugared)
       {:assignment, {:variable, "x"},
        {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
+      {:assignment, target, value, %{line: 40}}
   """
-  @type assignment :: {:assignment, target :: meta_ast(), value :: meta_ast()}
+  @type assignment ::
+          {:assignment, target :: meta_ast(), value :: meta_ast()}
+          | {:assignment, target :: meta_ast(), value :: meta_ast(), location()}
 
   @typedoc """
   M2 meta-type: Inline match (pattern matching).
@@ -340,8 +404,11 @@ defmodule Metastatic.AST do
       {:inline_match,
        {:pin, {:variable, "x"}},
        {:literal, :integer, 5}}
+      {:inline_match, pattern, value, %{line: 45}}
   """
-  @type inline_match :: {:inline_match, pattern :: meta_ast(), value :: meta_ast()}
+  @type inline_match ::
+          {:inline_match, pattern :: meta_ast(), value :: meta_ast()}
+          | {:inline_match, pattern :: meta_ast(), value :: meta_ast(), location()}
 
   # ----- M2.2: Extended Layer - Common Meta-Patterns -----
   # These represent concepts that exist in MOST languages, with variations
@@ -739,7 +806,48 @@ defmodule Metastatic.AST do
   @spec conforms?(term()) :: boolean()
   def conforms?(ast) do
     case ast do
-      # M2.1: Core
+      # M2.1: Core - with location
+      {:literal, type, _value, loc}
+      when type in [:integer, :float, :string, :boolean, :null, :symbol, :regex, :collection] ->
+        valid_location?(loc)
+
+      {:variable, name, loc} when is_binary(name) ->
+        valid_location?(loc)
+
+      {:list, elements, loc} when is_list(elements) ->
+        valid_location?(loc) and Enum.all?(elements, &conforms?/1)
+
+      {:map, pairs, loc} when is_list(pairs) ->
+        valid_location?(loc) and
+          Enum.all?(pairs, fn {key, value} -> conforms?(key) and conforms?(value) end)
+
+      {:binary_op, category, _op, left, right, loc}
+      when category in [:arithmetic, :comparison, :boolean] ->
+        valid_location?(loc) and conforms?(left) and conforms?(right)
+
+      {:unary_op, category, _op, operand, loc} when category in [:arithmetic, :boolean] ->
+        valid_location?(loc) and conforms?(operand)
+
+      {:function_call, name, args, loc} when is_binary(name) and is_list(args) ->
+        valid_location?(loc) and Enum.all?(args, &conforms?/1)
+
+      {:conditional, condition, then_branch, else_branch, loc} ->
+        valid_location?(loc) and conforms?(condition) and conforms?(then_branch) and
+          (is_nil(else_branch) or conforms?(else_branch))
+
+      {:early_return, value, loc} ->
+        valid_location?(loc) and conforms?(value)
+
+      {:block, statements, loc} when is_list(statements) ->
+        valid_location?(loc) and Enum.all?(statements, &conforms?/1)
+
+      {:assignment, target, value, loc} ->
+        valid_location?(loc) and conforms?(target) and conforms?(value)
+
+      {:inline_match, pattern, value, loc} ->
+        valid_location?(loc) and conforms?(pattern) and conforms?(value)
+
+      # M2.1: Core - without location (backward compatibility)
       {:literal, type, _value}
       when type in [:integer, :float, :string, :boolean, :null, :symbol, :regex, :collection] ->
         true
@@ -869,6 +977,74 @@ defmodule Metastatic.AST do
   # ----- Helper Functions -----
 
   @doc """
+  Extract location information from a MetaAST node if present.
+
+  Returns the location map if the node carries location information,
+  or `nil` if no location is attached.
+
+  ## Examples
+
+      iex> ast = {:literal, :integer, 42, %{line: 10, col: 5}}
+      iex> Metastatic.AST.location(ast)
+      %{line: 10, col: 5}
+
+      iex> ast = {:literal, :integer, 42}
+      iex> Metastatic.AST.location(ast)
+      nil
+
+      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}, %{line: 15}}
+      iex> Metastatic.AST.location(ast)
+      %{line: 15}
+  """
+  @spec location(meta_ast()) :: location() | nil
+  def location(ast) when is_tuple(ast) do
+    size = tuple_size(ast)
+
+    if size > 2 do
+      last_elem = elem(ast, size - 1)
+
+      if is_map(last_elem) and Map.has_key?(last_elem, :line) do
+        last_elem
+      else
+        nil
+      end
+    else
+      nil
+    end
+  end
+
+  def location(_), do: nil
+
+  @doc """
+  Attach location information to a MetaAST node.
+
+  If location is `nil`, returns the node unchanged. Otherwise, appends
+  the location map as the final element of the tuple.
+
+  ## Examples
+
+      iex> ast = {:literal, :integer, 42}
+      iex> Metastatic.AST.with_location(ast, %{line: 10})
+      {:literal, :integer, 42, %{line: 10}}
+
+      iex> ast = {:literal, :integer, 42}
+      iex> Metastatic.AST.with_location(ast, nil)
+      {:literal, :integer, 42}
+
+      iex> ast = {:variable, "x"}
+      iex> Metastatic.AST.with_location(ast, %{line: 5, col: 2})
+      {:variable, "x", %{line: 5, col: 2}}
+  """
+  @spec with_location(meta_ast(), location() | nil) :: meta_ast()
+  def with_location(ast, nil), do: ast
+
+  def with_location(ast, loc) when is_tuple(ast) and is_map(loc) do
+    Tuple.insert_at(ast, tuple_size(ast), loc)
+  end
+
+  def with_location(ast, _loc), do: ast
+
+  @doc """
   Extract all variables referenced in an AST.
 
   Useful for analyzing dependencies and scope.
@@ -955,9 +1131,19 @@ defmodule Metastatic.AST do
   defp valid_param?({:default, name, default}) when is_binary(name), do: conforms?(default)
   defp valid_param?(_), do: false
 
+  # Validate location structure
+  defp valid_location?(%{line: line}) when is_integer(line) and line > 0, do: true
+  defp valid_location?(_), do: false
+
   defp collect_variables({:variable, name}, acc), do: MapSet.put(acc, name)
+  defp collect_variables({:variable, name, _loc}, acc), do: MapSet.put(acc, name)
 
   defp collect_variables({:binary_op, _, _, left, right}, acc) do
+    acc = collect_variables(left, acc)
+    collect_variables(right, acc)
+  end
+
+  defp collect_variables({:binary_op, _, _, left, right, _loc}, acc) do
     acc = collect_variables(left, acc)
     collect_variables(right, acc)
   end
@@ -966,7 +1152,15 @@ defmodule Metastatic.AST do
     collect_variables(operand, acc)
   end
 
+  defp collect_variables({:unary_op, _, _, operand, _loc}, acc) do
+    collect_variables(operand, acc)
+  end
+
   defp collect_variables({:function_call, _, args}, acc) do
+    Enum.reduce(args, acc, fn arg, a -> collect_variables(arg, a) end)
+  end
+
+  defp collect_variables({:function_call, _, args, _loc}, acc) do
     Enum.reduce(args, acc, fn arg, a -> collect_variables(arg, a) end)
   end
 
@@ -976,7 +1170,17 @@ defmodule Metastatic.AST do
     if else_branch, do: collect_variables(else_branch, acc), else: acc
   end
 
+  defp collect_variables({:conditional, condition, then_branch, else_branch, _loc}, acc) do
+    acc = collect_variables(condition, acc)
+    acc = collect_variables(then_branch, acc)
+    if else_branch, do: collect_variables(else_branch, acc), else: acc
+  end
+
   defp collect_variables({:block, statements}, acc) do
+    Enum.reduce(statements, acc, fn stmt, a -> collect_variables(stmt, a) end)
+  end
+
+  defp collect_variables({:block, statements, _loc}, acc) do
     Enum.reduce(statements, acc, fn stmt, a -> collect_variables(stmt, a) end)
   end
 
@@ -985,7 +1189,17 @@ defmodule Metastatic.AST do
     collect_variables(value, acc)
   end
 
+  defp collect_variables({:assignment, target, value, _loc}, acc) do
+    acc = collect_variables(target, acc)
+    collect_variables(value, acc)
+  end
+
   defp collect_variables({:inline_match, pattern, value}, acc) do
+    acc = collect_variables(pattern, acc)
+    collect_variables(value, acc)
+  end
+
+  defp collect_variables({:inline_match, pattern, value, _loc}, acc) do
     acc = collect_variables(pattern, acc)
     collect_variables(value, acc)
   end
@@ -998,7 +1212,18 @@ defmodule Metastatic.AST do
     Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
   end
 
+  defp collect_variables({:list, elements, _loc}, acc) do
+    Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
+  end
+
   defp collect_variables({:map, pairs}, acc) do
+    Enum.reduce(pairs, acc, fn {key, value}, a ->
+      a = collect_variables(key, a)
+      collect_variables(value, a)
+    end)
+  end
+
+  defp collect_variables({:map, pairs, _loc}, acc) do
     Enum.reduce(pairs, acc, fn {key, value}, a ->
       a = collect_variables(key, a)
       collect_variables(value, a)

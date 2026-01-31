@@ -155,6 +155,55 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
     end
   end
 
+  # AST equivalence (ignoring location metadata)
+
+  @spec ast_equivalent?(term(), term()) :: boolean()
+  defp ast_equivalent?(ast1, ast2) do
+    strip_locations(ast1) == strip_locations(ast2)
+  end
+
+  # Strip location metadata from AST nodes for comparison
+  defp strip_locations(ast) when is_tuple(ast) do
+    case ast do
+      # Handle tuples with location as last element (map type)
+      tuple when tuple_size(tuple) > 0 and is_map(elem(tuple, tuple_size(tuple) - 1)) ->
+        last_elem = elem(tuple, tuple_size(tuple) - 1)
+
+        if Map.has_key?(last_elem, :line) or Map.has_key?(last_elem, :col) do
+          # This is a location map - remove it
+          tuple
+          |> Tuple.to_list()
+          |> Enum.take(tuple_size(tuple) - 1)
+          |> List.to_tuple()
+          |> tuple_map_elements(&strip_locations/1)
+        else
+          # Not a location, keep tuple and recurse
+          tuple_map_elements(tuple, &strip_locations/1)
+        end
+
+      _ ->
+        tuple_map_elements(ast, &strip_locations/1)
+    end
+  end
+
+  defp strip_locations(list) when is_list(list) do
+    Enum.map(list, &strip_locations/1)
+  end
+
+  defp strip_locations(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {k, strip_locations(v)} end)
+  end
+
+  defp strip_locations(other), do: other
+
+  # Helper to map over tuple elements
+  defp tuple_map_elements(tuple, fun) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.map(fun)
+    |> List.to_tuple()
+  end
+
   # Equivalence validation
 
   @spec validate_equivalence(String.t(), String.t(), keyword()) :: no_return()
@@ -172,7 +221,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
          {:ok, source2} <- CLI.read_file(file2),
          {:ok, doc1} <- Builder.from_source(source1, lang1),
          {:ok, doc2} <- Builder.from_source(source2, lang2) do
-      if doc1.ast == doc2.ast do
+      if ast_equivalent?(doc1.ast, doc2.ast) do
         Mix.shell().info(CLI.format_success("Semantically equivalent"))
 
         if verbose do

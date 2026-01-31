@@ -39,6 +39,8 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   This enables high-fidelity round-trips (M1 → M2 → M1).
   """
 
+  alias Metastatic.AST
+
   @doc """
   Transform Python AST to MetaAST.
 
@@ -76,9 +78,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Literals - M2.1 Core Layer
 
   # Constant node (Python 3.8+)
-  def transform(%{"_type" => "Constant", "value" => value}) do
+  def transform(%{"_type" => "Constant", "value" => value} = node) do
     literal = infer_literal_type(value)
-    {:ok, literal, %{}}
+    {:ok, add_location(literal, node), %{}}
   end
 
   # Legacy literal nodes (Python 3.7 compatibility)
@@ -108,28 +110,32 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Variables - M2.1 Core Layer
 
-  def transform(%{"_type" => "Name", "id" => name}) do
-    {:ok, {:variable, name}, %{}}
+  def transform(%{"_type" => "Name", "id" => name} = node) do
+    {:ok, add_location({:variable, name}, node), %{}}
   end
 
   # Binary Operators - M2.1 Core Layer
 
-  def transform(%{"_type" => "BinOp", "op" => op, "left" => left, "right" => right}) do
+  def transform(%{"_type" => "BinOp", "op" => op, "left" => left, "right" => right} = node) do
     with {:ok, op_meta} <- transform_binop(op),
          {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
       {category, operator} = op_meta
-      {:ok, {:binary_op, category, operator, left_meta, right_meta}, %{}}
+      ast = {:binary_op, category, operator, left_meta, right_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
   # Comparison Operators - M2.1 Core Layer
 
-  def transform(%{"_type" => "Compare", "left" => left, "ops" => [op], "comparators" => [right]}) do
+  def transform(
+        %{"_type" => "Compare", "left" => left, "ops" => [op], "comparators" => [right]} = node
+      ) do
     with {:ok, op_meta} <- transform_compare_op(op),
          {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :comparison, op_meta, left_meta, right_meta}, %{}}
+      ast = {:binary_op, :comparison, op_meta, left_meta, right_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
@@ -150,11 +156,12 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Boolean Operators - M2.1 Core Layer
 
-  def transform(%{"_type" => "BoolOp", "op" => op, "values" => [left, right]}) do
+  def transform(%{"_type" => "BoolOp", "op" => op, "values" => [left, right]} = node) do
     with {:ok, op_meta} <- transform_bool_op(op),
          {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :boolean, op_meta, left_meta, right_meta}, %{}}
+      ast = {:binary_op, :boolean, op_meta, left_meta, right_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
@@ -177,47 +184,52 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Unary Operators - M2.1 Core Layer
 
-  def transform(%{"_type" => "UnaryOp", "op" => op, "operand" => operand}) do
+  def transform(%{"_type" => "UnaryOp", "op" => op, "operand" => operand} = node) do
     with {:ok, {category, operator}} <- transform_unary_op(op),
          {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, category, operator, operand_meta}, %{}}
+      ast = {:unary_op, category, operator, operand_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
   # Function Calls - M2.1 Core Layer
 
-  def transform(%{"_type" => "Call", "func" => func, "args" => args}) do
+  def transform(%{"_type" => "Call", "func" => func, "args" => args} = node) do
     with {:ok, func_name} <- extract_function_name(func),
          {:ok, args_meta} <- transform_list(args) do
-      {:ok, {:function_call, func_name, args_meta}, %{}}
+      ast = {:function_call, func_name, args_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
   # Conditionals - M2.1 Core Layer
 
   # If statement
-  def transform(%{"_type" => "If", "test" => test, "body" => body, "orelse" => orelse}) do
+  def transform(%{"_type" => "If", "test" => test, "body" => body, "orelse" => orelse} = node) do
     with {:ok, test_meta, _} <- transform(test),
          {:ok, body_meta, _} <- transform_body(body),
          {:ok, else_meta, _} <- transform_body_or_nil(orelse) do
-      {:ok, {:conditional, test_meta, body_meta, else_meta}, %{}}
+      ast = {:conditional, test_meta, body_meta, else_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
   # If expression (ternary)
-  def transform(%{"_type" => "IfExp", "test" => test, "body" => body, "orelse" => orelse}) do
+  def transform(%{"_type" => "IfExp", "test" => test, "body" => body, "orelse" => orelse} = node) do
     with {:ok, test_meta, _} <- transform(test),
          {:ok, body_meta, _} <- transform(body),
          {:ok, else_meta, _} <- transform(orelse) do
-      {:ok, {:conditional, test_meta, body_meta, else_meta}, %{}}
+      ast = {:conditional, test_meta, body_meta, else_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
   # Early Returns - M2.1 Core Layer
 
-  def transform(%{"_type" => "Return", "value" => value}) do
+  def transform(%{"_type" => "Return", "value" => value} = node) do
     with {:ok, value_meta, _} <- transform_or_nil(value) do
-      {:ok, {:early_return, :return, value_meta}, %{}}
+      ast = {:early_return, value_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
@@ -233,7 +245,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # In Python, = is assignment (imperative binding/mutation)
 
   # Simple assignment: x = 5
-  def transform(%{"_type" => "Assign", "targets" => [target], "value" => value}) do
+  def transform(%{"_type" => "Assign", "targets" => [target], "value" => value} = node) do
     with {:ok, target_meta, target_metadata} <- transform(target),
          {:ok, value_meta, value_metadata} <- transform(value) do
       metadata = %{
@@ -241,7 +253,8 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         value_metadata: value_metadata
       }
 
-      {:ok, {:assignment, target_meta, value_meta}, metadata}
+      ast = {:assignment, target_meta, value_meta}
+      {:ok, add_location(ast, node), metadata}
     end
   end
 
@@ -311,18 +324,20 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Lists - M2.1 Core Layer
-  def transform(%{"_type" => "List", "elts" => elements}) do
+  def transform(%{"_type" => "List", "elts" => elements} = node) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:list, elements_meta}, %{}}
+      ast = {:list, elements_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
   # Dicts (Maps) - M2.1 Core Layer
-  def transform(%{"_type" => "Dict", "keys" => keys, "values" => values}) do
+  def transform(%{"_type" => "Dict", "keys" => keys, "values" => values} = node) do
     with {:ok, keys_meta} <- transform_list(keys),
          {:ok, values_meta} <- transform_list(values) do
       pairs = Enum.zip(keys_meta, values_meta)
-      {:ok, {:map, pairs}, %{}}
+      ast = {:map, pairs}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
@@ -336,19 +351,21 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Loops - M2.2 Extended Layer
 
   # While loop
-  def transform(%{"_type" => "While", "test" => test, "body" => body}) do
+  def transform(%{"_type" => "While", "test" => test, "body" => body} = node) do
     with {:ok, test_meta, _} <- transform(test),
          {:ok, body_meta, _} <- transform_body(body) do
-      {:ok, {:loop, :while, test_meta, body_meta}, %{}}
+      ast = {:loop, :while, test_meta, body_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
   # For loop
-  def transform(%{"_type" => "For", "target" => target, "iter" => iter, "body" => body}) do
+  def transform(%{"_type" => "For", "target" => target, "iter" => iter, "body" => body} = node) do
     with {:ok, target_meta, _} <- transform(target),
          {:ok, iter_meta, _} <- transform(iter),
          {:ok, body_meta, _} <- transform_body(body) do
-      {:ok, {:loop, :for_each, target_meta, iter_meta, body_meta}, %{}}
+      ast = {:loop, :for_each, target_meta, iter_meta, body_meta}
+      {:ok, add_location(ast, node), %{}}
     end
   end
 
@@ -700,4 +717,26 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Extract variable name from MetaAST node
   defp extract_variable_name({:variable, name}), do: name
   defp extract_variable_name(_), do: "_x"
+
+  # Add location information from Python AST node to MetaAST
+  defp add_location(ast, %{"lineno" => line} = node) do
+    loc = %{line: line}
+
+    loc =
+      if Map.has_key?(node, "col_offset"), do: Map.put(loc, :col, node["col_offset"]), else: loc
+
+    loc =
+      if Map.has_key?(node, "end_lineno"),
+        do: Map.put(loc, :end_line, node["end_lineno"]),
+        else: loc
+
+    loc =
+      if Map.has_key?(node, "end_col_offset"),
+        do: Map.put(loc, :end_col, node["end_col_offset"]),
+        else: loc
+
+    AST.with_location(ast, loc)
+  end
+
+  defp add_location(ast, _node), do: ast
 end

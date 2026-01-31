@@ -160,6 +160,8 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
         {:collection_op, :filter, _lambda, filter_var}
       ] ->
         if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+          loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
+
           [
             Analyzer.issue(
               analyzer: __MODULE__,
@@ -168,6 +170,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
               message:
                 "Inefficient filter: fetching all data then filtering in memory - push filter to data source",
               node: {:block, [fetch_expr, filter_var]},
+              location: make_location(loc),
               metadata: %{
                 suggestion:
                   "Use database query filters (WHERE clause) instead of fetching all then filtering"
@@ -184,6 +187,8 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
         {:collection_op, :filter, _lambda, filter_var}
       ] ->
         if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+          loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
+
           [
             Analyzer.issue(
               analyzer: __MODULE__,
@@ -192,6 +197,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
               message:
                 "Inefficient filter: fetching all data then filtering in memory - push filter to data source",
               node: {:block, [fetch_expr, filter_var]},
+              location: make_location(loc),
               metadata: %{
                 suggestion:
                   "Use database query filters (WHERE clause) instead of fetching all then filtering"
@@ -207,17 +213,32 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
     end)
   end
 
-  # Check if two variable references match
+  # Check if two variable references match (handle location-aware nodes)
   defp variables_match?({:variable, name1}, {:variable, name2}), do: name1 == name2
+  defp variables_match?({:variable, name1, _loc}, {:variable, name2}), do: name1 == name2
+  defp variables_match?({:variable, name1}, {:variable, name2, _loc}), do: name1 == name2
+  defp variables_match?({:variable, name1, _loc1}, {:variable, name2, _loc2}), do: name1 == name2
   defp variables_match?(_, _), do: false
 
-  # Check if expression is a "fetch all" operation
+  # Check if expression is a "fetch all" operation (handle location-aware nodes)
+  defp fetch_all?({:function_call, func_name, _args, _loc}) when is_atom(func_name) do
+    fetch_all_function?(func_name)
+  end
+
   defp fetch_all?({:function_call, func_name, _args}) when is_atom(func_name) do
+    fetch_all_function?(func_name)
+  end
+
+  defp fetch_all?({:function_call, func_name, _args, _loc}) when is_binary(func_name) do
     fetch_all_function?(func_name)
   end
 
   defp fetch_all?({:function_call, func_name, _args}) when is_binary(func_name) do
     fetch_all_function?(func_name)
+  end
+
+  defp fetch_all?({:attribute_access, _obj, method, _loc}) when is_atom(method) do
+    fetch_all_function?(method)
   end
 
   defp fetch_all?({:attribute_access, _obj, method}) when is_atom(method) do
@@ -253,4 +274,15 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
   end
 
   defp fetch_all_function?(_), do: false
+
+  # Convert AST location to analyzer location format
+  defp make_location(nil), do: %{line: nil, column: nil, path: nil}
+
+  defp make_location(%{line: line} = loc) do
+    %{
+      line: line,
+      column: Map.get(loc, :col),
+      path: nil
+    }
+  end
 end

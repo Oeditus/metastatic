@@ -89,7 +89,9 @@ defmodule Metastatic.Adapters.ElixirTest do
 
     test "preserves variable context" do
       ast = {:my_var, [line: 10], MyModule}
-      assert {:ok, {:variable, "my_var"}, metadata} = ToMeta.transform(ast)
+      assert {:ok, var_ast, metadata} = ToMeta.transform(ast)
+      # Variable may have location as last element
+      assert match?({:variable, "my_var"}, var_ast) or match?({:variable, "my_var", _}, var_ast)
       assert %{context: MyModule, elixir_meta: [line: 10]} = metadata
     end
   end
@@ -97,67 +99,132 @@ defmodule Metastatic.Adapters.ElixirTest do
   describe "ToMeta - binary operators" do
     test "transforms arithmetic addition" do
       ast = {:+, [], [{:x, [], nil}, 5]}
-      assert {:ok, {:binary_op, :arithmetic, :+, left, right}, %{}} = ToMeta.transform(ast)
-      assert {:variable, "x"} = left
+      assert {:ok, result, %{}} = ToMeta.transform(ast)
+      # Binary op may have location as last element
+      assert match?({:binary_op, :arithmetic, :+, _, _}, result) or
+               match?({:binary_op, :arithmetic, :+, _, _, _}, result)
+
+      {left, right} =
+        case result do
+          {:binary_op, :arithmetic, :+, l, r} -> {l, r}
+          {:binary_op, :arithmetic, :+, l, r, _loc} -> {l, r}
+        end
+
+      assert match?({:variable, "x"}, left) or match?({:variable, "x", _}, left)
       assert {:literal, :integer, 5} = right
     end
 
     test "transforms arithmetic subtraction" do
       ast = {:-, [], [10, {:y, [], nil}]}
-      assert {:ok, {:binary_op, :arithmetic, :-, left, right}, %{}} = ToMeta.transform(ast)
+      assert {:ok, result, %{}} = ToMeta.transform(ast)
+
+      assert match?({:binary_op, :arithmetic, :-, _, _}, result) or
+               match?({:binary_op, :arithmetic, :-, _, _, _}, result)
+
+      {left, right} =
+        case result do
+          {:binary_op, :arithmetic, :-, l, r} -> {l, r}
+          {:binary_op, :arithmetic, :-, l, r, _loc} -> {l, r}
+        end
+
       assert {:literal, :integer, 10} = left
-      assert {:variable, "y"} = right
+      assert match?({:variable, "y"}, right) or match?({:variable, "y", _}, right)
     end
 
     test "transforms multiplication and division" do
       mult_ast = {:*, [], [2, 3]}
-      assert {:ok, {:binary_op, :arithmetic, :*, _, _}, %{}} = ToMeta.transform(mult_ast)
+      assert {:ok, result, %{}} = ToMeta.transform(mult_ast)
+
+      assert match?({:binary_op, :arithmetic, :*, _, _}, result) or
+               match?({:binary_op, :arithmetic, :*, _, _, _}, result)
 
       div_ast = {:/, [], [10, 2]}
-      assert {:ok, {:binary_op, :arithmetic, :/, _, _}, %{}} = ToMeta.transform(div_ast)
+      assert {:ok, result, %{}} = ToMeta.transform(div_ast)
+
+      assert match?({:binary_op, :arithmetic, :/, _, _}, result) or
+               match?({:binary_op, :arithmetic, :/, _, _, _}, result)
     end
 
     test "transforms comparison operators" do
       eq_ast = {:==, [], [1, 2]}
-      assert {:ok, {:binary_op, :comparison, :==, _, _}, %{}} = ToMeta.transform(eq_ast)
+      assert {:ok, result, %{}} = ToMeta.transform(eq_ast)
+
+      assert match?({:binary_op, :comparison, :==, _, _}, result) or
+               match?({:binary_op, :comparison, :==, _, _, _}, result)
 
       lt_ast = {:<, [], [1, 2]}
-      assert {:ok, {:binary_op, :comparison, :<, _, _}, %{}} = ToMeta.transform(lt_ast)
+      assert {:ok, result, %{}} = ToMeta.transform(lt_ast)
+
+      assert match?({:binary_op, :comparison, :<, _, _}, result) or
+               match?({:binary_op, :comparison, :<, _, _, _}, result)
 
       gte_ast = {:>=, [], [5, 3]}
-      assert {:ok, {:binary_op, :comparison, :>=, _, _}, %{}} = ToMeta.transform(gte_ast)
+      assert {:ok, result, %{}} = ToMeta.transform(gte_ast)
+
+      assert match?({:binary_op, :comparison, :>=, _, _}, result) or
+               match?({:binary_op, :comparison, :>=, _, _, _}, result)
     end
 
     test "transforms boolean operators" do
       and_ast = {:and, [], [true, false]}
-      assert {:ok, {:binary_op, :boolean, :and, _, _}, %{}} = ToMeta.transform(and_ast)
+      assert {:ok, result, %{}} = ToMeta.transform(and_ast)
+
+      assert match?({:binary_op, :boolean, :and, _, _}, result) or
+               match?({:binary_op, :boolean, :and, _, _, _}, result)
 
       or_ast = {:or, [], [true, false]}
-      assert {:ok, {:binary_op, :boolean, :or, _, _}, %{}} = ToMeta.transform(or_ast)
+      assert {:ok, result, %{}} = ToMeta.transform(or_ast)
+
+      assert match?({:binary_op, :boolean, :or, _, _}, result) or
+               match?({:binary_op, :boolean, :or, _, _, _}, result)
     end
 
     test "transforms string concatenation" do
       ast = {:<>, [], ["hello", " world"]}
-      assert {:ok, {:binary_op, :arithmetic, :<>, _, _}, %{}} = ToMeta.transform(ast)
+      assert {:ok, result, %{}} = ToMeta.transform(ast)
+
+      assert match?({:binary_op, :arithmetic, :<>, _, _}, result) or
+               match?({:binary_op, :arithmetic, :<>, _, _, _}, result)
     end
   end
 
   describe "ToMeta - unary operators" do
     test "transforms logical not" do
       ast = {:not, [], [true]}
-      assert {:ok, {:unary_op, :boolean, :not, operand}, %{}} = ToMeta.transform(ast)
+      assert {:ok, result, %{}} = ToMeta.transform(ast)
+
+      operand =
+        case result do
+          {:unary_op, :boolean, :not, op} -> op
+          {:unary_op, :boolean, :not, op, _loc} -> op
+        end
+
       assert {:literal, :boolean, true} = operand
     end
 
     test "transforms negation" do
       ast = {:-, [], [42]}
-      assert {:ok, {:unary_op, :arithmetic, :-, operand}, %{}} = ToMeta.transform(ast)
+      assert {:ok, result, %{}} = ToMeta.transform(ast)
+
+      operand =
+        case result do
+          {:unary_op, :arithmetic, :-, op} -> op
+          {:unary_op, :arithmetic, :-, op, _loc} -> op
+        end
+
       assert {:literal, :integer, 42} = operand
     end
 
     test "transforms positive sign" do
       ast = {:+, [], [42]}
-      assert {:ok, {:unary_op, :arithmetic, :+, operand}, %{}} = ToMeta.transform(ast)
+      assert {:ok, result, %{}} = ToMeta.transform(ast)
+
+      operand =
+        case result do
+          {:unary_op, :arithmetic, :+, op} -> op
+          {:unary_op, :arithmetic, :+, op, _loc} -> op
+        end
+
       assert {:literal, :integer, 42} = operand
     end
   end

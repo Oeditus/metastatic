@@ -447,7 +447,13 @@ defmodule Metastatic.Adapters.PythonTest do
       source = "foo(1, 2)"
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
-      assert {:function_call, "foo", args} = meta_ast
+      # Function call may have location
+      args =
+        case meta_ast do
+          {:function_call, "foo", a} -> a
+          {:function_call, "foo", a, _loc} -> a
+        end
+
       assert [_, _] = args
     end
 
@@ -455,14 +461,28 @@ defmodule Metastatic.Adapters.PythonTest do
       source = "x == 5"
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
-      assert {:binary_op, :comparison, :==, {:variable, "x"}, {:literal, :integer, 5}} = meta_ast
+      # May have location as last element
+      assert match?({:binary_op, :comparison, :==, _, _}, meta_ast) or
+               match?({:binary_op, :comparison, :==, _, _, _}, meta_ast)
+
+      # Verify operands
+      {left, right} =
+        case meta_ast do
+          {:binary_op, :comparison, :==, l, r} -> {l, r}
+          {:binary_op, :comparison, :==, l, r, _loc} -> {l, r}
+        end
+
+      assert match?({:variable, "x"}, left) or match?({:variable, "x", _}, left)
+      assert match?({:literal, :integer, 5}, right) or match?({:literal, :integer, 5, _}, right)
     end
 
     test "round-trips boolean expression" do
       source = "True and False"
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
-      assert {:binary_op, :boolean, :and, _, _} = meta_ast
+      # May have location as last element
+      assert match?({:binary_op, :boolean, :and, _, _}, meta_ast) or
+               match?({:binary_op, :boolean, :and, _, _, _}, meta_ast)
     end
   end
 
@@ -471,51 +491,114 @@ defmodule Metastatic.Adapters.PythonTest do
       source = "x = 5"
 
       assert {:ok, ast} = Python.parse(source)
-      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
-      assert {:variable, "x"} = target
-      assert {:literal, :integer, 5} = value
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+      # Assignment may have location
+      {target, value} =
+        case result do
+          {:assignment, t, v} -> {t, v}
+          {:assignment, t, v, _loc} -> {t, v}
+        end
+
+      assert match?({:variable, "x"}, target) or match?({:variable, "x", _}, target)
+      assert match?({:literal, :integer, 5}, value) or match?({:literal, :integer, 5, _}, value)
     end
 
     test "transforms multiple assignment" do
       source = "x = y = 5"
 
       assert {:ok, ast} = Python.parse(source)
-      assert {:ok, {:assignment, outer_target, outer_value}, _metadata} = Python.to_meta(ast)
-      assert {:variable, "x"} = outer_target
-      assert {:assignment, inner_target, inner_value} = outer_value
-      assert {:variable, "y"} = inner_target
-      assert {:literal, :integer, 5} = inner_value
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+
+      {outer_target, outer_value} =
+        case result do
+          {:assignment, t, v} -> {t, v}
+          {:assignment, t, v, _loc} -> {t, v}
+        end
+
+      assert match?({:variable, "x"}, outer_target) or match?({:variable, "x", _}, outer_target)
+
+      {inner_target, inner_value} =
+        case outer_value do
+          {:assignment, t, v} -> {t, v}
+          {:assignment, t, v, _loc} -> {t, v}
+        end
+
+      assert match?({:variable, "y"}, inner_target) or match?({:variable, "y", _}, inner_target)
+
+      assert match?({:literal, :integer, 5}, inner_value) or
+               match?({:literal, :integer, 5, _}, inner_value)
     end
 
     test "transforms augmented assignment" do
       source = "x += 1"
 
       assert {:ok, ast} = Python.parse(source)
-      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
-      assert {:variable, "x"} = target
-      assert {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}} = value
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+
+      {target, value} =
+        case result do
+          {:assignment, t, v} -> {t, v}
+          {:assignment, t, v, _loc} -> {t, v}
+        end
+
+      assert match?({:variable, "x"}, target) or match?({:variable, "x", _}, target)
+      # Value is a binary_op that may have location
+      {left, right} =
+        case value do
+          {:binary_op, :arithmetic, :+, l, r} -> {l, r}
+          {:binary_op, :arithmetic, :+, l, r, _loc} -> {l, r}
+        end
+
+      assert match?({:variable, "x"}, left) or match?({:variable, "x", _}, left)
+      assert match?({:literal, :integer, 1}, right) or match?({:literal, :integer, 1, _}, right)
     end
 
     test "transforms tuple assignment" do
       source = "x, y = 1, 2"
 
       assert {:ok, ast} = Python.parse(source)
-      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
-      assert {:tuple, [var_x, var_y]} = target
-      assert {:variable, "x"} = var_x
-      assert {:variable, "y"} = var_y
-      assert {:tuple, [lit_1, lit_2]} = value
-      assert {:literal, :integer, 1} = lit_1
-      assert {:literal, :integer, 2} = lit_2
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+
+      {target, value} =
+        case result do
+          {:assignment, t, v} -> {t, v}
+          {:assignment, t, v, _loc} -> {t, v}
+        end
+
+      # Extract tuple elements (tuples may have location)
+      [var_x, var_y] =
+        case target do
+          {:tuple, elems} -> elems
+          {:tuple, elems, _loc} -> elems
+        end
+
+      assert match?({:variable, "x"}, var_x) or match?({:variable, "x", _}, var_x)
+      assert match?({:variable, "y"}, var_y) or match?({:variable, "y", _}, var_y)
+
+      [lit_1, lit_2] =
+        case value do
+          {:tuple, elems} -> elems
+          {:tuple, elems, _loc} -> elems
+        end
+
+      assert match?({:literal, :integer, 1}, lit_1) or match?({:literal, :integer, 1, _}, lit_1)
+      assert match?({:literal, :integer, 2}, lit_2) or match?({:literal, :integer, 2, _}, lit_2)
     end
 
     test "transforms annotated assignment" do
       source = "x: int = 5"
 
       assert {:ok, ast} = Python.parse(source)
-      assert {:ok, {:assignment, target, value}, _metadata} = Python.to_meta(ast)
-      assert {:variable, "x"} = target
-      assert {:literal, :integer, 5} = value
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+
+      {target, value} =
+        case result do
+          {:assignment, t, v} -> {t, v}
+          {:assignment, t, v, _loc} -> {t, v}
+        end
+
+      assert match?({:variable, "x"}, target) or match?({:variable, "x", _}, target)
+      assert match?({:literal, :integer, 5}, value) or match?({:literal, :integer, 5, _}, value)
     end
 
     test "transforms type-only annotation as language_specific" do
@@ -628,7 +711,8 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:assignment, _, _} = meta_ast
+      # Assignment may have location
+      assert match?({:assignment, _, _}, meta_ast) or match?({:assignment, _, _, _}, meta_ast)
       assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
     end
 
@@ -637,7 +721,16 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:assignment, {:tuple, _}, {:tuple, _}} = meta_ast
+      # Assignment and tuples may have locations
+      assert match?({:assignment, {:tuple, _}, {:tuple, _}}, meta_ast) or
+               match?({:assignment, {:tuple, _, _}, {:tuple, _}}, meta_ast) or
+               match?({:assignment, {:tuple, _}, {:tuple, _, _}}, meta_ast) or
+               match?({:assignment, {:tuple, _, _}, {:tuple, _, _}}, meta_ast) or
+               match?({:assignment, {:tuple, _}, {:tuple, _}, _}, meta_ast) or
+               match?({:assignment, {:tuple, _, _}, {:tuple, _}, _}, meta_ast) or
+               match?({:assignment, {:tuple, _}, {:tuple, _, _}, _}, meta_ast) or
+               match?({:assignment, {:tuple, _, _}, {:tuple, _, _}, _}, meta_ast)
+
       assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
     end
 
@@ -646,7 +739,8 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:assignment, _, _} = meta_ast
+      # Assignment may have location
+      assert match?({:assignment, _, _}, meta_ast) or match?({:assignment, _, _, _}, meta_ast)
       assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
     end
   end
@@ -656,22 +750,41 @@ defmodule Metastatic.Adapters.PythonTest do
       source = "while x > 0:\n    x"
 
       assert {:ok, ast} = Python.parse(source)
-      assert {:ok, {:loop, :while, condition, body}, _metadata} = Python.to_meta(ast)
-      assert {:binary_op, :comparison, :>, _, _} = condition
-      assert {:variable, "x"} = body
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+      # Handle loop with optional location
+      {condition, body} =
+        case result do
+          {:loop, :while, c, b} -> {c, b}
+          {:loop, :while, c, b, _loc} -> {c, b}
+        end
+
+      # Condition may have location
+      assert match?({:binary_op, :comparison, :>, _, _}, condition) or
+               match?({:binary_op, :comparison, :>, _, _, _}, condition)
+
+      # Body may have location
+      assert match?({:variable, "x"}, body) or match?({:variable, "x", _}, body)
     end
 
     test "transforms for loop" do
       source = "for i in items:\n    i"
 
       assert {:ok, ast} = Python.parse(source)
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
 
-      assert {:ok, {:loop, :for_each, iterator, collection, body}, _metadata} =
-               Python.to_meta(ast)
+      # Handle loop with optional location
+      {iterator, collection, body} =
+        case result do
+          {:loop, :for_each, i, c, b} -> {i, c, b}
+          {:loop, :for_each, i, c, b, _loc} -> {i, c, b}
+        end
 
-      assert {:variable, "i"} = iterator
-      assert {:variable, "items"} = collection
-      assert {:variable, "i"} = body
+      assert match?({:variable, "i"}, iterator) or match?({:variable, "i", _}, iterator)
+
+      assert match?({:variable, "items"}, collection) or
+               match?({:variable, "items", _}, collection)
+
+      assert match?({:variable, "i"}, body) or match?({:variable, "i", _}, body)
     end
   end
 
@@ -739,10 +852,26 @@ defmodule Metastatic.Adapters.PythonTest do
         ]
       }
 
-      assert {:ok, {:collection_op, :map, lambda, collection}, %{}} = ToMeta.transform(ast)
-      assert {:lambda, ["x"], [], body} = lambda
-      assert {:binary_op, :arithmetic, :*, _, _} = body
-      assert {:variable, "numbers"} = collection
+      assert {:ok, result, %{}} = ToMeta.transform(ast)
+      # Handle collection_op with optional location
+      {lambda, collection} =
+        case result do
+          {:collection_op, :map, l, c} -> {l, c}
+          {:collection_op, :map, l, c, _loc} -> {l, c}
+        end
+
+      # Lambda may have location
+      body =
+        case lambda do
+          {:lambda, ["x"], [], b} -> b
+          {:lambda, ["x"], [], b, _loc} -> b
+        end
+
+      assert match?({:binary_op, :arithmetic, :*, _, _}, body) or
+               match?({:binary_op, :arithmetic, :*, _, _, _}, body)
+
+      assert match?({:variable, "numbers"}, collection) or
+               match?({:variable, "numbers", _}, collection)
     end
 
     test "transforms complex comprehension with filter to language_specific" do
@@ -775,12 +904,22 @@ defmodule Metastatic.Adapters.PythonTest do
       source = "try:\n    risky()\nexcept Exception as e:\n    handle(e)"
 
       assert {:ok, ast} = Python.parse(source)
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
 
-      assert {:ok, {:exception_handling, try_block, rescue_clauses, finally_block}, _metadata} =
-               Python.to_meta(ast)
+      # Handle exception_handling with optional location
+      {try_block, rescue_clauses, finally_block} =
+        case result do
+          {:exception_handling, t, r, f} -> {t, r, f}
+          {:exception_handling, t, r, f, _loc} -> {t, r, f}
+        end
 
-      assert {:function_call, "risky", []} = try_block
-      assert [{:error, {:variable, "e"}, _}] = rescue_clauses
+      assert match?({:function_call, "risky", []}, try_block) or
+               match?({:function_call, "risky", [], _}, try_block)
+
+      # Rescue clauses contain variables that may have locations
+      assert match?([{:error, {:variable, "e"}, _}], rescue_clauses) or
+               match?([{:error, {:variable, "e", _}, _}], rescue_clauses)
+
       assert nil == finally_block
     end
 
@@ -788,11 +927,17 @@ defmodule Metastatic.Adapters.PythonTest do
       source = "try:\n    operation\nfinally:\n    cleanup()"
 
       assert {:ok, ast} = Python.parse(source)
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
 
-      assert {:ok, {:exception_handling, _try_block, [], finally_block}, _metadata} =
-               Python.to_meta(ast)
+      # Handle exception_handling with optional location
+      {_try_block, _rescue, finally_block} =
+        case result do
+          {:exception_handling, t, r, f} -> {t, r, f}
+          {:exception_handling, t, r, f, _loc} -> {t, r, f}
+        end
 
-      assert {:function_call, "cleanup", []} = finally_block
+      assert match?({:function_call, "cleanup", []}, finally_block) or
+               match?({:function_call, "cleanup", [], _}, finally_block)
     end
   end
 
@@ -897,7 +1042,8 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:loop, :while, _, _} = meta_ast
+      # Loop may have location
+      assert match?({:loop, :while, _, _}, meta_ast) or match?({:loop, :while, _, _, _}, meta_ast)
       assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
     end
 
@@ -906,7 +1052,10 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:loop, :for_each, _, _, _} = meta_ast
+      # Loop may have location
+      assert match?({:loop, :for_each, _, _, _}, meta_ast) or
+               match?({:loop, :for_each, _, _, _, _}, meta_ast)
+
       assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
     end
 
@@ -915,7 +1064,10 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:lambda, ["x"], [], _} = meta_ast
+      # Lambda may have location
+      assert match?({:lambda, ["x"], [], _}, meta_ast) or
+               match?({:lambda, ["x"], [], _, _}, meta_ast)
+
       assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
       assert {:ok, result} = Python.unparse(ast2)
       # Lambda may have parentheses added
@@ -928,7 +1080,12 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:collection_op, :map, {:lambda, _, _, _}, _} = meta_ast
+      # Collection op and lambda may have locations
+      assert match?({:collection_op, :map, {:lambda, _, _, _}, _}, meta_ast) or
+               match?({:collection_op, :map, {:lambda, _, _, _, _}, _}, meta_ast) or
+               match?({:collection_op, :map, {:lambda, _, _, _}, _, _}, meta_ast) or
+               match?({:collection_op, :map, {:lambda, _, _, _, _}, _, _}, meta_ast)
+
       assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
       assert {:ok, result} = Python.unparse(ast2)
       # Should produce comprehension-like output
@@ -941,7 +1098,10 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
-      assert {:exception_handling, _, _, _} = meta_ast
+      # Exception handling may have location
+      assert match?({:exception_handling, _, _, _}, meta_ast) or
+               match?({:exception_handling, _, _, _, _}, meta_ast)
+
       assert {:ok, _ast2} = Python.from_meta(meta_ast, metadata)
     end
   end
@@ -1727,12 +1887,68 @@ defmodule Metastatic.Adapters.PythonTest do
     end
   end
 
-  # Helper function
+  # Helper function - handles nodes with and without location
   defp same_structure?({:binary_op, cat, op, l1, r1}, {:binary_op, cat, op, l2, r2}) do
     same_structure?(l1, l2) and same_structure?(r1, r2)
   end
 
+  defp same_structure?({:binary_op, cat, op, l1, r1, _loc1}, {:binary_op, cat, op, l2, r2}) do
+    same_structure?(l1, l2) and same_structure?(r1, r2)
+  end
+
+  defp same_structure?({:binary_op, cat, op, l1, r1}, {:binary_op, cat, op, l2, r2, _loc2}) do
+    same_structure?(l1, l2) and same_structure?(r1, r2)
+  end
+
+  defp same_structure?({:binary_op, cat, op, l1, r1, _loc1}, {:binary_op, cat, op, l2, r2, _loc2}) do
+    same_structure?(l1, l2) and same_structure?(r1, r2)
+  end
+
   defp same_structure?({:variable, _}, {:variable, _}), do: true
+  defp same_structure?({:variable, _, _loc1}, {:variable, _}), do: true
+  defp same_structure?({:variable, _}, {:variable, _, _loc2}), do: true
+  defp same_structure?({:variable, _, _loc1}, {:variable, _, _loc2}), do: true
+
   defp same_structure?({:literal, t, v}, {:literal, t, v}), do: true
+  defp same_structure?({:literal, t, v, _loc1}, {:literal, t, v}), do: true
+  defp same_structure?({:literal, t, v}, {:literal, t, v, _loc2}), do: true
+  defp same_structure?({:literal, t, v, _loc1}, {:literal, t, v, _loc2}), do: true
+
+  defp same_structure?({:function_call, name, args1}, {:function_call, name, args2}) do
+    length(args1) == length(args2) and
+      Enum.zip(args1, args2) |> Enum.all?(fn {a1, a2} -> same_structure?(a1, a2) end)
+  end
+
+  defp same_structure?({:function_call, name, args1, _loc1}, {:function_call, name, args2}) do
+    length(args1) == length(args2) and
+      Enum.zip(args1, args2) |> Enum.all?(fn {a1, a2} -> same_structure?(a1, a2) end)
+  end
+
+  defp same_structure?({:function_call, name, args1}, {:function_call, name, args2, _loc2}) do
+    length(args1) == length(args2) and
+      Enum.zip(args1, args2) |> Enum.all?(fn {a1, a2} -> same_structure?(a1, a2) end)
+  end
+
+  defp same_structure?({:function_call, name, args1, _loc1}, {:function_call, name, args2, _loc2}) do
+    length(args1) == length(args2) and
+      Enum.zip(args1, args2) |> Enum.all?(fn {a1, a2} -> same_structure?(a1, a2) end)
+  end
+
+  defp same_structure?({:conditional, c1, t1, e1}, {:conditional, c2, t2, e2}) do
+    same_structure?(c1, c2) and same_structure?(t1, t2) and same_structure?(e1, e2)
+  end
+
+  defp same_structure?({:conditional, c1, t1, e1, _loc1}, {:conditional, c2, t2, e2}) do
+    same_structure?(c1, c2) and same_structure?(t1, t2) and same_structure?(e1, e2)
+  end
+
+  defp same_structure?({:conditional, c1, t1, e1}, {:conditional, c2, t2, e2, _loc2}) do
+    same_structure?(c1, c2) and same_structure?(t1, t2) and same_structure?(e1, e2)
+  end
+
+  defp same_structure?({:conditional, c1, t1, e1, _loc1}, {:conditional, c2, t2, e2, _loc2}) do
+    same_structure?(c1, c2) and same_structure?(t1, t2) and same_structure?(e1, e2)
+  end
+
   defp same_structure?(a, b), do: a == b
 end

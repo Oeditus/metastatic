@@ -119,51 +119,101 @@ defmodule Metastatic.CLI.Inspector do
   defp filter_composite_children(ast, _layer), do: ast
 
   @spec node_layer(AST.meta_ast()) :: layer()
+  # Handle location-aware nodes
+  defp node_layer({:literal, _, _, _loc}), do: :core
   defp node_layer({:literal, _, _}), do: :core
+  defp node_layer({:variable, _, _loc}), do: :core
   defp node_layer({:variable, _}), do: :core
+  defp node_layer({:list, _, _loc}), do: :core
   defp node_layer({:list, _}), do: :core
+  defp node_layer({:map, _, _loc}), do: :core
   defp node_layer({:map, _}), do: :core
+  defp node_layer({:binary_op, _, _, _, _, _loc}), do: :core
   defp node_layer({:binary_op, _, _, _, _}), do: :core
+  defp node_layer({:unary_op, _, _, _, _loc}), do: :core
   defp node_layer({:unary_op, _, _, _}), do: :core
+  defp node_layer({:function_call, _, _, _loc}), do: :core
   defp node_layer({:function_call, _, _}), do: :core
+  defp node_layer({:conditional, _, _, _, _loc}), do: :core
   defp node_layer({:conditional, _, _, _}), do: :core
+  defp node_layer({:block, _, _loc}), do: :core
   defp node_layer({:block, _}), do: :core
+  defp node_layer({:early_return, _, _, _loc}), do: :core
   defp node_layer({:early_return, _, _}), do: :core
+  defp node_layer({:loop, _, _, _, _loc}), do: :extended
   defp node_layer({:loop, _, _, _}), do: :extended
+  defp node_layer({:loop, _, _, _, _, _loc}), do: :extended
   defp node_layer({:loop, _, _, _, _}), do: :extended
+  defp node_layer({:lambda, _, _, _, _loc}), do: :extended
   defp node_layer({:lambda, _, _, _}), do: :extended
+  defp node_layer({:collection_op, _, _, _, _loc}), do: :extended
   defp node_layer({:collection_op, _, _, _}), do: :extended
+  defp node_layer({:collection_op, _, _, _, _, _loc}), do: :extended
   defp node_layer({:collection_op, _, _, _, _}), do: :extended
+  defp node_layer({:exception_handling, _, _, _, _loc}), do: :extended
   defp node_layer({:exception_handling, _, _, _}), do: :extended
   defp node_layer({:language_specific, _, _, _}), do: :native
   defp node_layer(_), do: :core
 
   @spec composite_node?(AST.meta_ast()) :: boolean()
+  # Handle location-aware nodes
+  defp composite_node?({:binary_op, _, _, _, _, _loc}), do: true
   defp composite_node?({:binary_op, _, _, _, _}), do: true
+  defp composite_node?({:unary_op, _, _, _, _loc}), do: true
   defp composite_node?({:unary_op, _, _, _}), do: true
+  defp composite_node?({:list, _, _loc}), do: true
   defp composite_node?({:list, _}), do: true
+  defp composite_node?({:map, _, _loc}), do: true
   defp composite_node?({:map, _}), do: true
+  defp composite_node?({:function_call, _, _, _loc}), do: true
   defp composite_node?({:function_call, _, _}), do: true
+  defp composite_node?({:conditional, _, _, _, _loc}), do: true
   defp composite_node?({:conditional, _, _, _}), do: true
+  defp composite_node?({:block, _, _loc}), do: true
   defp composite_node?({:block, _}), do: true
+  defp composite_node?({:loop, _, _, _, _loc}), do: true
   defp composite_node?({:loop, _, _, _}), do: true
+  defp composite_node?({:loop, _, _, _, _, _loc}), do: true
   defp composite_node?({:loop, _, _, _, _}), do: true
+  defp composite_node?({:lambda, _, _, _, _loc}), do: true
   defp composite_node?({:lambda, _, _, _}), do: true
+  defp composite_node?({:collection_op, _, _, _, _loc}), do: true
   defp composite_node?({:collection_op, _, _, _}), do: true
+  defp composite_node?({:collection_op, _, _, _, _, _loc}), do: true
   defp composite_node?({:collection_op, _, _, _, _}), do: true
+  defp composite_node?({:exception_handling, _, _, _, _loc}), do: true
   defp composite_node?({:exception_handling, _, _, _}), do: true
   defp composite_node?(_), do: false
 
   @spec calculate_depth(AST.meta_ast()) :: non_neg_integer()
+  # Handle location-aware nodes
+  defp calculate_depth({:literal, _, _, _loc}), do: 1
   defp calculate_depth({:literal, _, _}), do: 1
+  defp calculate_depth({:variable, _, _loc}), do: 1
   defp calculate_depth({:variable, _}), do: 1
+
+  defp calculate_depth({:binary_op, _, _, left, right, _loc}) do
+    1 + max(calculate_depth(left), calculate_depth(right))
+  end
 
   defp calculate_depth({:binary_op, _, _, left, right}) do
     1 + max(calculate_depth(left), calculate_depth(right))
   end
 
+  defp calculate_depth({:unary_op, _, _, operand, _loc}) do
+    1 + calculate_depth(operand)
+  end
+
   defp calculate_depth({:unary_op, _, _, operand}) do
     1 + calculate_depth(operand)
+  end
+
+  defp calculate_depth({:function_call, _, args, _loc}) do
+    if Enum.empty?(args) do
+      1
+    else
+      1 + (Enum.map(args, &calculate_depth/1) |> Enum.max())
+    end
   end
 
   defp calculate_depth({:function_call, _, args}) do
@@ -237,15 +287,30 @@ defmodule Metastatic.CLI.Inspector do
   defp calculate_depth(_), do: 1
 
   @spec count_nodes(AST.meta_ast()) :: non_neg_integer()
+  # Handle location-aware nodes
+  defp count_nodes({:literal, _, _, _loc}), do: 1
   defp count_nodes({:literal, _, _}), do: 1
+  defp count_nodes({:variable, _, _loc}), do: 1
   defp count_nodes({:variable, _}), do: 1
+
+  defp count_nodes({:binary_op, _, _, left, right, _loc}) do
+    1 + count_nodes(left) + count_nodes(right)
+  end
 
   defp count_nodes({:binary_op, _, _, left, right}) do
     1 + count_nodes(left) + count_nodes(right)
   end
 
+  defp count_nodes({:unary_op, _, _, operand, _loc}) do
+    1 + count_nodes(operand)
+  end
+
   defp count_nodes({:unary_op, _, _, operand}) do
     1 + count_nodes(operand)
+  end
+
+  defp count_nodes({:function_call, _, args, _loc}) do
+    1 + Enum.sum(Enum.map(args, &count_nodes/1))
   end
 
   defp count_nodes({:function_call, _, args}) do
