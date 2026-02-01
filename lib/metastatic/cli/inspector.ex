@@ -127,7 +127,7 @@ defmodule Metastatic.CLI.Inspector do
   @spec node_layer(AST.meta_ast()) :: layer()
   # Handle location-aware nodes
   for {layer, kinds} <- @node_layers do
-    defp node_layer(ast) when is_tuple(ast) and elem(ast, 1) in unquote(kinds), do: unquote(layer)
+    defp node_layer(ast) when is_tuple(ast) and elem(ast, 0) in unquote(kinds), do: unquote(layer)
   end
 
   defp node_layer(_), do: :core
@@ -135,7 +135,7 @@ defmodule Metastatic.CLI.Inspector do
   @composite_nodes ~w|binary_op unary_op list map function_call conditional block loop lambda collection_op exception_handling|a
   @spec composite_node?(AST.meta_ast()) :: boolean()
   # Handle location-aware nodes
-  defp composite_node?(ast) when is_tuple(ast) and elem(ast, 1) in @composite_nodes, do: true
+  defp composite_node?(ast) when is_tuple(ast) and elem(ast, 0) in @composite_nodes, do: true
   defp composite_node?(_), do: false
 
   @spec calculate_depth(AST.meta_ast()) :: non_neg_integer()

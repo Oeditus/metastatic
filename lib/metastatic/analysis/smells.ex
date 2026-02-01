@@ -105,9 +105,7 @@ defmodule Metastatic.Analysis.Smells do
     # Check per-function metrics for long functions
     per_function_smells =
       complexity.per_function
-      |> Enum.filter(fn func ->
-        func.statements > thresholds.max_statements
-      end)
+      |> Enum.filter(&(&1.statements > thresholds.max_statements))
       |> Enum.map(fn func ->
         %{
           type: :long_function,
@@ -125,7 +123,33 @@ defmodule Metastatic.Analysis.Smells do
         }
       end)
 
-    per_function_smells ++ smells
+    # Fallback: if no per-function metrics, check the whole document
+    document_smells =
+      with true <- Enum.empty?(complexity.per_function),
+           statement_count when statement_count > thresholds.max_statements <-
+             complexity.function_metrics.statement_count do
+        location = extract_location(doc)
+
+        [
+          %{
+            type: :long_function,
+            severity:
+              determine_severity(:long_function, statement_count, thresholds.max_statements),
+            description:
+              "Code has #{statement_count} statements (threshold: #{thresholds.max_statements})",
+            suggestion: "Break this function into smaller, focused functions",
+            context: %{
+              statement_count: statement_count,
+              threshold: thresholds.max_statements
+            },
+            location: location
+          }
+        ]
+      else
+        _ -> []
+      end
+
+    per_function_smells ++ document_smells ++ smells
   end
 
   # Detect deep nesting using per-function complexity metrics
@@ -141,8 +165,7 @@ defmodule Metastatic.Analysis.Smells do
       |> Enum.map(fn func ->
         %{
           type: :deep_nesting,
-          severity:
-            determine_severity(:deep_nesting, func.max_nesting, thresholds.max_nesting),
+          severity: determine_severity(:deep_nesting, func.max_nesting, thresholds.max_nesting),
           description:
             "Function '#{func.name}' has nesting depth of #{func.max_nesting} (threshold: #{thresholds.max_nesting})",
           suggestion: "Reduce nesting by extracting functions or using early returns",
@@ -155,7 +178,32 @@ defmodule Metastatic.Analysis.Smells do
         }
       end)
 
-    per_function_smells ++ smells
+    # Fallback: if no per-function metrics, check the whole document
+    document_smells =
+      with true <- Enum.empty?(complexity.per_function),
+           max_nesting when max_nesting > thresholds.max_nesting <-
+             complexity.max_nesting do
+        location = extract_location(doc)
+
+        [
+          %{
+            type: :deep_nesting,
+            severity: determine_severity(:deep_nesting, max_nesting, thresholds.max_nesting),
+            description:
+              "Nesting depth of #{max_nesting} exceeds threshold (threshold: #{thresholds.max_nesting})",
+            suggestion: "Reduce nesting by extracting functions or using early returns",
+            context: %{
+              max_nesting: max_nesting,
+              threshold: thresholds.max_nesting
+            },
+            location: location
+          }
+        ]
+      else
+        _ -> []
+      end
+
+    per_function_smells ++ document_smells ++ smells
   end
 
   # Detect magic numbers (numeric literals in complex expressions)

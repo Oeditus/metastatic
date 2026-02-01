@@ -236,7 +236,7 @@ defmodule Metastatic.Analysis.Complexity do
   # M2.2s: Extract functions from container members
   # NEW format: {:container, type, name, parent, type_params, implements, body}
   defp extract_per_function_metrics(
-         {:container, _type, name, _parent, _type_params, _implements, body},
+         {:container, _type, _name, _parent, _type_params, _implements, body},
          _doc_metadata
        ) do
     # Handle different body formats:
@@ -256,7 +256,7 @@ defmodule Metastatic.Analysis.Complexity do
       end
 
     members
-    |> Enum.filter(&match?(ast when is_tuple(ast) and elem(ast, 1) == :function_def, &1))
+    |> Enum.filter(&match?(ast when is_tuple(ast) and elem(ast, 0) == :function_def, &1))
     |> Enum.map(&analyze_function_def/1)
   end
 
@@ -266,12 +266,14 @@ defmodule Metastatic.Analysis.Complexity do
 
   defp extract_functions_from_body({:block, statements}) when is_list(statements) do
     statements
-    |> Enum.filter(fn
-      {:language_specific, _, _, :function_definition, _} -> true
-      {:language_specific, _, _, :function_definition} -> true
-      {:function_def, _, _, _, _, _} -> true
-      _ -> false
-    end)
+    |> Enum.filter(
+      &match?(
+        ast
+        when (is_tuple(ast) and elem(ast, 0) == :function_def) or
+               (elem(ast, 0) == :language_specific and elem(ast, 3) == :function_definition),
+        &1
+      )
+    )
     |> Enum.map(fn
       {:function_def, _, _, _, _, _} = node -> analyze_function_def(node)
       node -> analyze_function(node)
