@@ -306,15 +306,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Function Calls - M2.1 Core Layer
 
-  # Function capture
-  # &1.field
-  def transform(
-        {{:., _call_meta, [{:&, _capture_meta, capture_args}, func]}, _meta, args} = whole
-      )
-      when is_list(args) do
-    require Logger
-    Logger.notice("Incomplete transform: " <> inspect(whole))
-    {:ok, {:function_capture, {:capture, func}, {:capture_args, capture_args}}, %{args: args}}
+  # Function capture - M2.2 Extended Layer
+  # Handles various forms:
+  # &1, &2, etc. - argument references
+  # &(&1 + 1) - anonymous function with capture
+  # &Module.function/arity - named function capture
+  # &function/arity - local function capture
+  def transform({:&, meta, [body]}) do
+    transform_function_capture(body, meta)
   end
 
   # Map field access
@@ -955,4 +954,125 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   defp add_location(ast, _), do: ast
+
+  # Function capture transformation
+  # Converts &(...) syntax to equivalent anonymous functions
+
+  # Simple argument reference: &1, &2, etc.
+  defp transform_function_capture(n, _meta) when is_integer(n) do
+    # &1 becomes fn arg_1 -> arg_1 end
+    param_name = "arg_#{n}"
+    param = {:param, param_name, nil, nil}
+    body = {:variable, param_name}
+    {:ok, {:lambda, [param], [], body}, %{capture_form: :argument_reference}}
+  end
+
+  # Named function capture: &Module.function/arity or &function/arity
+  defp transform_function_capture({:/, _, [function_ref, arity]}, _meta)
+       when is_integer(arity) do
+    # Extract function name
+    function_name =
+      case function_ref do
+        {{:., _, [module, func]}, _, []} ->
+          # Remote function: &Module.function/arity
+          module_name = module_to_string(module)
+          func_name = Atom.to_string(func)
+          "#{module_name}.#{func_name}"
+
+        {func, _, _} when is_atom(func) ->
+          # Local function: &function/arity
+          Atom.to_string(func)
+
+        _ ->
+          "unknown"
+      end
+
+    # Create lambda with N parameters that calls the function
+    params = for i <- 1..arity, do: {:param, "arg_#{i}", nil, nil}
+    args = for i <- 1..arity, do: {:variable, "arg_#{i}"}
+    body = {:function_call, function_name, args}
+
+    {:ok, {:lambda, params, [], body}, %{capture_form: :named_function}}
+  end
+
+  # Complex capture: &(&1 + 1), &(&1 + &2), etc.
+  defp transform_function_capture(body, _meta) do
+    # Find all argument captures in the body
+    arg_nums = find_capture_arguments(body)
+
+    if Enum.empty?(arg_nums) do
+      # No captures found - this might be an error or edge case
+      # Just transform the body as-is and wrap in a zero-arity lambda
+      with {:ok, body_meta, _} <- transform(body) do
+        {:ok, {:lambda, [], [], body_meta}, %{capture_form: :no_arguments}}
+      end
+    else
+      # Determine arity from maximum argument number
+      arity = Enum.max(arg_nums)
+
+      # Generate unique parameter names
+      params = for i <- 1..arity, do: {:param, "arg_#{i}", nil, nil}
+
+      # Transform body, replacing captures with parameter references
+      with {:ok, body_meta, _} <- transform_capture_body(body, arity) do
+        {:ok, {:lambda, params, [], body_meta}, %{capture_form: :expression, arity: arity}}
+      end
+    end
+  end
+
+  # Find all &N references in the capture body
+  defp find_capture_arguments(ast) do
+    find_capture_arguments(ast, MapSet.new())
+  end
+
+  defp find_capture_arguments({:&, _, [n]}, acc) when is_integer(n) do
+    MapSet.put(acc, n)
+  end
+
+  defp find_capture_arguments({:&, _, [_body]}, acc) do
+    # Nested capture - don't recurse into it
+    acc
+  end
+
+  defp find_capture_arguments(tuple, acc) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.reduce(acc, &find_capture_arguments/2)
+  end
+
+  defp find_capture_arguments(list, acc) when is_list(list) do
+    Enum.reduce(list, acc, &find_capture_arguments/2)
+  end
+
+  defp find_capture_arguments(_other, acc), do: acc
+
+  # Transform the capture body, replacing &N with parameter variables
+  defp transform_capture_body(ast, arity) do
+    transformed_ast = replace_capture_args(ast, arity)
+    transform(transformed_ast)
+  end
+
+  # Replace &N with variable references
+  defp replace_capture_args({:&, meta, [n]}, _arity) when is_integer(n) do
+    # Replace &1 with variable reference (use atom for variable name)
+    {String.to_atom("arg_#{n}"), meta, nil}
+  end
+
+  defp replace_capture_args({:&, _, [_body]} = nested_capture, _arity) do
+    # Nested capture - don't modify it, will be transformed later
+    nested_capture
+  end
+
+  defp replace_capture_args(tuple, arity) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.map(&replace_capture_args(&1, arity))
+    |> List.to_tuple()
+  end
+
+  defp replace_capture_args(list, arity) when is_list(list) do
+    Enum.map(list, &replace_capture_args(&1, arity))
+  end
+
+  defp replace_capture_args(other, _arity), do: other
 end
