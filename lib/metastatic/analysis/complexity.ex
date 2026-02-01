@@ -228,27 +228,41 @@ defmodule Metastatic.Analysis.Complexity do
 
   defp extract_per_function_metrics({:language_specific, _, _, hint}, metadata)
        when hint == :module_definition do
-    body = Map.get(metadata, :body)
-    extract_functions_from_body(body)
+    metadata
+    |> Map.get(:body)
+    |> extract_functions_from_body()
   end
 
   # M2.2s: Extract functions from container members
   # NEW format: {:container, type, name, parent, type_params, implements, body}
   defp extract_per_function_metrics(
-         {:container, _type, _name, _parent, _type_params, _implements, body},
+         {:container, _type, name, _parent, _type_params, _implements, body},
          _doc_metadata
        ) do
-    members = if is_list(body), do: body, else: []
+    # Handle different body formats:
+    # - {:block, [function_def, ...]} for multiple functions
+    # - function_def for single function
+    # - [function_def, ...] for list of functions (edge case)
+    members =
+      case body do
+        {:block, statements} when is_list(statements) ->
+          statements
+
+        list when is_list(list) ->
+          list
+
+        single_item ->
+          [single_item]
+      end
 
     members
-    |> Enum.filter(fn
-      {:function_def, _, _, _, _, _} -> true
-      _ -> false
-    end)
+    |> Enum.filter(&match?(ast when is_tuple(ast) and elem(ast, 1) == :function_def, &1))
     |> Enum.map(&analyze_function_def/1)
   end
 
-  defp extract_per_function_metrics(_, _), do: []
+  defp extract_per_function_metrics(_ast, _metadata) do
+    []
+  end
 
   defp extract_functions_from_body({:block, statements}) when is_list(statements) do
     statements

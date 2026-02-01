@@ -118,71 +118,24 @@ defmodule Metastatic.CLI.Inspector do
 
   defp filter_composite_children(ast, _layer), do: ast
 
+  @node_layers %{
+    core:
+      ~w|literal variable list map binary_op unary_op function_call conditional block early_return|a,
+    extended: ~w|loop lambda collection_op exception_handling|a,
+    native: ~w|language_specific|a
+  }
   @spec node_layer(AST.meta_ast()) :: layer()
   # Handle location-aware nodes
-  defp node_layer({:literal, _, _, _loc}), do: :core
-  defp node_layer({:literal, _, _}), do: :core
-  defp node_layer({:variable, _, _loc}), do: :core
-  defp node_layer({:variable, _}), do: :core
-  defp node_layer({:list, _, _loc}), do: :core
-  defp node_layer({:list, _}), do: :core
-  defp node_layer({:map, _, _loc}), do: :core
-  defp node_layer({:map, _}), do: :core
-  defp node_layer({:binary_op, _, _, _, _, _loc}), do: :core
-  defp node_layer({:binary_op, _, _, _, _}), do: :core
-  defp node_layer({:unary_op, _, _, _, _loc}), do: :core
-  defp node_layer({:unary_op, _, _, _}), do: :core
-  defp node_layer({:function_call, _, _, _loc}), do: :core
-  defp node_layer({:function_call, _, _}), do: :core
-  defp node_layer({:conditional, _, _, _, _loc}), do: :core
-  defp node_layer({:conditional, _, _, _}), do: :core
-  defp node_layer({:block, _, _loc}), do: :core
-  defp node_layer({:block, _}), do: :core
-  defp node_layer({:early_return, _, _, _loc}), do: :core
-  defp node_layer({:early_return, _, _}), do: :core
-  defp node_layer({:loop, _, _, _, _loc}), do: :extended
-  defp node_layer({:loop, _, _, _}), do: :extended
-  defp node_layer({:loop, _, _, _, _, _loc}), do: :extended
-  defp node_layer({:loop, _, _, _, _}), do: :extended
-  defp node_layer({:lambda, _, _, _, _loc}), do: :extended
-  defp node_layer({:lambda, _, _, _}), do: :extended
-  defp node_layer({:collection_op, _, _, _, _loc}), do: :extended
-  defp node_layer({:collection_op, _, _, _}), do: :extended
-  defp node_layer({:collection_op, _, _, _, _, _loc}), do: :extended
-  defp node_layer({:collection_op, _, _, _, _}), do: :extended
-  defp node_layer({:exception_handling, _, _, _, _loc}), do: :extended
-  defp node_layer({:exception_handling, _, _, _}), do: :extended
-  defp node_layer({:language_specific, _, _, _}), do: :native
+  for {layer, kinds} <- @node_layers do
+    defp node_layer(ast) when is_tuple(ast) and elem(ast, 1) in unquote(kinds), do: unquote(layer)
+  end
+
   defp node_layer(_), do: :core
 
+  @composite_nodes ~w|binary_op unary_op list map function_call conditional block loop lambda collection_op exception_handling|a
   @spec composite_node?(AST.meta_ast()) :: boolean()
   # Handle location-aware nodes
-  defp composite_node?({:binary_op, _, _, _, _, _loc}), do: true
-  defp composite_node?({:binary_op, _, _, _, _}), do: true
-  defp composite_node?({:unary_op, _, _, _, _loc}), do: true
-  defp composite_node?({:unary_op, _, _, _}), do: true
-  defp composite_node?({:list, _, _loc}), do: true
-  defp composite_node?({:list, _}), do: true
-  defp composite_node?({:map, _, _loc}), do: true
-  defp composite_node?({:map, _}), do: true
-  defp composite_node?({:function_call, _, _, _loc}), do: true
-  defp composite_node?({:function_call, _, _}), do: true
-  defp composite_node?({:conditional, _, _, _, _loc}), do: true
-  defp composite_node?({:conditional, _, _, _}), do: true
-  defp composite_node?({:block, _, _loc}), do: true
-  defp composite_node?({:block, _}), do: true
-  defp composite_node?({:loop, _, _, _, _loc}), do: true
-  defp composite_node?({:loop, _, _, _}), do: true
-  defp composite_node?({:loop, _, _, _, _, _loc}), do: true
-  defp composite_node?({:loop, _, _, _, _}), do: true
-  defp composite_node?({:lambda, _, _, _, _loc}), do: true
-  defp composite_node?({:lambda, _, _, _}), do: true
-  defp composite_node?({:collection_op, _, _, _, _loc}), do: true
-  defp composite_node?({:collection_op, _, _, _}), do: true
-  defp composite_node?({:collection_op, _, _, _, _, _loc}), do: true
-  defp composite_node?({:collection_op, _, _, _, _}), do: true
-  defp composite_node?({:exception_handling, _, _, _, _loc}), do: true
-  defp composite_node?({:exception_handling, _, _, _}), do: true
+  defp composite_node?(ast) when is_tuple(ast) and elem(ast, 1) in @composite_nodes, do: true
   defp composite_node?(_), do: false
 
   @spec calculate_depth(AST.meta_ast()) :: non_neg_integer()

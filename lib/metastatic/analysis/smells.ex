@@ -98,52 +98,64 @@ defmodule Metastatic.Analysis.Smells do
     Map.merge(@default_thresholds, overrides)
   end
 
-  # Detect long functions using complexity metrics
+  # Detect long functions using per-function complexity metrics
   defp detect_long_function(smells, doc, thresholds) do
     {:ok, complexity} = Complexity.analyze(doc)
-    statement_count = Map.get(complexity.function_metrics, :statement_count, 0)
 
-    if statement_count > thresholds.max_statements do
-      location = extract_location(doc)
+    # Check per-function metrics for long functions
+    per_function_smells =
+      complexity.per_function
+      |> Enum.filter(fn func ->
+        func.statements > thresholds.max_statements
+      end)
+      |> Enum.map(fn func ->
+        %{
+          type: :long_function,
+          severity:
+            determine_severity(:long_function, func.statements, thresholds.max_statements),
+          description:
+            "Function '#{func.name}' has #{func.statements} statements (threshold: #{thresholds.max_statements})",
+          suggestion: "Break this function into smaller, focused functions",
+          context: %{
+            function_name: func.name,
+            statement_count: func.statements,
+            threshold: thresholds.max_statements
+          },
+          location: %{function: func.name}
+        }
+      end)
 
-      smell = %{
-        type: :long_function,
-        severity: determine_severity(:long_function, statement_count, thresholds.max_statements),
-        description:
-          "Function has #{statement_count} statements (threshold: #{thresholds.max_statements})",
-        suggestion: "Break this function into smaller, focused functions",
-        context: %{statement_count: statement_count, threshold: thresholds.max_statements},
-        location: location
-      }
-
-      [smell | smells]
-    else
-      smells
-    end
+    per_function_smells ++ smells
   end
 
-  # Detect deep nesting using complexity metrics
+  # Detect deep nesting using per-function complexity metrics
   defp detect_deep_nesting(smells, doc, thresholds) do
     {:ok, complexity} = Complexity.analyze(doc)
 
-    if complexity.max_nesting > thresholds.max_nesting do
-      location = extract_location(doc)
+    # Check per-function metrics for deep nesting
+    per_function_smells =
+      complexity.per_function
+      |> Enum.filter(fn func ->
+        func.max_nesting > thresholds.max_nesting
+      end)
+      |> Enum.map(fn func ->
+        %{
+          type: :deep_nesting,
+          severity:
+            determine_severity(:deep_nesting, func.max_nesting, thresholds.max_nesting),
+          description:
+            "Function '#{func.name}' has nesting depth of #{func.max_nesting} (threshold: #{thresholds.max_nesting})",
+          suggestion: "Reduce nesting by extracting functions or using early returns",
+          context: %{
+            function_name: func.name,
+            max_nesting: func.max_nesting,
+            threshold: thresholds.max_nesting
+          },
+          location: %{function: func.name}
+        }
+      end)
 
-      smell = %{
-        type: :deep_nesting,
-        severity:
-          determine_severity(:deep_nesting, complexity.max_nesting, thresholds.max_nesting),
-        description:
-          "Nesting depth of #{complexity.max_nesting} exceeds threshold of #{thresholds.max_nesting}",
-        suggestion: "Reduce nesting by extracting functions or using early returns",
-        context: %{max_nesting: complexity.max_nesting, threshold: thresholds.max_nesting},
-        location: location
-      }
-
-      [smell | smells]
-    else
-      smells
-    end
+    per_function_smells ++ smells
   end
 
   # Detect magic numbers (numeric literals in complex expressions)
