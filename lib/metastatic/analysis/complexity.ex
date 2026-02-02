@@ -197,10 +197,10 @@ defmodule Metastatic.Analysis.Complexity do
   # M2.2s: Structural types - extract members/body for analysis
   # NEW format with metadata: {:container, type, name, parent, type_params, implements, body, metadata}
   defp extract_analyzable_ast(
-         {:container, _type, _name, _parent, _type_params, _implements, body, _metadata},
+         {:container, _type, _name, _parent, _type_params, _implements, body, metadata},
          _doc_metadata
        )
-       when is_map(_metadata) do
+       when is_map(metadata) do
     # For containers, analyze the aggregate complexity of all members
     if is_list(body) do
       {:block, body}
@@ -224,10 +224,10 @@ defmodule Metastatic.Analysis.Complexity do
 
   # NEW format with metadata: {:function_def, name, params, ret_type, opts, body, metadata}
   defp extract_analyzable_ast(
-         {:function_def, _name, _params, _ret_type, _opts, body, _metadata},
+         {:function_def, _name, _params, _ret_type, _opts, body, metadata},
          _doc_metadata
        )
-       when is_map(_metadata) do
+       when is_map(metadata) do
     # For function definitions, analyze the body
     body
   end
@@ -260,10 +260,10 @@ defmodule Metastatic.Analysis.Complexity do
   # M2.2s: Extract functions from container members
   # NEW format with metadata: {:container, type, name, parent, type_params, implements, body, metadata}
   defp extract_per_function_metrics(
-         {:container, _type, _name, _parent, _type_params, _implements, body, _metadata},
+         {:container, _type, _name, _parent, _type_params, _implements, body, metadata},
          _doc_metadata
        )
-       when is_map(_metadata) do
+       when is_map(metadata) do
     # Handle different body formats:
     # - {:block, [function_def, ...]} for multiple functions
     # - function_def for single function
