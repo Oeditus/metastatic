@@ -195,7 +195,21 @@ defmodule Metastatic.Analysis.Complexity do
   end
 
   # M2.2s: Structural types - extract members/body for analysis
-  # NEW format: {:container, type, name, parent, type_params, implements, body}
+  # NEW format with metadata: {:container, type, name, parent, type_params, implements, body, metadata}
+  defp extract_analyzable_ast(
+         {:container, _type, _name, _parent, _type_params, _implements, body, _metadata},
+         _doc_metadata
+       )
+       when is_map(_metadata) do
+    # For containers, analyze the aggregate complexity of all members
+    if is_list(body) do
+      {:block, body}
+    else
+      body
+    end
+  end
+
+  # Legacy format: {:container, type, name, parent, type_params, implements, body}
   defp extract_analyzable_ast(
          {:container, _type, _name, _parent, _type_params, _implements, body},
          _doc_metadata
@@ -208,7 +222,17 @@ defmodule Metastatic.Analysis.Complexity do
     end
   end
 
-  # NEW format: {:function_def, name, params, ret_type, opts, body}
+  # NEW format with metadata: {:function_def, name, params, ret_type, opts, body, metadata}
+  defp extract_analyzable_ast(
+         {:function_def, _name, _params, _ret_type, _opts, body, _metadata},
+         _doc_metadata
+       )
+       when is_map(_metadata) do
+    # For function definitions, analyze the body
+    body
+  end
+
+  # Legacy format: {:function_def, name, params, ret_type, opts, body}
   defp extract_analyzable_ast(
          {:function_def, _name, _params, _ret_type, _opts, body},
          _doc_metadata
@@ -234,7 +258,34 @@ defmodule Metastatic.Analysis.Complexity do
   end
 
   # M2.2s: Extract functions from container members
-  # NEW format: {:container, type, name, parent, type_params, implements, body}
+  # NEW format with metadata: {:container, type, name, parent, type_params, implements, body, metadata}
+  defp extract_per_function_metrics(
+         {:container, _type, _name, _parent, _type_params, _implements, body, _metadata},
+         _doc_metadata
+       )
+       when is_map(_metadata) do
+    # Handle different body formats:
+    # - {:block, [function_def, ...]} for multiple functions
+    # - function_def for single function
+    # - [function_def, ...] for list of functions (edge case)
+    members =
+      case body do
+        {:block, statements} when is_list(statements) ->
+          statements
+
+        list when is_list(list) ->
+          list
+
+        single_item ->
+          [single_item]
+      end
+
+    members
+    |> Enum.filter(&match?(ast when is_tuple(ast) and elem(ast, 0) == :function_def, &1))
+    |> Enum.map(&analyze_function_def/1)
+  end
+
+  # Legacy format: {:container, type, name, parent, type_params, implements, body}
   defp extract_per_function_metrics(
          {:container, _type, _name, _parent, _type_params, _implements, body},
          _doc_metadata
@@ -275,6 +326,7 @@ defmodule Metastatic.Analysis.Complexity do
       )
     )
     |> Enum.map(fn
+      {:function_def, _, _, _, _, _, _} = node -> analyze_function_def(node)
       {:function_def, _, _, _, _, _} = node -> analyze_function_def(node)
       node -> analyze_function(node)
     end)
@@ -307,7 +359,22 @@ defmodule Metastatic.Analysis.Complexity do
   defp analyze_function(_), do: nil
 
   # M2.2s: Analyze function_def structural type
-  # NEW format: {:function_def, name, params, ret_type, opts, body}
+  # NEW format with metadata: {:function_def, name, params, ret_type, opts, body, metadata}
+  defp analyze_function_def({:function_def, name, _params, _ret_type, _opts, body, metadata})
+       when is_map(metadata) do
+    variables = Metastatic.AST.variables(body)
+
+    %{
+      name: name,
+      cyclomatic: Cyclomatic.calculate(body),
+      cognitive: Cognitive.calculate(body),
+      max_nesting: Nesting.calculate(body),
+      statements: FunctionMetrics.calculate(body).statement_count,
+      variables: MapSet.size(variables)
+    }
+  end
+
+  # Legacy format: {:function_def, name, params, ret_type, opts, body}
   defp analyze_function_def({:function_def, name, _params, _ret_type, _opts, body}) do
     variables = Metastatic.AST.variables(body)
 
