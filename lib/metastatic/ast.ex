@@ -50,24 +50,70 @@ defmodule Metastatic.AST do
   and code analysis. All fields use 1-indexed line numbers and 0-indexed
   column offsets to match common editor conventions.
 
+  In addition to source position, this type preserves M1-level context metadata
+  such as module name, function name, and arity. This enables tools like Ragex
+  to provide rich context-aware analysis without losing abstraction at M2 level.
+
   ## Fields
 
+  ### Source Position (existing)
   - `:line` - 1-indexed line number (required)
   - `:col` - 0-indexed column offset (optional)
   - `:end_line` - 1-indexed end line number (optional)
   - `:end_col` - 0-indexed end column offset (optional)
 
+  ### M1 Context Metadata (new)
+  - `:language` - Source language atom (`:elixir`, `:python`, etc.)
+  - `:module` - Fully qualified module/namespace name
+  - `:function` - Current function/method name
+  - `:arity` - Function arity (number of parameters)
+  - `:container` - Container name (class, module, namespace)
+  - `:visibility` - Visibility modifier (`:public`, `:private`, `:protected`)
+  - `:file` - Absolute or relative file path
+  - `:m1_meta` - Language-specific metadata escape hatch
+
   ## Examples
 
+      # Basic source position
       %{line: 10}
       %{line: 10, col: 5}
       %{line: 10, col: 5, end_line: 10, end_col: 15}
+
+      # With M1 context metadata
+      %{
+        line: 42,
+        col: 8,
+        language: :elixir,
+        module: "MyApp.UserController",
+        function: "create",
+        arity: 2,
+        visibility: :public,
+        file: "lib/my_app/user_controller.ex"
+      }
+
+      # Python example with class context
+      %{
+        line: 15,
+        language: :python,
+        container: "UserService",
+        function: "authenticate",
+        arity: 2,
+        file: "services/user_service.py"
+      }
   """
   @type location :: %{
           required(:line) => pos_integer(),
           optional(:col) => non_neg_integer(),
           optional(:end_line) => pos_integer(),
-          optional(:end_col) => non_neg_integer()
+          optional(:end_col) => non_neg_integer(),
+          optional(:language) => atom(),
+          optional(:module) => String.t(),
+          optional(:function) => String.t(),
+          optional(:arity) => non_neg_integer(),
+          optional(:container) => String.t(),
+          optional(:visibility) => atom(),
+          optional(:file) => String.t(),
+          optional(:m1_meta) => map()
         }
 
   @typedoc """
@@ -1043,6 +1089,186 @@ defmodule Metastatic.AST do
   end
 
   def with_location(ast, _loc), do: ast
+
+  @doc """
+  Merge context metadata into a node's location.
+
+  If the node already has location metadata, merges the context into it.
+  If the node has no location, creates a new location with just the context
+  (without line number, which is optional for context-only metadata).
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10}}
+      iex> context = %{module: "MyApp", function: "foo"}
+      iex> Metastatic.AST.with_context(ast, context)
+      {:variable, "x", %{line: 10, module: "MyApp", function: "foo"}}
+
+      iex> ast = {:variable, "x"}
+      iex> context = %{module: "MyApp", function: "foo", arity: 2}
+      iex> Metastatic.AST.with_context(ast, context)
+      {:variable, "x", %{module: "MyApp", function: "foo", arity: 2}}
+  """
+  @spec with_context(meta_ast(), map()) :: meta_ast()
+  def with_context(ast, context) when is_tuple(ast) and is_map(context) do
+    existing_loc = location(ast)
+
+    new_loc =
+      if existing_loc do
+        Map.merge(existing_loc, context)
+      else
+        context
+      end
+
+    # Remove existing location if present, then add merged location
+    ast_without_loc = strip_location(ast)
+    with_location(ast_without_loc, new_loc)
+  end
+
+  def with_context(ast, _context), do: ast
+
+  @doc """
+  Extract a specific metadata value from a node's location.
+
+  Returns the value if present, or `nil` if not found or no location attached.
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10, module: "MyApp", function: "foo"}}
+      iex> Metastatic.AST.extract_metadata(ast, :module)
+      "MyApp"
+
+      iex> ast = {:variable, "x", %{line: 10}}
+      iex> Metastatic.AST.extract_metadata(ast, :module)
+      nil
+
+      iex> ast = {:variable, "x"}
+      iex> Metastatic.AST.extract_metadata(ast, :function)
+      nil
+  """
+  @spec extract_metadata(meta_ast(), atom()) :: term() | nil
+  def extract_metadata(ast, key) when is_atom(key) do
+    case location(ast) do
+      nil -> nil
+      loc -> Map.get(loc, key)
+    end
+  end
+
+  @doc """
+  Extract module name from a node's location metadata.
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10, module: "MyApp.UserController"}}
+      iex> Metastatic.AST.node_module(ast)
+      "MyApp.UserController"
+
+      iex> ast = {:variable, "x", %{line: 10}}
+      iex> Metastatic.AST.node_module(ast)
+      nil
+  """
+  @spec node_module(meta_ast()) :: String.t() | nil
+  def node_module(ast), do: extract_metadata(ast, :module)
+
+  @doc """
+  Extract function name from a node's location metadata.
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10, function: "create"}}
+      iex> Metastatic.AST.node_function(ast)
+      "create"
+
+      iex> ast = {:variable, "x"}
+      iex> Metastatic.AST.node_function(ast)
+      nil
+  """
+  @spec node_function(meta_ast()) :: String.t() | nil
+  def node_function(ast), do: extract_metadata(ast, :function)
+
+  @doc """
+  Extract function arity from a node's location metadata.
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10, arity: 3}}
+      iex> Metastatic.AST.node_arity(ast)
+      3
+
+      iex> ast = {:variable, "x", %{line: 10}}
+      iex> Metastatic.AST.node_arity(ast)
+      nil
+  """
+  @spec node_arity(meta_ast()) :: non_neg_integer() | nil
+  def node_arity(ast), do: extract_metadata(ast, :arity)
+
+  @doc """
+  Extract file path from a node's location metadata.
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10, file: "lib/my_app.ex"}}
+      iex> Metastatic.AST.node_file(ast)
+      "lib/my_app.ex"
+
+      iex> ast = {:variable, "x"}
+      iex> Metastatic.AST.node_file(ast)
+      nil
+  """
+  @spec node_file(meta_ast()) :: String.t() | nil
+  def node_file(ast), do: extract_metadata(ast, :file)
+
+  @doc """
+  Extract container name from a node's location metadata.
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10, container: "UserService"}}
+      iex> Metastatic.AST.node_container(ast)
+      "UserService"
+
+      iex> ast = {:variable, "x"}
+      iex> Metastatic.AST.node_container(ast)
+      nil
+  """
+  @spec node_container(meta_ast()) :: String.t() | nil
+  def node_container(ast), do: extract_metadata(ast, :container)
+
+  @doc """
+  Extract visibility from a node's location metadata.
+
+  ## Examples
+
+      iex> ast = {:variable, "x", %{line: 10, visibility: :private}}
+      iex> Metastatic.AST.node_visibility(ast)
+      :private
+
+      iex> ast = {:variable, "x"}
+      iex> Metastatic.AST.node_visibility(ast)
+      nil
+  """
+  @spec node_visibility(meta_ast()) :: atom() | nil
+  def node_visibility(ast), do: extract_metadata(ast, :visibility)
+
+  # Strip location from a node (helper for with_context)
+  defp strip_location(ast) when is_tuple(ast) do
+    size = tuple_size(ast)
+
+    if size > 2 do
+      last_elem = elem(ast, size - 1)
+
+      if is_map(last_elem) and Map.has_key?(last_elem, :line) do
+        # Remove the last element (location)
+        ast |> Tuple.to_list() |> Enum.drop(-1) |> List.to_tuple()
+      else
+        ast
+      end
+    else
+      ast
+    end
+  end
+
+  defp strip_location(ast), do: ast
 
   @doc """
   Extract all variables referenced in an AST.

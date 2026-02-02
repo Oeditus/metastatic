@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- M1 Metadata Preservation - Full context threading for Ragex integration:
+  - Expanded location type with optional M1 context fields: `:language`, `:module`, `:function`, `:arity`, `:container`, `:visibility`, `:file`, `:m1_meta`
+  - Added AST helper functions: `with_context/2`, `extract_metadata/2`, `node_module/1`, `node_function/1`, `node_arity/1`, `node_file/1`, `node_container/1`, `node_visibility/1`
+  - Elixir adapter now attaches module and function context to structural nodes (container, function_def)
+  - Runner properly handles location-aware nodes (both with and without metadata) in `update_contexts/2` and `extract_children/2`
+  - Analyzer.issue/1 helper automatically extracts location metadata from nodes
+  - Updated TelemetryInRecursiveFunction analyzer to handle both 6-tuple and 7-tuple function_def patterns
+  - All 1,431 tests passing (202 doctests + 1,229 tests including 14 new metadata tests)
+  - Enables Ragex to access function names, arities, modules, and locations from business logic analyzers
 - Business Logic Analyzers - 20 language-agnostic analyzers ported from oeditus_credo:
   - **Tier 1 (Pure MetaAST, 9 analyzers)**: CallbackHell, MissingErrorHandling, SilentErrorCase, SwallowingException, HardcodedValue, NPlusOneQuery, InefficientFilter, UnmanagedTask, TelemetryInRecursiveFunction
   - **Tier 2 (Function Name Heuristics, 4 analyzers)**: MissingTelemetryForExternalHttp, SyncOverAsync, DirectStructUpdate, MissingHandleAsync

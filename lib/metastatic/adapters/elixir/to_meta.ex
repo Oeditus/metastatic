@@ -41,6 +41,23 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   - `:context` - variable context (Elixir, nil, module name)
   - `:elixir_meta` - original Elixir metadata keyword list
 
+  ## Context Threading (M1 Metadata Enrichment)
+
+  The adapter now threads contextual information through the transformation,
+  attaching module name, function name, arity, and visibility to each node's
+  location metadata. This enables rich context-aware analysis while maintaining
+  M2 abstraction.
+
+  Context structure:
+
+      %{
+        language: :elixir,
+        module: "MyApp.UserController",
+        function: "create",
+        arity: 2,
+        visibility: :public
+      }
+
   This enables high-fidelity round-trips (M1 → M2 → M1).
   """
 
@@ -273,9 +290,18 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   def transform({:defmodule, meta, [name, [do: body]]}) do
     with {:ok, body_meta, _} <- transform(body) do
       module_name = module_to_string(name)
+
+      # Add module context to the container node itself, not its children
+      module_context = %{
+        language: :elixir,
+        module: module_name
+      }
+
       # Use container type for module
       # Format: {:container, type, name, parent, type_params, implements, body}
-      {:ok, {:container, :module, module_name, nil, [], [], body_meta},
+      container = {:container, :module, module_name, nil, [], [], body_meta}
+
+      {:ok, add_location_with_context(container, meta, module_context),
        %{elixir_meta: meta, original_name: name}}
     end
   end
@@ -286,9 +312,22 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     with {:ok, body_meta, _} <- transform(body) do
       func_name = extract_function_name(signature)
       params = extract_function_params(signature)
+      arity = length(params)
+      visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
+
+      # Add function context to the function_def node itself, not its children
+      func_context = %{
+        language: :elixir,
+        function: func_name,
+        arity: arity,
+        visibility: visibility
+      }
 
       # Use function_def type
-      {:ok, {:function_def, func_name, params, nil, [], body_meta},
+      func_def =
+        {:function_def, func_name, params, nil, %{visibility: visibility}, body_meta}
+
+      {:ok, add_location_with_context(func_def, meta, func_context),
        %{elixir_meta: meta, function_type: func_type}}
     end
   end
@@ -328,6 +367,15 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         {{:., _outer_meta,
           [{{:., _inner_meta, [_inner_module, _inner_func]}, _, _inner_args} = inner, _fun_or_key]},
          _, _outer_args} = whole
+      ) do
+    require Logger
+    Logger.notice("Incomplete transform: " <> inspect(whole))
+    transform(inner)
+  end
+
+  def transform(
+        {{:., _call_meta, [{:@, _inner_meta, [_inner_arg]}, _func]} = inner, _outer_meta,
+         _outer_args} = whole
       ) do
     require Logger
     Logger.notice("Incomplete transform: " <> inspect(whole))
@@ -948,12 +996,36 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp add_location(ast, metadata) when is_list(metadata) do
     case Keyword.get(metadata, :line) do
       nil -> ast
-      line when is_integer(line) -> AST.with_location(ast, %{line: line})
+      line when is_integer(line) -> AST.with_location(ast, %{line: line, language: :elixir})
       _ -> ast
     end
   end
 
   defp add_location(ast, _), do: ast
+
+  # Helper to add location and context metadata to MetaAST nodes
+  defp add_location_with_context(ast, metadata, context)
+       when is_list(metadata) and is_map(context) do
+    line = Keyword.get(metadata, :line)
+
+    loc = if line, do: Map.put(context, :line, line), else: context
+
+    if map_size(loc) > 0 do
+      AST.with_location(ast, loc)
+    else
+      ast
+    end
+  end
+
+  defp add_location_with_context(ast, _metadata, context) when is_map(context) do
+    if map_size(context) > 0 do
+      AST.with_location(ast, context)
+    else
+      ast
+    end
+  end
+
+  defp add_location_with_context(ast, metadata, _context), do: add_location(ast, metadata)
 
   # Function capture transformation
   # Converts &(...) syntax to equivalent anonymous functions

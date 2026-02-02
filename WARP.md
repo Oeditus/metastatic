@@ -6,18 +6,19 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
-**Current Status:** Phase 2 Complete - Structural Layer Implemented (v0.2.0-dev)  
-- Core MetaAST foundation implemented with 1458 passing tests (100% coverage)
+**Current Status:** Phase 2 Complete - Structural Layer Implemented + M1 Metadata Preservation (v0.2.0-dev)  
+- Core MetaAST foundation implemented with 1431 passing tests (100% coverage)
 - M2.2s Structural/Organizational Layer: container, function_def, attribute_access, augmented_assignment, property
+- M1 Metadata Preservation: Full context threading (module, function, arity, visibility) for Ragex integration
 - Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented
 - All 9 analysis tools support structural types
-- Business Logic Analyzers: 20 language-agnostic analyzers operational
+- Business Logic Analyzers: 20 language-agnostic analyzers operational with M1 context
 
 ## Essential Commands
 
 ### Testing
 ```bash
-# Run all tests (1458 tests: 143 doctests + 1315 tests, all passing)
+# Run all tests (1431 tests: 202 doctests + 1229 tests, all passing)
 mix test
 
 # Run specific test file
@@ -133,6 +134,73 @@ flowchart TD
 **lib/metastatic/application.ex**
 - OTP application entry point
 - Currently minimal supervisor structure
+
+### M1 Metadata Preservation
+
+The library now preserves M1 (language-specific) context information through the M2 abstraction layer, enabling tools like Ragex to access function names, modules, arities, and locations from business logic analyzers.
+
+**Location Type Extension:**
+```elixir
+@type location :: %{
+  optional(:line) => non_neg_integer(),
+  optional(:column) => non_neg_integer(),
+  optional(:path) => String.t(),
+  # M1 context fields for Ragex integration
+  optional(:language) => atom(),
+  optional(:module) => String.t(),
+  optional(:function) => String.t(),
+  optional(:arity) => non_neg_integer(),
+  optional(:container) => String.t(),
+  optional(:visibility) => :public | :private | :protected,
+  optional(:file) => String.t(),
+  optional(:m1_meta) => map()
+}
+```
+
+**Context Attachment Strategy:**
+- **Container nodes** (modules/classes) receive `:module`, `:language`, `:line` metadata
+- **Function_def nodes** receive `:function`, `:arity`, `:visibility`, `:language`, `:line` metadata
+- **Child nodes** do NOT receive context enrichment (prevents tuple bloat)
+- **Runner** extracts context from structural nodes and propagates via `context` map to analyzers
+
+**Helper Functions:**
+```elixir
+# Attach context to a node
+AST.with_context(node, %{module: "MyApp", function: "create", arity: 2})
+
+# Extract specific metadata
+AST.extract_metadata(node, :module)        # => "MyApp"
+AST.extract_metadata(node, :function)      # => "create"
+
+# Convenience extractors
+AST.node_module(node)      # => "MyApp"
+AST.node_function(node)    # => "create"
+AST.node_arity(node)       # => 2
+AST.node_visibility(node)  # => :public
+```
+
+**Example - Elixir Adapter:**
+```elixir
+# Source
+defmodule MyApp.UserController do
+  def create(name, email) do
+    {:ok, user} = User.create(name, email)
+    user
+  end
+end
+
+# MetaAST with context
+{:container, :module, "MyApp.UserController", nil, [], [], 
+  {:function_def, "create", [...], nil, %{visibility: :public}, body,
+    %{function: "create", arity: 2, visibility: :public, language: :elixir, line: 2}},
+  %{module: "MyApp.UserController", language: :elixir, line: 1}}
+```
+
+**Integration with Analysis:**
+- `Analyzer.issue/1` helper automatically extracts location metadata from nodes
+- All 20 business logic analyzers benefit from context without modification
+- Runner's `update_contexts/2` propagates structural node context to analyzer `context` map
+- Analyzers access via `context.module_name` and `context.function_name`
 
 ### Type System Key Decisions
 

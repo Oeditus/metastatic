@@ -211,9 +211,22 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   end
 
   @impl true
+  # Function definition without location metadata (6-tuple)
   def analyze({:function_def, name, _params, _return_type, _opts, body} = node, _context)
       when is_atom(name) or is_binary(name) do
-    # Check if function is recursive and contains telemetry
+    check_recursive_telemetry(name, body, node)
+  end
+
+  # Function definition with location metadata (7-tuple)
+  def analyze({:function_def, name, _params, _return_type, _opts, body, _loc} = node, _context)
+      when is_atom(name) or is_binary(name) do
+    check_recursive_telemetry(name, body, node)
+  end
+
+  def analyze(_node, _context), do: []
+
+  # Check if function is recursive and contains telemetry
+  defp check_recursive_telemetry(name, body, node) do
     if recursive?(name, body) and contains_telemetry?(body) do
       [
         Analyzer.issue(
@@ -234,8 +247,6 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
       []
     end
   end
-
-  def analyze(_node, _context), do: []
 
   # ----- Private Helpers -----
 

@@ -34,7 +34,8 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
   describe "Function captures - named function references" do
     test "transforms &Integer.parse/1 to lambda calling Integer.parse" do
       # &Integer.parse/1
-      ast = {:&, [], [{:/, [], [{{:., [], [{:__aliases__, [], [:Integer]}, :parse]}, [], []}, 1]}]}
+      ast =
+        {:&, [], [{:/, [], [{{:., [], [{:__aliases__, [], [:Integer]}, :parse]}, [], []}, 1]}]}
 
       assert {:ok, {:lambda, params, [], body}, metadata} = ToMeta.transform(ast)
       assert [{:param, "arg_1", nil, nil}] = params
@@ -56,7 +57,8 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
 
     test "transforms &String.upcase/1 to lambda calling String.upcase" do
       # &String.upcase/1
-      ast = {:&, [], [{:/, [], [{{:., [], [{:__aliases__, [], [:String]}, :upcase]}, [], []}, 1]}]}
+      ast =
+        {:&, [], [{:/, [], [{{:., [], [{:__aliases__, [], [:String]}, :upcase]}, [], []}, 1]}]}
 
       assert {:ok, {:lambda, params, [], body}, _metadata} = ToMeta.transform(ast)
       assert [{:param, "arg_1", nil, nil}] = params
@@ -168,7 +170,13 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       assert {:ok, {:lambda, params, [], _body}, metadata} = ToMeta.transform(ast)
       # Should create params for arg_1, arg_2, arg_3
       assert length(params) == 3
-      assert [{:param, "arg_1", nil, nil}, {:param, "arg_2", nil, nil}, {:param, "arg_3", nil, nil}] = params
+
+      assert [
+               {:param, "arg_1", nil, nil},
+               {:param, "arg_2", nil, nil},
+               {:param, "arg_3", nil, nil}
+             ] = params
+
       assert metadata.arity == 3
     end
   end

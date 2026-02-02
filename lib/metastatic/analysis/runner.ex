@@ -243,49 +243,98 @@ defmodule Metastatic.Analysis.Runner do
       {:binary_op, _, _, left, right} ->
         [left, right]
 
+      {:binary_op, _, _, left, right, _loc} ->
+        [left, right]
+
       {:unary_op, _, _, operand} ->
+        [operand]
+
+      {:unary_op, _, _, operand, _loc} ->
         [operand]
 
       {:conditional, cond, then_br, else_br} ->
         [cond, then_br, else_br]
 
+      {:conditional, cond, then_br, else_br, _loc} ->
+        [cond, then_br, else_br]
+
       {:block, stmts} when is_list(stmts) ->
+        stmts
+
+      {:block, stmts, _loc} when is_list(stmts) ->
         stmts
 
       {:early_return, value} ->
         [value]
 
+      {:early_return, value, _loc} ->
+        [value]
+
       {:assignment, target, value} ->
+        [target, value]
+
+      {:assignment, target, value, _loc} ->
         [target, value]
 
       {:inline_match, pattern, value} ->
         [pattern, value]
 
+      {:inline_match, pattern, value, _loc} ->
+        [pattern, value]
+
       {:function_call, _name, args} ->
+        args
+
+      {:function_call, _name, args, _loc} ->
         args
 
       {:attribute_access, obj, _attr} ->
         [obj]
 
+      {:attribute_access, obj, _attr, _loc} ->
+        [obj]
+
       {:augmented_assignment, target, _op, value} ->
+        [target, value]
+
+      {:augmented_assignment, target, _op, value, _loc} ->
         [target, value]
 
       # M2.2 Extended layer
       {:loop, :while, cond, body} ->
         [cond, body]
 
+      {:loop, :while, cond, body, _loc} ->
+        [cond, body]
+
       {:loop, _, iter, coll, body} ->
+        [iter, coll, body]
+
+      {:loop, _, iter, coll, body, _loc} ->
         [iter, coll, body]
 
       {:lambda, _params, _captures, body} ->
         # Lambda is {:lambda, params, captures, body}
         [body]
 
-      {:collection_op, _, func, coll} ->
-        [func, coll]
+      {:lambda, _params, _captures, body, _loc} ->
+        [body]
 
+      # Reduce: 6-tuple with location (must come first)
+      {:collection_op, _, func, coll, init, loc} when is_map(loc) ->
+        [func, coll, init]
+
+      # Reduce: 5-tuple without location
       {:collection_op, _, func, coll, init} ->
         [func, coll, init]
+
+      # Map/filter: 5-tuple with location
+      {:collection_op, _, func, coll, loc} when is_map(loc) ->
+        [func, coll]
+
+      # Map/filter: 4-tuple without location
+      {:collection_op, _, func, coll} ->
+        [func, coll]
 
       {:pattern_match, patterns, _opts} when is_list(patterns) ->
         Enum.flat_map(patterns, &extract_pattern_children/1)
@@ -301,17 +350,32 @@ defmodule Metastatic.Analysis.Runner do
         # container: type, name, parent, type_params, implements, body
         if is_list(body), do: body, else: [body]
 
+      {:container, _type, _name, _parent, _type_params, _implements, body, _loc} ->
+        if is_list(body), do: body, else: [body]
+
       {:function_def, _name, _params, _ret_type, _opts, body} ->
         [body]
 
+      {:function_def, _name, _params, _ret_type, _opts, body, _loc} ->
+        [body]
+
       {:property, _name, getter, setter, _opts} ->
+        [getter, setter]
+
+      {:property, _name, getter, setter, _opts, _loc} ->
         [getter, setter]
 
       # Literals and variables have no children
       {:literal, _, _} ->
         []
 
+      {:literal, _, _, _loc} ->
+        []
+
       {:variable, _} ->
+        []
+
+      {:variable, _, _loc} ->
         []
 
       # Language-specific nodes - use transformed body from metadata if available
@@ -413,13 +477,29 @@ defmodule Metastatic.Analysis.Runner do
     # Update context based on current AST node
     # Track function names, module names, etc. for analyzers that need them
     case ast do
+      # Container without location metadata (7-tuple)
       {:container, _type, name, _, _, _, _} ->
         # Entering a module/class/namespace
         Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
           Map.put(acc, analyzer, Map.put(ctx, :module_name, name))
         end)
 
+      # Container with location metadata (8-tuple)
+      {:container, _type, name, _, _, _, _, _loc} ->
+        # Entering a module/class/namespace
+        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
+          Map.put(acc, analyzer, Map.put(ctx, :module_name, name))
+        end)
+
+      # Function definition without location metadata (6-tuple)
       {:function_def, name, _params, _ret_type, _opts, _body} ->
+        # Entering a function definition
+        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
+          Map.put(acc, analyzer, Map.put(ctx, :function_name, name))
+        end)
+
+      # Function definition with location metadata (7-tuple)
+      {:function_def, name, _params, _ret_type, _opts, _body, _loc} ->
         # Entering a function definition
         Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
           Map.put(acc, analyzer, Map.put(ctx, :function_name, name))

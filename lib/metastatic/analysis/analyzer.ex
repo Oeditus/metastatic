@@ -264,6 +264,10 @@ defmodule Metastatic.Analysis.Analyzer do
   @doc """
   Creates an issue map with required fields.
 
+  Automatically extracts location information from the node's metadata if available.
+  If the node has M1 context metadata (module, function, arity, etc.), it will be
+  included in the location.
+
   ## Examples
 
       iex> Analyzer.issue(
@@ -283,20 +287,76 @@ defmodule Metastatic.Analysis.Analyzer do
         suggestion: nil,
         metadata: %{}
       }
+
+      # With M1 context metadata in node:
+      iex> node_with_context = {:variable, "x", %{line: 10, module: "MyApp", function: "foo", arity: 2}}
+      iex> Analyzer.issue(
+      ...>   analyzer: MyAnalyzer,
+      ...>   category: :style,
+      ...>   severity: :warning,
+      ...>   message: "Found an issue",
+      ...>   node: node_with_context
+      ...> )
+      %{
+        analyzer: MyAnalyzer,
+        category: :style,
+        severity: :warning,
+        message: "Found an issue",
+        node: node_with_context,
+        location: %{line: 10, column: nil, path: nil, module: "MyApp", function: "foo", arity: 2},
+        suggestion: nil,
+        metadata: %{}
+      }
   """
   @spec issue(keyword()) :: issue()
   def issue(opts) do
+    node = Keyword.fetch!(opts, :node)
+
+    # Extract location from node if not explicitly provided
+    location =
+      case Keyword.get(opts, :location) do
+        nil -> extract_location_from_node(node)
+        explicit_loc -> explicit_loc
+      end
+
     %{
       analyzer: Keyword.fetch!(opts, :analyzer),
       category: Keyword.fetch!(opts, :category),
       severity: Keyword.fetch!(opts, :severity),
       message: Keyword.fetch!(opts, :message),
-      node: Keyword.fetch!(opts, :node),
-      location: Keyword.get(opts, :location, %{line: nil, column: nil, path: nil}),
+      node: node,
+      location: location,
       suggestion: Keyword.get(opts, :suggestion),
       metadata: Keyword.get(opts, :metadata, %{})
     }
   end
+
+  # Extract location information from a MetaAST node
+  defp extract_location_from_node(node) do
+    node_loc = AST.location(node)
+
+    if node_loc do
+      # Build location map with all available metadata
+      %{
+        line: Map.get(node_loc, :line),
+        column: Map.get(node_loc, :col),
+        path: Map.get(node_loc, :file)
+      }
+      |> maybe_add(:module, Map.get(node_loc, :module))
+      |> maybe_add(:function, Map.get(node_loc, :function))
+      |> maybe_add(:arity, Map.get(node_loc, :arity))
+      |> maybe_add(:container, Map.get(node_loc, :container))
+      |> maybe_add(:visibility, Map.get(node_loc, :visibility))
+      |> maybe_add(:language, Map.get(node_loc, :language))
+    else
+      # No location metadata in node
+      %{line: nil, column: nil, path: nil}
+    end
+  end
+
+  # Helper to conditionally add key to map if value is not nil
+  defp maybe_add(map, _key, nil), do: map
+  defp maybe_add(map, key, value), do: Map.put(map, key, value)
 
   @doc """
   Creates a suggestion map.
