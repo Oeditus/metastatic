@@ -316,6 +316,17 @@ defmodule Metastatic.Analysis.Security do
         walk_ast(body, acc, func)
 
       # M2.2s Structural layer
+      # Container with metadata (7 elements)
+      {:container, _type, _name, _parent, _type_params, _implements, body, _metadata}
+      when is_map(_metadata) ->
+        # Walk container body (modules, classes, etc.)
+        if is_list(body) do
+          Enum.reduce(body, acc, fn child, a -> walk_ast(child, a, func) end)
+        else
+          walk_ast(body, acc, func)
+        end
+
+      # Container without metadata (6 elements) - legacy
       {:container, _type, _name, _parent, _type_params, _implements, body} ->
         # Walk container body (modules, classes, etc.)
         if is_list(body) do
@@ -324,6 +335,13 @@ defmodule Metastatic.Analysis.Security do
           walk_ast(body, acc, func)
         end
 
+      # Function definition with metadata (7 elements)
+      {:function_def, _name, _params, _ret_type, _opts, body, _metadata}
+      when is_map(_metadata) ->
+        # Walk function body
+        walk_ast(body, acc, func)
+
+      # Function definition without metadata (6 elements) - legacy
       {:function_def, _name, _params, _ret_type, _opts, body} ->
         # Walk function body
         walk_ast(body, acc, func)
