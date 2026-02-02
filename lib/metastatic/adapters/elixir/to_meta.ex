@@ -555,6 +555,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   defp module_to_string({:__aliases__, _, parts}), do: Enum.join(parts, ".")
   defp module_to_string(atom) when is_atom(atom), do: Atom.to_string(atom)
+  # Handle variable or dynamic module reference (e.g., {:module, meta, nil})
+  defp module_to_string({name, _meta, context}) when is_atom(name) and is_atom(context) do
+    Atom.to_string(name)
+  end
 
   defp special_form?(atom) do
     atom in [
