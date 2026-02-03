@@ -324,13 +324,13 @@ defmodule Metastatic.Analysis.Runner do
       {:collection_op, _, func, coll, init, loc} when is_map(loc) ->
         [func, coll, init]
 
-      # Reduce: 5-tuple without location
-      {:collection_op, _, func, coll, init} ->
-        [func, coll, init]
-
       # Map/filter: 5-tuple with location
       {:collection_op, _, func, coll, loc} when is_map(loc) ->
         [func, coll]
+
+      # Reduce: 5-tuple without location
+      {:collection_op, _, func, coll, init} ->
+        [func, coll, init]
 
       # Map/filter: 4-tuple without location
       {:collection_op, _, func, coll} ->
