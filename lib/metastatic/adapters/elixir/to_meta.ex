@@ -173,8 +173,15 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Module aliases: User, MyApp.User, etc.
   def transform({:__aliases__, _meta, parts}) when is_list(parts) do
     # __aliases__ represents module names like User, MyApp.User
-    # Treat as a variable reference to the module
-    module_name = Enum.join(parts, ".")
+    # Handle special forms like __MODULE__ in alias paths
+    parts_strings =
+      Enum.map(parts, fn
+        atom when is_atom(atom) -> Atom.to_string(atom)
+        {:__MODULE__, _, _} -> "__MODULE__"
+        other -> inspect(other)
+      end)
+
+    module_name = Enum.join(parts_strings, ".")
     {:ok, {:variable, module_name}, %{}}
   end
 
