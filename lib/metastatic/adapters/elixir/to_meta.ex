@@ -465,6 +465,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Conditionals - M2.1 Core Layer
 
+  # Standalone if: if condition do ... end
   defp transform_if([condition, clauses]) do
     then_clause = Keyword.get(clauses, :do)
     else_clause = Keyword.get(clauses, :else)
@@ -474,6 +475,13 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
          {:ok, else_meta, _} <- transform_or_nil(else_clause) do
       {:ok, {:conditional, cond_meta, then_meta, else_meta}, %{}}
     end
+  end
+
+  # Piped if: expr |> if do ... end
+  # The condition comes from the pipe, so args only contains the clauses
+  defp transform_if([clauses]) do
+    # The condition is implicit from the pipe - mark as language-specific for now
+    {:ok, {:language_specific, :elixir, {:if, [], [clauses]}, "piped if expression"}, %{}}
   end
 
   defp transform_unless([condition, clauses]) do
