@@ -171,17 +171,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Variables - M2.1 Core Layer
 
   # Module aliases: User, MyApp.User, etc.
-  def transform({:__aliases__, _meta, parts}) when is_list(parts) do
+  def transform({:__aliases__, meta, parts}) when is_list(parts) do
     # __aliases__ represents module names like User, MyApp.User
-    # Handle special forms like __MODULE__ in alias paths
-    parts_strings =
-      Enum.map(parts, fn
-        atom when is_atom(atom) -> Atom.to_string(atom)
-        {:__MODULE__, _, _} -> "__MODULE__"
-        other -> inspect(other)
-      end)
-
-    module_name = Enum.join(parts_strings, ".")
+    # Treat as a variable reference to the module
+    module_name = module_to_string({:__aliases__, meta, parts})
     {:ok, {:variable, module_name}, %{}}
   end
 
@@ -568,12 +561,26 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp transform_or_nil(nil), do: {:ok, nil, %{}}
   defp transform_or_nil(value), do: transform(value)
 
-  defp module_to_string({:__aliases__, _, parts}), do: Enum.join(parts, ".")
+  defp module_to_string({:__aliases__, _, parts}) do
+    # Handle special forms like __MODULE__ in alias paths
+    parts_strings =
+      Enum.map(parts, fn
+        atom when is_atom(atom) -> Atom.to_string(atom)
+        {:__MODULE__, _, _} -> "__MODULE__"
+        other -> inspect(other)
+      end)
+
+    Enum.join(parts_strings, ".")
+  end
+
   defp module_to_string(atom) when is_atom(atom), do: Atom.to_string(atom)
   # Handle variable or dynamic module reference (e.g., {:module, meta, nil})
   defp module_to_string({name, _meta, context}) when is_atom(name) and is_atom(context) do
     Atom.to_string(name)
   end
+
+  # Fallback for complex expressions (function calls, etc.) - return inspected form
+  defp module_to_string(expr), do: inspect(expr)
 
   defp special_form?(atom) do
     atom in [
