@@ -189,6 +189,107 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
     end
   end
 
+  # M2.2s Structural Layer - Container support
+
+  def transform({:container, :class, name, parent, _type_params, _implements, body}, _metadata) do
+    with {:ok, name_ast} <- build_const_ast(name),
+         {:ok, parent_ast} <- build_const_ast_or_nil(parent),
+         {:ok, body_ast} <- transform_or_nil(body) do
+      {:ok, %{"type" => "class", "children" => [name_ast, parent_ast, body_ast]}}
+    end
+  end
+
+  def transform(
+        {:container, :class, name, parent, _type_params, _implements, body, _loc},
+        metadata
+      ) do
+    # Handle version with location metadata
+    transform({:container, :class, name, parent, [], [], body}, metadata)
+  end
+
+  def transform(
+        {:container, :module, name, _parent, _type_params, _implements, body},
+        _metadata
+      ) do
+    with {:ok, name_ast} <- build_const_ast(name),
+         {:ok, body_ast} <- transform_or_nil(body) do
+      {:ok, %{"type" => "module", "children" => [name_ast, body_ast]}}
+    end
+  end
+
+  def transform(
+        {:container, :module, name, _parent, _type_params, _implements, body, _loc},
+        metadata
+      ) do
+    # Handle version with location metadata
+    transform({:container, :module, name, nil, [], [], body}, metadata)
+  end
+
+  # M2.2s Structural Layer - Function definition support
+
+  # Handle class methods (self.method_name) - MUST come before generic function_def
+  def transform(
+        {:function_def, "self." <> method_name, params, _ret_type, _opts, body},
+        _metadata
+      ) do
+    args_ast = build_args_ast(params)
+    self_ast = %{"type" => "self", "children" => []}
+
+    with {:ok, body_ast} <- transform_or_nil(body) do
+      {:ok, %{"type" => "defs", "children" => [self_ast, method_name, args_ast, body_ast]}}
+    end
+  end
+
+  def transform(
+        {:function_def, "self." <> method_name, params, _ret_type, _opts, body, _loc},
+        metadata
+      ) do
+    # Handle version with location metadata
+    transform({:function_def, "self." <> method_name, params, nil, %{}, body}, metadata)
+  end
+
+  # Generic function definition (regular methods)
+  def transform({:function_def, name, params, _ret_type, _opts, body}, _metadata) do
+    args_ast = build_args_ast(params)
+
+    with {:ok, body_ast} <- transform_or_nil(body) do
+      {:ok, %{"type" => "def", "children" => [name, args_ast, body_ast]}}
+    end
+  end
+
+  def transform({:function_def, name, params, _ret_type, _opts, body, _loc}, metadata) do
+    # Handle version with location metadata
+    transform({:function_def, name, params, nil, %{}, body}, metadata)
+  end
+
+  # M2.2s Structural Layer - Attribute access
+
+  def transform({:attribute_access, receiver, attribute}, _metadata) do
+    with {:ok, receiver_ast} <- transform(receiver, %{}) do
+      # Convert to Ruby send node (method call without args)
+      {:ok, %{"type" => "send", "children" => [receiver_ast, String.to_atom(attribute)]}}
+    end
+  end
+
+  def transform({:attribute_access, receiver, attribute, _loc}, metadata) do
+    # Handle version with location metadata
+    transform({:attribute_access, receiver, attribute}, metadata)
+  end
+
+  # M2.2s Structural Layer - Augmented assignment
+
+  def transform({:augmented_assignment, _category, op, target, value}, _metadata) do
+    with {:ok, target_ast} <- transform(target, %{}),
+         {:ok, value_ast} <- transform(value, %{}) do
+      {:ok, %{"type" => "op_asgn", "children" => [target_ast, op, value_ast]}}
+    end
+  end
+
+  def transform({:augmented_assignment, _category, op, target, value, _loc}, metadata) do
+    # Handle version with location metadata
+    transform({:augmented_assignment, :arithmetic, op, target, value}, metadata)
+  end
+
   # M2.3 Native Layer - Passthrough
 
   def transform({:language_specific, :ruby, original_ast, _construct_type}, _metadata) do
@@ -221,4 +322,31 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
 
   defp transform_or_nil(nil), do: {:ok, nil}
   defp transform_or_nil(value), do: transform(value, %{})
+
+  # Helper to build constant AST node
+  defp build_const_ast(name) when is_binary(name) do
+    {:ok, %{"type" => "const", "children" => [nil, name]}}
+  end
+
+  defp build_const_ast_or_nil(nil), do: {:ok, nil}
+  defp build_const_ast_or_nil(name), do: build_const_ast(name)
+
+  # Helper to build args AST for method definitions
+  defp build_args_ast(params) when is_list(params) do
+    children =
+      Enum.map(params, fn
+        param when is_binary(param) ->
+          %{"type" => "arg", "children" => [param]}
+
+        {:pattern, _meta} ->
+          # Pattern parameters - simplified for now
+          %{"type" => "arg", "children" => ["_pattern"]}
+
+        {:default, name, _default_val} ->
+          # Default parameters - simplified for now
+          %{"type" => "arg", "children" => [name]}
+      end)
+
+    %{"type" => "args", "children" => children}
+  end
 end

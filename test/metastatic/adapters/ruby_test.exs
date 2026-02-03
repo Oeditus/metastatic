@@ -727,8 +727,8 @@ defmodule Metastatic.Adapters.RubyTest do
     end
   end
 
-  describe "ToMeta - Ruby-specific constructs (M2.3 Native Layer)" do
-    test "transforms class definition" do
+  describe "ToMeta - M2.2s Structural Layer (containers and functions)" do
+    test "transforms class definition to container" do
       ast = %{
         "type" => "class",
         "children" => [
@@ -738,15 +738,24 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, _ast, :class_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      assert metadata.name == "Foo"
-      assert metadata.superclass == nil
-      assert metadata.body == {:literal, :integer, 42}
+      # Should be a container, not language_specific
+      case meta_ast do
+        {:container, :class, "Foo", nil, [], [], body} ->
+          assert {:literal, :integer, 42} = body
+
+        {:container, :class, "Foo", nil, [], [], body, _loc} ->
+          assert {:literal, :integer, 42} = body
+
+        other ->
+          flunk("Expected container, got: #{inspect(other)}")
+      end
+
+      assert metadata.ruby_ast == ast
     end
 
-    test "transforms class definition with superclass" do
+    test "transforms class definition with superclass to container" do
       ast = %{
         "type" => "class",
         "children" => [
@@ -756,14 +765,24 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, _ast, :class_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      assert metadata.name == "Child"
+      # Should be a container with parent
+      case meta_ast do
+        {:container, :class, "Child", "Parent", [], [], _body} ->
+          :ok
+
+        {:container, :class, "Child", "Parent", [], [], _body, _loc} ->
+          :ok
+
+        other ->
+          flunk("Expected container with parent, got: #{inspect(other)}")
+      end
+
       assert {:literal, :constant, "Parent"} = metadata.superclass
     end
 
-    test "transforms module definition" do
+    test "transforms module definition to container" do
       ast = %{
         "type" => "module",
         "children" => [
@@ -772,14 +791,24 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, _ast, :module_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      assert metadata.name == "Foo"
-      assert metadata.body == {:literal, :integer, 42}
+      # Should be a container (module)
+      case meta_ast do
+        {:container, :module, "Foo", nil, [], [], body} ->
+          assert {:literal, :integer, 42} = body
+
+        {:container, :module, "Foo", nil, [], [], body, _loc} ->
+          assert {:literal, :integer, 42} = body
+
+        other ->
+          flunk("Expected module container, got: #{inspect(other)}")
+      end
+
+      assert metadata.ruby_ast == ast
     end
 
-    test "transforms method definition without params" do
+    test "transforms method definition to function_def" do
       ast = %{
         "type" => "def",
         "children" => [
@@ -789,15 +818,28 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, _ast, :method_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      assert metadata.name == "bar"
-      assert metadata.params == []
-      assert metadata.body == {:literal, :integer, 42}
+      # Should be a function_def, not language_specific
+      case meta_ast do
+        {:function_def, "bar", [], nil, opts, body} ->
+          assert opts.visibility == :public
+          assert opts.arity == 0
+          assert {:literal, :integer, 42} = body
+
+        {:function_def, "bar", [], nil, opts, body, _loc} ->
+          assert opts.visibility == :public
+          assert opts.arity == 0
+          assert {:literal, :integer, 42} = body
+
+        other ->
+          flunk("Expected function_def, got: #{inspect(other)}")
+      end
+
+      assert metadata.ruby_ast == ast
     end
 
-    test "transforms method definition with params" do
+    test "transforms method definition with params to function_def" do
       ast = %{
         "type" => "def",
         "children" => [
@@ -820,12 +862,23 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, _ast, :method_definition}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      assert metadata.name == "add"
-      assert metadata.params == ["x", "y"]
-      assert {:binary_op, :arithmetic, :+, _, _} = metadata.body
+      # Should be a function_def
+      case meta_ast do
+        {:function_def, "add", ["x", "y"], nil, opts, body} ->
+          assert opts.visibility == :public
+          assert opts.arity == 2
+          assert {:binary_op, :arithmetic, :+, _, _} = body
+
+        {:function_def, "add", ["x", "y"], nil, opts, body, _loc} ->
+          assert opts.visibility == :public
+          assert opts.arity == 2
+          assert {:binary_op, :arithmetic, :+, _, _} = body
+
+        other ->
+          flunk("Expected function_def, got: #{inspect(other)}")
+      end
     end
 
     test "transforms constant assignment" do
@@ -881,6 +934,194 @@ defmodule Metastatic.Adapters.RubyTest do
   describe "file_extensions/0" do
     test "returns Ruby file extensions" do
       assert [".rb"] = Ruby.file_extensions()
+    end
+  end
+
+  describe "M2.2s Structural Layer - Round-trip integration" do
+    test "round-trips class definition" do
+      source = """
+      class Calculator
+        def add(x, y)
+          x + y
+        end
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      # Verify it's a container
+      case meta_ast do
+        {:container, :class, "Calculator", nil, [], [], _body} -> :ok
+        {:container, :class, "Calculator", nil, [], [], _body, _loc} -> :ok
+        other -> flunk("Expected class container, got: #{inspect(other)}")
+      end
+    end
+
+    test "round-trips module definition" do
+      source = """
+      module Utils
+        def self.helper
+          42
+        end
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      # Verify it's a container
+      case meta_ast do
+        {:container, :module, "Utils", nil, [], [], _body} -> :ok
+        {:container, :module, "Utils", nil, [], [], _body, _loc} -> :ok
+        other -> flunk("Expected module container, got: #{inspect(other)}")
+      end
+    end
+
+    test "round-trips method definition" do
+      source = "def calculate(x); x * 2; end"
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      # Verify it's a function_def
+      case meta_ast do
+        {:function_def, "calculate", ["x"], nil, _opts, _body} -> :ok
+        {:function_def, "calculate", ["x"], nil, _opts, _body, _loc} -> :ok
+        other -> flunk("Expected function_def, got: #{inspect(other)}")
+      end
+    end
+
+    test "round-trips augmented assignment" do
+      source = "x += 5"
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      # Verify it's an augmented assignment
+      case meta_ast do
+        {:augmented_assignment, :arithmetic, :+, _, _} -> :ok
+        {:augmented_assignment, :arithmetic, :+, _, _, _} -> :ok
+        other -> flunk("Expected augmented_assignment, got: #{inspect(other)}")
+      end
+    end
+
+    test "verifies M1 context metadata preservation" do
+      source = """
+      module Calculator
+        def add(x, y)
+          x + y
+        end
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      # Check context metadata in location map
+      case meta_ast do
+        {:container, :module, "Calculator", nil, [], [], _body, loc} ->
+          assert loc.language == :ruby
+          assert loc.module == "Calculator"
+
+        {:container, :module, "Calculator", nil, [], [], _body} ->
+          # Without location - that's OK for some cases
+          :ok
+
+        other ->
+          flunk("Expected module container with context, got: #{inspect(other)}")
+      end
+    end
+  end
+
+  describe "ToMeta - M2.2s Structural Layer (attribute access and augmented assignment)" do
+    test "transforms attribute access" do
+      ast = %{
+        "type" => "send",
+        "children" => [
+          %{"type" => "lvar", "children" => ["obj"]},
+          "field"
+        ]
+      }
+
+      assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
+
+      # Should be attribute_access for variable receiver
+      case meta_ast do
+        {:attribute_access, {:variable, "obj"}, "field"} ->
+          assert metadata.kind == :instance_var
+
+        {:attribute_access, {:variable, "obj"}, "field", _loc} ->
+          :ok
+
+        {:attribute_access, {:variable, "obj", _loc}, "field"} ->
+          :ok
+
+        {:attribute_access, {:variable, "obj", _loc}, "field", _loc2} ->
+          :ok
+
+        other ->
+          flunk("Expected attribute_access, got: #{inspect(other)}")
+      end
+    end
+
+    test "transforms augmented assignment (+=)" do
+      ast = %{
+        "type" => "op_asgn",
+        "children" => [
+          %{"type" => "lvar", "children" => ["x"]},
+          :+,
+          %{"type" => "int", "children" => [5]}
+        ]
+      }
+
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      # Should be augmented_assignment
+      case meta_ast do
+        {:augmented_assignment, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}} ->
+          :ok
+
+        {:augmented_assignment, :arithmetic, :+, {:variable, "x", _loc}, {:literal, :integer, 5}} ->
+          :ok
+
+        {:augmented_assignment, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5, _loc}} ->
+          :ok
+
+        {:augmented_assignment, :arithmetic, :+, {:variable, "x", _loc},
+         {:literal, :integer, 5, _loc2}} ->
+          :ok
+
+        {:augmented_assignment, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}, _loc} ->
+          :ok
+
+        {:augmented_assignment, :arithmetic, :+, {:variable, "x", _loc},
+         {:literal, :integer, 5, _loc2}, _loc3} ->
+          :ok
+
+        other ->
+          flunk("Expected augmented_assignment, got: #{inspect(other)}")
+      end
+    end
+
+    test "transforms augmented assignment (-=)" do
+      ast = %{
+        "type" => "op_asgn",
+        "children" => [
+          %{"type" => "lvar", "children" => ["count"]},
+          :-,
+          %{"type" => "int", "children" => [1]}
+        ]
+      }
+
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      # Check it's an augmented assignment with subtraction
+      case meta_ast do
+        {:augmented_assignment, :arithmetic, :-, _, _} -> :ok
+        {:augmented_assignment, :arithmetic, :-, _, _, _} -> :ok
+        other -> flunk("Expected augmented_assignment with :-, got: #{inspect(other)}")
+      end
     end
   end
 

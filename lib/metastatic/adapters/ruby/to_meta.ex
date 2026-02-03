@@ -241,10 +241,20 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       # Local method call without args: hello
       {:ok, {:function_call, method_str, []}, %{call_type: :local}}
     else
-      # Method call with receiver but no arguments: obj.method
+      # Check if this looks like attribute access (not a method call)
+      # In Ruby, obj.attr without parentheses could be either
+      # For simplicity, treat as attribute_access if receiver is a variable
       with {:ok, receiver_meta, _} <- transform(receiver) do
-        qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
-        {:ok, {:function_call, qualified_name, []}, %{call_type: :instance}}
+        case receiver_meta do
+          {:variable, _} ->
+            # Likely attribute access: obj.field
+            {:ok, {:attribute_access, receiver_meta, method_str}, %{kind: :instance_var}}
+
+          _ ->
+            # Method call with receiver but no arguments: obj.method
+            qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
+            {:ok, {:function_call, qualified_name, []}, %{call_type: :instance}}
+        end
       end
     end
   end
@@ -309,6 +319,43 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
     with {:ok, value_meta, _} <- transform(value) do
       {:ok, {:assignment, {:variable, var_name}, value_meta}, %{scope: :instance}}
+    end
+  end
+
+  # Class variable assignment
+  def transform(%{"type" => "cvasgn", "children" => [name, value]}) do
+    var_name = if is_atom(name), do: Atom.to_string(name), else: name
+
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:assignment, {:variable, var_name}, value_meta}, %{scope: :class}}
+    end
+  end
+
+  # Global variable assignment
+  def transform(%{"type" => "gvasgn", "children" => [name, value]}) do
+    var_name = if is_atom(name), do: Atom.to_string(name), else: name
+
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:assignment, {:variable, var_name}, value_meta}, %{scope: :global}}
+    end
+  end
+
+  # M2.2s Structural Layer - Augmented assignment
+  # Ruby represents += as op_asgn (operational assignment)
+  def transform(%{"type" => "op_asgn", "children" => [target, op, value]}) do
+    op_atom = normalize_op(op)
+
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, value_meta, _} <- transform(value) do
+      # Determine operation category
+      category =
+        cond do
+          is_arithmetic_op?(op) -> :arithmetic
+          is_comparison_op?(op) -> :comparison
+          true -> :other
+        end
+
+      {:ok, {:augmented_assignment, category, op_atom, target_meta, value_meta}, %{}}
     end
   end
 
@@ -424,51 +471,113 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
-  # M2.3 Native Layer - Ruby-specific constructs
+  # M2.2s Structural Layer - Container support
 
-  # Class definition
+  # Class definition - maps to container
   def transform(%{"type" => "class", "children" => [name, superclass, body]} = ast) do
     with {:ok, name_meta, _} <- transform(name),
          {:ok, superclass_meta, _} <- transform_or_nil(superclass),
          {:ok, body_meta, _} <- transform_or_nil(body) do
-      metadata = %{
-        name: extract_constant_name(name_meta),
-        superclass: superclass_meta,
-        body: body_meta
+      class_name = extract_constant_name(name_meta)
+      parent_name = extract_parent_name(superclass_meta)
+
+      # Add class context to the container node itself
+      class_context = %{
+        language: :ruby,
+        module: class_name
       }
 
-      {:ok, {:language_specific, :ruby, ast, :class_definition}, metadata}
+      # Create container: {:container, type, name, parent, type_params, implements, body}
+      container = {:container, :class, class_name, parent_name, [], [], body_meta}
+
+      {:ok, add_location_with_context(container, ast, class_context),
+       %{ruby_ast: ast, superclass: superclass_meta}}
     end
   end
 
-  # Module definition
+  # Module definition - maps to container
   def transform(%{"type" => "module", "children" => [name, body]} = ast) do
     with {:ok, name_meta, _} <- transform(name),
          {:ok, body_meta, _} <- transform_or_nil(body) do
-      metadata = %{
-        name: extract_constant_name(name_meta),
-        body: body_meta
+      module_name = extract_constant_name(name_meta)
+
+      # Add module context to the container node itself
+      module_context = %{
+        language: :ruby,
+        module: module_name
       }
 
-      {:ok, {:language_specific, :ruby, ast, :module_definition}, metadata}
+      # Create container: {:container, type, name, parent, type_params, implements, body}
+      container = {:container, :module, module_name, nil, [], [], body_meta}
+
+      {:ok, add_location_with_context(container, ast, module_context), %{ruby_ast: ast}}
     end
   end
 
-  # Method definition (def)
+  # M2.2s Structural Layer - Function definition support
+
+  # Method definition (def) - maps to function_def
   def transform(%{"type" => "def", "children" => [name, args, body]} = ast) do
     method_name = if is_atom(name), do: Atom.to_string(name), else: name
 
     with {:ok, params} <- extract_method_params(args),
          {:ok, body_meta, _} <- transform_or_nil(body) do
-      metadata = %{
-        name: method_name,
-        params: params,
-        body: body_meta
+      arity = length(params)
+
+      # Add function context to the function_def node itself
+      func_context = %{
+        language: :ruby,
+        function: method_name,
+        arity: arity,
+        visibility: :public
       }
 
-      {:ok, {:language_specific, :ruby, ast, :method_definition}, metadata}
+      # Create function_def: {:function_def, name, params, ret_type, opts, body}
+      function_def =
+        {:function_def, method_name, params, nil, %{visibility: :public, arity: arity}, body_meta}
+
+      {:ok, add_location_with_context(function_def, ast, func_context), %{ruby_ast: ast}}
     end
   end
+
+  # Class method definition (def self.method) or singleton method (def obj.method)
+  # Ruby parser represents this as "defs" type
+  def transform(%{"type" => "defs", "children" => [receiver, name, args, body]} = ast) do
+    method_name = if is_atom(name), do: Atom.to_string(name), else: name
+
+    with {:ok, receiver_meta, _} <- transform(receiver),
+         {:ok, params} <- extract_method_params(args),
+         {:ok, body_meta, _} <- transform_or_nil(body) do
+      # For class methods (def self.method), qualify the name
+      qualified_name =
+        case receiver_meta do
+          {:variable, "self"} -> "self.#{method_name}"
+          _ -> "#{format_receiver(receiver_meta)}.#{method_name}"
+        end
+
+      arity = length(params)
+
+      # Add function context
+      func_context = %{
+        language: :ruby,
+        function: qualified_name,
+        arity: arity,
+        visibility: :public
+      }
+
+      # Create function_def with qualified name
+      function_def =
+        {:function_def, qualified_name, params, nil, %{visibility: :public, arity: arity},
+         body_meta}
+
+      {:ok, add_location_with_context(function_def, ast, func_context),
+       %{ruby_ast: ast, is_class_method: true}}
+    end
+  end
+
+  # Private/protected method definition - uses access control keywords
+  # Note: Ruby's private/protected are modifier keywords, not part of def itself
+  # They're typically handled at a higher level in the AST
 
   # Constant assignment (e.g., BAR = 42)
   def transform(%{"type" => "casgn", "children" => [namespace, name, value]} = ast) do
@@ -772,10 +881,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   defp transform_exception_types(nil), do: {:ok, []}
 
-  # M2.3 Native Layer Helpers
+  # M2.2s Structural Layer Helpers
 
   defp extract_constant_name({:literal, :constant, name}), do: name
   defp extract_constant_name(_), do: "Unknown"
+
+  defp extract_parent_name({:literal, :constant, name}), do: name
+  defp extract_parent_name(nil), do: nil
+  defp extract_parent_name(_), do: nil
 
   defp extract_method_params(%{"type" => "args", "children" => args}) do
     params =
@@ -830,7 +943,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
-  # Location extraction helper
+  # Location extraction helpers
   @doc false
   @spec add_location(term(), map()) :: map() | nil
   defp add_location(meta_ast, %{"location" => loc}) when is_map(loc) do
@@ -849,6 +962,24 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   end
 
   defp add_location(meta_ast, _ast_node), do: meta_ast
+
+  # Add location and context metadata (for M1 metadata preservation)
+  @doc false
+  defp add_location_with_context(meta_ast, %{"location" => loc}, context)
+       when is_map(loc) and is_map(context) do
+    location =
+      context
+      |> maybe_put(:line, loc["begin_line"])
+      |> maybe_put(:col, loc["begin_column"])
+      |> maybe_put(:end_line, loc["end_line"])
+      |> maybe_put(:end_col, loc["end_column"])
+
+    Tuple.insert_at(meta_ast, tuple_size(meta_ast), location)
+  end
+
+  defp add_location_with_context(meta_ast, _ast, context) when is_map(context) do
+    Tuple.insert_at(meta_ast, tuple_size(meta_ast), context)
+  end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
