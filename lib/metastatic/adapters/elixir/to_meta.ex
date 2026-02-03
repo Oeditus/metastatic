@@ -1009,9 +1009,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
             error -> {:halt, error}
           end
 
-        _ ->
-          raise inspect(pair: pair, pairs: pairs)
-          {:halt, {:error, "Invalid map pair: #{inspect(pair)}"}}
+        unexpected ->
+          require Logger
+          Logger.notice("Unexpected map transform: " <> inspect(unexpected))
+          {:cont, {:ok, acc}}
       end
     end)
     |> case do
