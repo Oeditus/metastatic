@@ -615,7 +615,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     cond_to_nested_if(rest)
   end
 
-  defp transform_case_arms(clauses) do
+  defp transform_case_arms([_ | _] = clauses) do
     clauses
     |> Enum.reduce_while({:ok, []}, fn {:->, _, [[pattern], body]}, {:ok, acc} ->
       with {:ok, pattern_meta, _} <- transform_pattern(pattern),
@@ -631,6 +631,9 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       error -> error
     end
   end
+
+  # [TODO] this is a stub, needs better handling
+  defp transform_case_arms(_clauses), do: {:ok, []}
 
   defp transform_pattern(pattern) do
     # Pattern matching patterns - similar to regular transforms but allow wildcards
@@ -1086,8 +1089,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       end
 
     # Create lambda with N parameters that calls the function
-    params = for i <- 1..arity, do: {:param, "arg_#{i}", nil, nil}
-    args = for i <- 1..arity, do: {:variable, "arg_#{i}"}
+    params = for i <- 1..arity//1, do: {:param, "arg_#{i}", nil, nil}
+    args = for i <- 1..arity//1, do: {:variable, "arg_#{i}"}
     body = {:function_call, function_name, args}
 
     {:ok, {:lambda, params, [], body}, %{capture_form: :named_function}}
