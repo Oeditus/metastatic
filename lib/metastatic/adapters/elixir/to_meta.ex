@@ -361,6 +361,15 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {:ok, {:attribute_access, {:variable, var}, field}, %{kind: :map}}
   end
 
+  # Anonymous function call
+  # {{:., _fun_meta, [{fun_name, _fun_name_meta, _nil}]}, _meta, args}
+  def transform({{:., _fun_meta, [{fun_name, _fun_name_meta, _nil}]}, _meta, args})
+      when is_list(args) do
+    with {:ok, args_meta} <- transform_list(args) do
+      {:ok, {:function_call, fun_name, args_meta}, %{call_type: :local}}
+    end
+  end
+
   # Remote call (Module.function)
   # [TODO] This is simplified, better traverse is needed
   def transform(
@@ -780,10 +789,9 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     # In Elixir AST: fn x when is_integer(x) -> ... end
     # params is [{:when, _, [param, guard_expr]}] or just [param1, param2, ...]
     case params do
-      [{:when, _, [params_part, guard_expr]}] ->
-        # Guard present - params_part might be a single var or a list
-        params_list = if is_list(params_part), do: params_part, else: [params_part]
-        {params_list, guard_expr}
+      [{:when, _, params_part_and_guard_expr}] ->
+        {params, [guard_expr]} = Enum.split(params_part_and_guard_expr, -1)
+        {params, guard_expr}
 
       _ ->
         # No guard
@@ -804,8 +812,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     params
     |> Enum.reduce_while({:ok, []}, fn param, {:ok, acc} ->
       case param do
+        # guards
+        # {key, %{} = map}, {into, path, errors} when not is_struct(map)
+        {:when, _guard_meta, _} ->
+          {params_list, _guard} = extract_guard_from_params(param)
+          {:cont, {:ok, [transform_fn_params(params_list) | acc]}}
+
         # Simple variable: x, acc, etc.
-        {name, _, context} when is_atom(name) and is_atom(context) ->
+        {name, _meta, context} when is_atom(name) and is_atom(context) ->
           {:cont, {:ok, [{:param, Atom.to_string(name), nil, nil} | acc]}}
 
         # Map pattern: %{key: value}, %{"key" => value}, etc.
