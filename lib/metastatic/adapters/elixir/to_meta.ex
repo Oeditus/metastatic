@@ -236,7 +236,9 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # Pipe operator - M2.3 Native Layer
-  def transform({:|>, _meta, [left, right]}) do
+  # [TODO] UNPIPE it!
+  # ast |> Enum.reduce(fn {{fun, meta, args}, 0}, {value, 0} -> {{fun, meta, [value | args]}, 0} end)
+  def transform({:|>, _meta, [left, {_fun, _fun_meta, _args} = right]}) do
     # Pipe is language-specific to Elixir/Erlang
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
@@ -465,6 +467,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   def transform({:fn, meta, clauses}) do
     transform_fn({:fn, meta, clauses})
+  end
+
+  # unquote(:"coerce_#{key}")(value)
+  # [TODO] handle this somehow
+  def transform({{:unquote, _unquote_meta, _quoted_content}, _meta, _args} = unexpected) do
+    require Logger
+    Logger.notice("Unsupported unquote: " <> inspect(unexpected))
+    {:ok, [], %{}}
   end
 
   # Catch-all for unsupported constructs
@@ -822,6 +832,19 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         {name, _meta, context} when is_atom(name) and is_atom(context) ->
           {:cont, {:ok, [{:param, Atom.to_string(name), nil, nil} | acc]}}
 
+        # Map match: %{} = map
+        # {:=, [line: 231], [{:%{}, [line: 231], []}, {:map, [line: 231], nil}]}
+        {:=, _meta, [{_pattern, _, pattern_context}, {match, _match_meta, _match_context}]}
+        when is_list(pattern_context) ->
+          {:cont, {:ok, [{:param, Atom.to_string(match), nil, nil} | acc]}}
+
+        {:=, _meta, [{match, _match_meta, _match_context}, {_pattern, _, pattern_context}]}
+        when is_list(pattern_context) ->
+          {:cont, {:ok, [{:param, Atom.to_string(match), nil, nil} | acc]}}
+
+        {:=, _meta, [{_pattern, _pattern_context}, {match, _match_meta, _match_context}]} ->
+          {:cont, {:ok, [{:param, Atom.to_string(match), nil, nil} | acc]}}
+
         # Map pattern: %{key: value}, %{"key" => value}, etc.
         {:%{}, _, _fields} = map_pattern ->
           # Map patterns in params - preserve as pattern metadata
@@ -833,10 +856,16 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
           # The pattern will be preserved but we use a generic name
           {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: tuple_pattern}} | acc]}}
 
-        # Two-element tuple (special syntax): {x, y}
-        {left, right} when not is_list(left) and not is_list(right) ->
-          # Two-element tuple pattern
+        # Two-element tuple (special syntax) or match: `{x, y}` or `_ = %{}`
+        {left, right} when not is_list(left) ->
           {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: {left, right}}} | acc]}}
+
+        # Match (reversed order)
+        {left, right} when not is_list(right) ->
+          {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: {right, left}}} | acc]}}
+
+        literal when is_number(literal) or is_atom(literal) or is_binary(literal) ->
+          {:cont, transform(literal)}
 
         _ ->
           {:halt, {:error, "Unsupported parameter pattern: #{inspect(param)}"}}
