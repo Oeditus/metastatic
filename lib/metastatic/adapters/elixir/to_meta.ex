@@ -61,28 +61,26 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   """
   @spec transform(term()) :: {:ok, term(), map()} | {:error, String.t()}
   def transform(elixir_ast) do
-    try do
-      # Initial context for tracking module/function/arity
-      initial_context = %{
-        module: nil,
-        function: nil,
-        arity: nil,
-        visibility: :public
-      }
+    # Initial context for tracking module/function/arity
+    initial_context = %{
+      module: nil,
+      function: nil,
+      arity: nil,
+      visibility: :public
+    }
 
-      # Use Macro.traverse for bottom-up transformation
-      {meta_ast, final_context} =
-        Macro.traverse(
-          elixir_ast,
-          initial_context,
-          &pre_transform/2,
-          &post_transform/2
-        )
+    # Use Macro.traverse for bottom-up transformation
+    {meta_ast, final_context} =
+      Macro.traverse(
+        elixir_ast,
+        initial_context,
+        &pre_transform/2,
+        &post_transform/2
+      )
 
-      {:ok, meta_ast, final_context}
-    rescue
-      e -> {:error, "Transform failed: #{Exception.message(e)}"}
-    end
+    {:ok, meta_ast, final_context}
+  rescue
+    e -> {:error, "Transform failed: #{Exception.message(e)}"}
   end
 
   # ----- Pre-Transform: Context Tracking Only -----
@@ -706,34 +704,6 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
-  defp handle_remote_call(module, func, args, meta, ctx) when is_atom(func) do
-    module_name = extract_module_name(module)
-    func_name = "#{module_name}.#{func}"
-
-    # Check for Enum operations
-    case {module_name, func, args} do
-      {"Enum", :map, [collection, func_arg]} ->
-        node_meta = [op_type: :map] ++ build_meta(meta)
-        {{:collection_op, node_meta, [func_arg, collection]}, ctx}
-
-      {"Enum", :filter, [collection, func_arg]} ->
-        node_meta = [op_type: :filter] ++ build_meta(meta)
-        {{:collection_op, node_meta, [func_arg, collection]}, ctx}
-
-      {"Enum", :reduce, [collection, initial, func_arg]} ->
-        node_meta = [op_type: :reduce] ++ build_meta(meta)
-        {{:collection_op, node_meta, [func_arg, collection, initial]}, ctx}
-
-      _ ->
-        node_meta = [name: func_name] ++ build_meta(meta)
-        {{:function_call, node_meta, args}, ctx}
-    end
-  end
-
-  defp extract_func_name({:literal, _, func}) when is_atom(func), do: func
-  defp extract_func_name(func) when is_atom(func), do: func
-  defp extract_func_name(_), do: :unknown
-
   # Local function call
   defp post_transform({func, meta, args}, ctx)
        when is_atom(func) and is_list(args) and
@@ -942,6 +912,34 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # ----- Helper Functions -----
+
+  defp handle_remote_call(module, func, args, meta, ctx) when is_atom(func) do
+    module_name = extract_module_name(module)
+    func_name = "#{module_name}.#{func}"
+
+    # Check for Enum operations
+    case {module_name, func, args} do
+      {"Enum", :map, [collection, func_arg]} ->
+        node_meta = [op_type: :map] ++ build_meta(meta)
+        {{:collection_op, node_meta, [func_arg, collection]}, ctx}
+
+      {"Enum", :filter, [collection, func_arg]} ->
+        node_meta = [op_type: :filter] ++ build_meta(meta)
+        {{:collection_op, node_meta, [func_arg, collection]}, ctx}
+
+      {"Enum", :reduce, [collection, initial, func_arg]} ->
+        node_meta = [op_type: :reduce] ++ build_meta(meta)
+        {{:collection_op, node_meta, [func_arg, collection, initial]}, ctx}
+
+      _ ->
+        node_meta = [name: func_name] ++ build_meta(meta)
+        {{:function_call, node_meta, args}, ctx}
+    end
+  end
+
+  defp extract_func_name({:literal, _, func}) when is_atom(func), do: func
+  defp extract_func_name(func) when is_atom(func), do: func
+  defp extract_func_name(_), do: :unknown
 
   # Build metadata keyword list from Elixir AST meta
   defp build_meta(elixir_meta) when is_list(elixir_meta) do

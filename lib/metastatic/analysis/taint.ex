@@ -160,32 +160,22 @@ defmodule Metastatic.Analysis.Taint do
       []
     else
       walk_ast(ast, [], fn node, acc ->
-        case node do
-          {:function_call, meta, args} when is_list(meta) ->
-            name = Keyword.get(meta, :name, "")
+        with {:function_call, meta, args} when is_list(meta) <- node,
+             name <- Keyword.get(meta, :name, ""),
+             {sink_name, risk} when is_list(args) <-
+               Enum.find(sinks, fn {sink_name, _} -> sink_name == name end),
+             true <- has_taint_source?(args, sources) do
+          flow = %{
+            source: Enum.join(sources, ", "),
+            sink: sink_name,
+            risk: risk,
+            path: [sink_name],
+            recommendation: get_recommendation(risk)
+          }
 
-            case Enum.find(sinks, fn {sink_name, _} -> sink_name == name end) do
-              {sink_name, risk} when is_list(args) ->
-                if has_taint_source?(args, sources) do
-                  flow = %{
-                    source: Enum.join(sources, ", "),
-                    sink: sink_name,
-                    risk: risk,
-                    path: [sink_name],
-                    recommendation: get_recommendation(risk)
-                  }
-
-                  [flow | acc]
-                else
-                  acc
-                end
-
-              _ ->
-                acc
-            end
-
-          _ ->
-            acc
+          [flow | acc]
+        else
+          _ -> acc
         end
       end)
     end

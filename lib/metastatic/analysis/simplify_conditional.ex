@@ -54,7 +54,7 @@ defmodule Metastatic.Analysis.SimplifyConditional do
     case {then_branch, else_branch} do
       # Pattern: if condition then true else false => condition
       {{:literal, then_meta, true}, {:literal, else_meta, false}} ->
-        if is_boolean_literal?(then_meta) and is_boolean_literal?(else_meta) do
+        if boolean_literal?(then_meta) and boolean_literal?(else_meta) do
           [
             Analyzer.issue(
               analyzer: __MODULE__,
@@ -78,7 +78,7 @@ defmodule Metastatic.Analysis.SimplifyConditional do
 
       # Pattern: if condition then false else true => not condition
       {{:literal, then_meta, false}, {:literal, else_meta, true}} ->
-        if is_boolean_literal?(then_meta) and is_boolean_literal?(else_meta) do
+        if boolean_literal?(then_meta) and boolean_literal?(else_meta) do
           negated = {:unary_op, [category: :boolean, operator: :not], [condition]}
 
           [
@@ -104,7 +104,7 @@ defmodule Metastatic.Analysis.SimplifyConditional do
 
       # Pattern: if condition then condition else false => condition
       {cond_duplicate, {:literal, else_meta, false}} when condition == cond_duplicate ->
-        if is_boolean_literal?(else_meta) do
+        if boolean_literal?(else_meta) do
           [
             Analyzer.issue(
               analyzer: __MODULE__,
@@ -129,7 +129,7 @@ defmodule Metastatic.Analysis.SimplifyConditional do
 
       # Pattern: if condition then true else condition => condition
       {{:literal, then_meta, true}, cond_duplicate} when condition == cond_duplicate ->
-        if is_boolean_literal?(then_meta) do
+        if boolean_literal?(then_meta) do
           [
             Analyzer.issue(
               analyzer: __MODULE__,
@@ -158,11 +158,11 @@ defmodule Metastatic.Analysis.SimplifyConditional do
 
   def analyze(_node, _context), do: []
 
-  defp is_boolean_literal?(meta) when is_list(meta) do
+  defp boolean_literal?(meta) when is_list(meta) do
     Keyword.get(meta, :subtype) == :boolean
   end
 
-  defp is_boolean_literal?(_), do: false
+  defp boolean_literal?(_), do: false
 
   # ----- Private Helpers -----
 

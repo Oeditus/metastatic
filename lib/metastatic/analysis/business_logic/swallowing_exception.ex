@@ -219,6 +219,19 @@ defmodule Metastatic.Analysis.BusinessLogic.SwallowingException do
     logging_name?(func_name)
   end
 
+  # Check nested structures
+  defp has_logging?(tuple) when is_tuple(tuple) do
+    tuple
+    |> Tuple.to_list()
+    |> Enum.any?(&has_logging?/1)
+  end
+
+  defp has_logging?(list) when is_list(list) do
+    Enum.any?(list, &has_logging?/1)
+  end
+
+  defp has_logging?(_), do: false
+
   defp logging_name?(func_name) when is_atom(func_name) do
     func_name in @logging_functions or
       func_name
@@ -232,19 +245,6 @@ defmodule Metastatic.Analysis.BusinessLogic.SwallowingException do
   end
 
   defp logging_name?(_), do: false
-
-  # Check nested structures
-  defp has_logging?(tuple) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.any?(&has_logging?/1)
-  end
-
-  defp has_logging?(list) when is_list(list) do
-    Enum.any?(list, &has_logging?/1)
-  end
-
-  defp has_logging?(_), do: false
 
   # Recursively check for re-raise calls
   # New 3-tuple format: {:block, meta, statements}
@@ -280,15 +280,6 @@ defmodule Metastatic.Analysis.BusinessLogic.SwallowingException do
     func_name in @reraise_functions
   end
 
-  defp reraise_name?(func_name) when is_atom(func_name), do: func_name in @reraise_functions
-
-  defp reraise_name?(func_name) when is_binary(func_name) do
-    func_lower = String.downcase(func_name)
-    Enum.any?(["raise", "reraise", "throw"], &String.contains?(func_lower, &1))
-  end
-
-  defp reraise_name?(_), do: false
-
   # Check nested structures
   defp has_reraise?(tuple) when is_tuple(tuple) do
     tuple
@@ -301,4 +292,13 @@ defmodule Metastatic.Analysis.BusinessLogic.SwallowingException do
   end
 
   defp has_reraise?(_), do: false
+
+  defp reraise_name?(func_name) when is_atom(func_name), do: func_name in @reraise_functions
+
+  defp reraise_name?(func_name) when is_binary(func_name) do
+    func_lower = String.downcase(func_name)
+    Enum.any?(["raise", "reraise", "throw"], &String.contains?(func_lower, &1))
+  end
+
+  defp reraise_name?(_), do: false
 end

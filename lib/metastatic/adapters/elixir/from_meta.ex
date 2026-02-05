@@ -54,16 +54,14 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   """
   @spec transform(term(), map()) :: {:ok, term()} | {:error, String.t()}
   def transform(meta_ast, metadata \\ %{}) do
-    try do
-      {elixir_ast, _acc} =
-        AST.traverse(meta_ast, metadata, &pre_transform/2, &post_transform/2)
+    {elixir_ast, _acc} =
+      AST.traverse(meta_ast, metadata, &pre_transform/2, &post_transform/2)
 
-      {:ok, elixir_ast}
-    rescue
-      e -> {:error, "Transform failed: #{Exception.message(e)}"}
-    catch
-      {:unsupported, reason} -> {:error, reason}
-    end
+    {:ok, elixir_ast}
+  rescue
+    e -> {:error, "Transform failed: #{Exception.message(e)}"}
+  catch
+    {:unsupported, reason} -> {:error, reason}
   end
 
   # ----- Pre-Transform: Pass through -----

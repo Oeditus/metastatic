@@ -303,18 +303,6 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   defp normalize_ast(nil), do: nil
   defp normalize_ast(other), do: other
 
-  # Helper for normalizing function parameters
-  defp normalize_param(param) when is_binary(param), do: :_
-  # New format: {:param, name, pattern, default}
-  defp normalize_param({:param, _name, pattern, default}) do
-    {:param, :_, if(pattern, do: normalize_ast(pattern), else: nil),
-     if(default, do: normalize_ast(default), else: nil)}
-  end
-
-  # Old format compatibility
-  defp normalize_param({:pattern, pattern}), do: {:pattern, normalize_ast(pattern)}
-  defp normalize_param({:default, _name, default}), do: {:default, :_, normalize_ast(default)}
-
   # Extract tokens for token-based similarity (3-tuple format)
   defp extract_tokens({:variable, _meta, _name}, acc), do: [:variable | acc]
 

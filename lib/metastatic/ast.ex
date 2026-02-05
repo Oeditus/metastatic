@@ -597,13 +597,6 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:pattern_match, _meta, _), do: false
 
-  defp valid_pattern_arms?(arms) when is_list(arms) do
-    Enum.all?(arms, fn
-      {pattern, body} -> (conforms?(pattern) or pattern == :_) and conforms?(body)
-      arm -> conforms?(arm)
-    end)
-  end
-
   defp valid_node?(:match_arm, meta, body) do
     pattern = Keyword.get(meta, :pattern)
 
@@ -618,13 +611,6 @@ defmodule Metastatic.AST do
   end
 
   defp valid_node?(:exception_handling, _meta, _), do: false
-
-  defp valid_exception_handlers?(handlers) when is_list(handlers) do
-    Enum.all?(handlers, fn
-      {:error, var, body} -> conforms?(var) and conforms?(body)
-      handler -> conforms?(handler)
-    end)
-  end
 
   defp valid_node?(:async_operation, meta, [operation]) do
     op_type = Keyword.get(meta, :op_type)
@@ -678,6 +664,20 @@ defmodule Metastatic.AST do
   defp valid_node?(:language_specific, meta, _native_ast) do
     language = Keyword.get(meta, :language)
     is_atom(language)
+  end
+
+  defp valid_pattern_arms?(arms) when is_list(arms) do
+    Enum.all?(arms, fn
+      {pattern, body} -> (conforms?(pattern) or pattern == :_) and conforms?(body)
+      arm -> conforms?(arm)
+    end)
+  end
+
+  defp valid_exception_handlers?(handlers) when is_list(handlers) do
+    Enum.all?(handlers, fn
+      {:error, var, body} -> conforms?(var) and conforms?(body)
+      handler -> conforms?(handler)
+    end)
   end
 
   # Validate literal values match their subtype

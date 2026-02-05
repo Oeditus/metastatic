@@ -261,15 +261,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
 
   # Check if two variable references match (handle both formats)
   # New 3-tuple: {:variable, meta, name} or {:variable, [], name}
-  defp variables_match?({:variable, _meta1, name1}, {:variable, _meta2, name2}),
-    do: name1 == name2
-
-  defp variables_match?({:variable, _meta1, name1}, {:variable, name2}), do: name1 == name2
-  defp variables_match?({:variable, _meta1, name1}, {:variable, name2, _loc}), do: name1 == name2
-  defp variables_match?({:variable, name1}, {:variable, name2}), do: name1 == name2
-  defp variables_match?({:variable, name1, _loc}, {:variable, name2}), do: name1 == name2
-  defp variables_match?({:variable, name1}, {:variable, name2, _loc}), do: name1 == name2
-  defp variables_match?({:variable, name1, _loc1}, {:variable, name2, _loc2}), do: name1 == name2
+  defp variables_match?({:variable, _meta1, name}, {:variable, _meta2, name}), do: true
   defp variables_match?(_, _), do: false
 
   # Check if expression is a "fetch all" operation (handle all formats)

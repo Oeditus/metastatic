@@ -1127,7 +1127,7 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # 3-tuple format: {:augmented_assignment, [category: :arithmetic, operator: :-], [...]} 
+      # 3-tuple format: {:augmented_assignment, [category: :arithmetic, operator: :-], [...]}
       case meta_ast do
         {:augmented_assignment, meta, _children} when is_list(meta) ->
           assert Keyword.get(meta, :category) == :arithmetic

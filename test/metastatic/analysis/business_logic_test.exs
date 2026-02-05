@@ -227,10 +227,11 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
   describe "InefficientFilter" do
     test "detects fetch-all followed by filter pattern" do
       ast =
-        {:block,
+        {:block, [],
          [
-           {:assignment, {:variable, "users"}, {:function_call, :all, []}},
-           {:collection_op, :filter, {:lambda, [], {:block, []}}, {:variable, "users"}}
+           {:assignment, [], [{:variable, [], "users"}, {:function_call, [name: :all], []}]},
+           {:collection_op, [op_type: :filter],
+            [{:lambda, [params: []], [{:block, [], []}]}, {:variable, [], "users"}]}
          ]}
 
       context = %{assignments: %{}}
@@ -246,10 +247,12 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
 
     test "detects Repo.all followed by Enum.filter" do
       ast =
-        {:block,
+        {:block, [],
          [
-           {:assignment, {:variable, "posts"}, {:attribute_access, {:variable, "Repo"}, :all}},
-           {:collection_op, :filter, {:lambda, [], {:block, []}}, {:variable, "posts"}}
+           {:assignment, [],
+            [{:variable, [], "posts"}, {:attribute_access, [], [{:variable, [], "Repo"}, :all]}]},
+           {:collection_op, [op_type: :filter],
+            [{:lambda, [params: []], [{:block, [], []}]}, {:variable, [], "posts"}]}
          ]}
 
       issues = InefficientFilter.analyze(ast, %{assignments: %{}})
@@ -260,11 +263,12 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
 
     test "does not flag non-consecutive statements" do
       ast =
-        {:block,
+        {:block, [],
          [
-           {:assignment, {:variable, "users"}, {:function_call, :all, []}},
-           {:function_call, :log, []},
-           {:collection_op, :filter, {:lambda, [], {:block, []}}, {:variable, "users"}}
+           {:assignment, [], [{:variable, [], "users"}, {:function_call, [name: :all], []}]},
+           {:function_call, [name: :log], []},
+           {:collection_op, [op_type: :filter],
+            [{:lambda, [params: []], [{:block, [], []}]}, {:variable, [], "users"}]}
          ]}
 
       assert [] = InefficientFilter.analyze(ast, %{assignments: %{}})
@@ -272,10 +276,11 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
 
     test "does not flag different variables" do
       ast =
-        {:block,
+        {:block, [],
          [
-           {:assignment, {:variable, "users"}, {:function_call, :all, []}},
-           {:collection_op, :filter, {:lambda, [], {:block, []}}, {:variable, "posts"}}
+           {:assignment, [], [{:variable, [], "users"}, {:function_call, [name: :all], []}]},
+           {:collection_op, [op_type: :filter],
+            [{:lambda, [params: []], [{:block, [], []}]}, {:variable, [], "posts"}]}
          ]}
 
       assert [] = InefficientFilter.analyze(ast, %{assignments: %{}})

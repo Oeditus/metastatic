@@ -194,22 +194,12 @@ defmodule Metastatic.Analysis.Security do
   # 3-tuple format
   defp find_hardcoded_secrets(ast) do
     walk_ast(ast, [], fn node, acc ->
-      case node do
-        {:literal, meta, value} when is_list(meta) and is_binary(value) ->
-          subtype = Keyword.get(meta, :subtype)
-
-          if subtype == :string do
-            Enum.reduce(secret_patterns(), acc, fn {type, pattern}, a ->
-              if Regex.match?(pattern, value) do
-                [{type, value} | a]
-              else
-                a
-              end
-            end)
-          else
-            acc
-          end
-
+      with {:literal, meta, value} when is_list(meta) and is_binary(value) <- node,
+           :string <- Keyword.get(meta, :subtype) do
+        Enum.reduce(secret_patterns(), acc, fn {type, pattern}, acc ->
+          if Regex.match?(pattern, value), do: [{type, value} | acc], else: acc
+        end)
+      else
         _ ->
           acc
       end

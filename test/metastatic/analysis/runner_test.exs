@@ -162,7 +162,8 @@ defmodule Metastatic.Analysis.RunnerTest do
     end
 
     @impl true
-    # New 3-tuple format: {:conditional, meta, [cond, {:literal, [subtype: :boolean], true}, {:literal, [subtype: :boolean], false}]}
+    # New 3-tuple format:
+    # {:conditional, meta, [cond, {:literal, [subtype: :boolean], true}, {:literal, [subtype: :boolean], false}]}
     def analyze(
           {:conditional, _meta,
            [

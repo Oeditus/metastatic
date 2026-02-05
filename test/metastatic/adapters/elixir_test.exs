@@ -7,23 +7,23 @@ defmodule Metastatic.Adapters.ElixirTest do
   doctest Metastatic.Adapters.Elixir
 
   # Helper to check 3-tuple format nodes
-  defp is_binary_op?(result, category, operator) do
+  defp binary_op?(result, category, operator) do
     match?({:binary_op, meta, [_left, _right]} when is_list(meta), result) and
       Keyword.get(elem(result, 1), :category) == category and
       Keyword.get(elem(result, 1), :operator) == operator
   end
 
-  defp is_unary_op?(result, category, operator) do
+  defp unary_op?(result, category, operator) do
     match?({:unary_op, meta, [_operand]} when is_list(meta), result) and
       Keyword.get(elem(result, 1), :category) == category and
       Keyword.get(elem(result, 1), :operator) == operator
   end
 
-  defp is_variable?(result, name) do
+  defp variable?(result, name) do
     match?({:variable, _meta, ^name}, result)
   end
 
-  defp is_literal?(result, subtype, value) do
+  defp literal?(result, subtype, value) do
     match?({:literal, meta, ^value} when is_list(meta), result) and
       Keyword.get(elem(result, 1), :subtype) == subtype
   end
@@ -77,34 +77,34 @@ defmodule Metastatic.Adapters.ElixirTest do
   describe "ToMeta - literals" do
     test "transforms integer literals" do
       assert {:ok, result, %{}} = ToMeta.transform(42)
-      assert is_literal?(result, :integer, 42)
+      assert literal?(result, :integer, 42)
     end
 
     test "transforms float literals" do
       assert {:ok, result, %{}} = ToMeta.transform(3.14)
-      assert is_literal?(result, :float, 3.14)
+      assert literal?(result, :float, 3.14)
     end
 
     test "transforms string literals" do
       assert {:ok, result, %{}} = ToMeta.transform("hello")
-      assert is_literal?(result, :string, "hello")
+      assert literal?(result, :string, "hello")
     end
 
     test "transforms boolean literals" do
       assert {:ok, result_true, %{}} = ToMeta.transform(true)
       assert {:ok, result_false, %{}} = ToMeta.transform(false)
-      assert is_literal?(result_true, :boolean, true)
-      assert is_literal?(result_false, :boolean, false)
+      assert literal?(result_true, :boolean, true)
+      assert literal?(result_false, :boolean, false)
     end
 
     test "transforms nil" do
       assert {:ok, result, %{}} = ToMeta.transform(nil)
-      assert is_literal?(result, :null, nil)
+      assert literal?(result, :null, nil)
     end
 
     test "transforms atoms as symbols" do
       assert {:ok, result, %{}} = ToMeta.transform(:atom)
-      assert is_literal?(result, :symbol, :atom)
+      assert literal?(result, :symbol, :atom)
     end
   end
 
@@ -112,14 +112,14 @@ defmodule Metastatic.Adapters.ElixirTest do
     test "transforms variable references" do
       ast = {:x, [], nil}
       assert {:ok, result, metadata} = ToMeta.transform(ast)
-      assert is_variable?(result, "x")
+      assert variable?(result, "x")
       assert is_map(metadata)
     end
 
     test "preserves variable context" do
       ast = {:my_var, [line: 10], MyModule}
       assert {:ok, result, metadata} = ToMeta.transform(ast)
-      assert is_variable?(result, "my_var")
+      assert variable?(result, "my_var")
       # Context is stored in the result, metadata contains function/module tracking
       assert is_map(metadata)
     end
@@ -129,61 +129,61 @@ defmodule Metastatic.Adapters.ElixirTest do
     test "transforms arithmetic addition" do
       ast = {:+, [], [{:x, [], nil}, 5]}
       assert {:ok, result, %{}} = ToMeta.transform(ast)
-      assert is_binary_op?(result, :arithmetic, :+)
+      assert binary_op?(result, :arithmetic, :+)
 
       {:binary_op, _meta, [left, right]} = result
-      assert is_variable?(left, "x")
-      assert is_literal?(right, :integer, 5)
+      assert variable?(left, "x")
+      assert literal?(right, :integer, 5)
     end
 
     test "transforms arithmetic subtraction" do
       ast = {:-, [], [10, {:y, [], nil}]}
       assert {:ok, result, %{}} = ToMeta.transform(ast)
-      assert is_binary_op?(result, :arithmetic, :-)
+      assert binary_op?(result, :arithmetic, :-)
 
       {:binary_op, _meta, [left, right]} = result
-      assert is_literal?(left, :integer, 10)
-      assert is_variable?(right, "y")
+      assert literal?(left, :integer, 10)
+      assert variable?(right, "y")
     end
 
     test "transforms multiplication and division" do
       mult_ast = {:*, [], [2, 3]}
       assert {:ok, result, %{}} = ToMeta.transform(mult_ast)
-      assert is_binary_op?(result, :arithmetic, :*)
+      assert binary_op?(result, :arithmetic, :*)
 
       div_ast = {:/, [], [10, 2]}
       assert {:ok, result, %{}} = ToMeta.transform(div_ast)
-      assert is_binary_op?(result, :arithmetic, :/)
+      assert binary_op?(result, :arithmetic, :/)
     end
 
     test "transforms comparison operators" do
       eq_ast = {:==, [], [1, 2]}
       assert {:ok, result, %{}} = ToMeta.transform(eq_ast)
-      assert is_binary_op?(result, :comparison, :==)
+      assert binary_op?(result, :comparison, :==)
 
       lt_ast = {:<, [], [1, 2]}
       assert {:ok, result, %{}} = ToMeta.transform(lt_ast)
-      assert is_binary_op?(result, :comparison, :<)
+      assert binary_op?(result, :comparison, :<)
 
       gte_ast = {:>=, [], [5, 3]}
       assert {:ok, result, %{}} = ToMeta.transform(gte_ast)
-      assert is_binary_op?(result, :comparison, :>=)
+      assert binary_op?(result, :comparison, :>=)
     end
 
     test "transforms boolean operators" do
       and_ast = {:and, [], [true, false]}
       assert {:ok, result, %{}} = ToMeta.transform(and_ast)
-      assert is_binary_op?(result, :boolean, :and)
+      assert binary_op?(result, :boolean, :and)
 
       or_ast = {:or, [], [true, false]}
       assert {:ok, result, %{}} = ToMeta.transform(or_ast)
-      assert is_binary_op?(result, :boolean, :or)
+      assert binary_op?(result, :boolean, :or)
     end
 
     test "transforms string concatenation" do
       ast = {:<>, [], ["hello", " world"]}
       assert {:ok, result, %{}} = ToMeta.transform(ast)
-      assert is_binary_op?(result, :arithmetic, :<>)
+      assert binary_op?(result, :arithmetic, :<>)
     end
   end
 
@@ -191,28 +191,28 @@ defmodule Metastatic.Adapters.ElixirTest do
     test "transforms logical not" do
       ast = {:not, [], [true]}
       assert {:ok, result, %{}} = ToMeta.transform(ast)
-      assert is_unary_op?(result, :boolean, :not)
+      assert unary_op?(result, :boolean, :not)
 
       {:unary_op, _meta, [operand]} = result
-      assert is_literal?(operand, :boolean, true)
+      assert literal?(operand, :boolean, true)
     end
 
     test "transforms negation" do
       ast = {:-, [], [42]}
       assert {:ok, result, %{}} = ToMeta.transform(ast)
-      assert is_unary_op?(result, :arithmetic, :-)
+      assert unary_op?(result, :arithmetic, :-)
 
       {:unary_op, _meta, [operand]} = result
-      assert is_literal?(operand, :integer, 42)
+      assert literal?(operand, :integer, 42)
     end
 
     test "transforms positive sign" do
       ast = {:+, [], [42]}
       assert {:ok, result, %{}} = ToMeta.transform(ast)
-      assert is_unary_op?(result, :arithmetic, :+)
+      assert unary_op?(result, :arithmetic, :+)
 
       {:unary_op, _meta, [operand]} = result
-      assert is_literal?(operand, :integer, 42)
+      assert literal?(operand, :integer, 42)
     end
   end
 
@@ -293,9 +293,9 @@ defmodule Metastatic.Adapters.ElixirTest do
       assert {:ok, {:conditional, _meta, [condition, then_branch, else_branch]}, %{}} =
                ToMeta.transform(ast)
 
-      assert is_literal?(condition, :boolean, true)
-      assert is_literal?(then_branch, :integer, 1)
-      assert is_literal?(else_branch, :integer, 2)
+      assert literal?(condition, :boolean, true)
+      assert literal?(then_branch, :integer, 1)
+      assert literal?(else_branch, :integer, 2)
     end
 
     test "transforms if without else" do
@@ -340,8 +340,8 @@ defmodule Metastatic.Adapters.ElixirTest do
       ast = {:=, [], [{:x, [], nil}, 5]}
 
       assert {:ok, {:inline_match, _meta, [pattern, value]}, metadata} = ToMeta.transform(ast)
-      assert is_variable?(pattern, "x")
-      assert is_literal?(value, :integer, 5)
+      assert variable?(pattern, "x")
+      assert literal?(value, :integer, 5)
       assert is_map(metadata)
     end
 
@@ -352,11 +352,11 @@ defmodule Metastatic.Adapters.ElixirTest do
 
       assert {:ok, {:inline_match, _meta, [pattern, value]}, _metadata} = ToMeta.transform(ast)
       assert {:tuple, _meta1, [var_x, var_y]} = pattern
-      assert is_variable?(var_x, "x")
-      assert is_variable?(var_y, "y")
+      assert variable?(var_x, "x")
+      assert variable?(var_y, "y")
       assert {:tuple, _meta2, [lit1, lit2]} = value
-      assert is_literal?(lit1, :integer, 1)
-      assert is_literal?(lit2, :integer, 2)
+      assert literal?(lit1, :integer, 1)
+      assert literal?(lit2, :integer, 2)
     end
 
     test "transforms nested pattern: {:ok, value} = result" do
@@ -368,9 +368,9 @@ defmodule Metastatic.Adapters.ElixirTest do
                ToMeta.transform(ast)
 
       assert {:tuple, _meta1, [ok_atom, var_value]} = pattern_meta
-      assert is_literal?(ok_atom, :symbol, :ok)
-      assert is_variable?(var_value, "value")
-      assert is_variable?(value_meta, "result")
+      assert literal?(ok_atom, :symbol, :ok)
+      assert variable?(var_value, "value")
+      assert variable?(value_meta, "result")
     end
 
     test "transforms pin operator: ^x = 5" do
@@ -380,7 +380,7 @@ defmodule Metastatic.Adapters.ElixirTest do
       assert {:ok, {:inline_match, _meta, [pattern, value]}, _metadata} = ToMeta.transform(ast)
       # Pin operator may be represented as function_call or pin node
       assert match?({:function_call, _, _}, pattern) or match?({:pin, _, _}, pattern)
-      assert is_literal?(value, :integer, 5)
+      assert literal?(value, :integer, 5)
     end
   end
 
@@ -414,7 +414,7 @@ defmodule Metastatic.Adapters.ElixirTest do
 
       assert {:ok, {:function_call, meta, [left, right]}, _metadata} = ToMeta.transform(ast)
       assert Keyword.get(meta, :name) == "|>"
-      assert is_variable?(left, "x")
+      assert variable?(left, "x")
       assert match?({:function_call, _, _}, right)
     end
 
