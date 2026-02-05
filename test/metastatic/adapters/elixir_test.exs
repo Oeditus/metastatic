@@ -308,7 +308,7 @@ defmodule Metastatic.Adapters.ElixirTest do
     test "transforms unless" do
       ast = {:unless, [], [false, [do: 1]]}
 
-      assert {:ok, {:conditional, _meta, [condition, _then, _else]}, metadata} =
+      assert {:ok, {:conditional, _meta, [condition, _then, _else]}, _final_context} =
                ToMeta.transform(ast)
 
       # unless may store original_form in metadata or negate condition

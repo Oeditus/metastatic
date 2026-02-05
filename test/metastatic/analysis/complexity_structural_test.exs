@@ -9,7 +9,7 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
     {:container, meta, body}
   end
 
-  defp function_def(name, params, body, opts \\ []) do
+  defp function_def(name, params, body, opts) do
     meta = [name: name, params: params] ++ opts
     {:function_def, meta, body}
   end
@@ -78,13 +78,17 @@ defmodule Metastatic.Analysis.ComplexityStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       func2 =
         function_def(
           "sub",
           ["x", "y"],
-          [binary_op(:arithmetic, :-, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :-, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       ast = container(:module, "Math", [func1, func2])
       doc = Document.new(ast, :elixir)

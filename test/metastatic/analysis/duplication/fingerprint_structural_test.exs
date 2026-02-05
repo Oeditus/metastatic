@@ -12,13 +12,12 @@ defmodule Metastatic.Analysis.Duplication.FingerprintStructuralTest do
   end
 
   defp assignment(target, value), do: {:assignment, [], [target, value]}
-  defp tuple_node(elems), do: {:tuple, [], elems}
 
   defp container(type, name, body, opts \\ []) do
     {:container, [container_type: type, name: name] ++ opts, body}
   end
 
-  defp function_def(name, params, body, opts \\ []) do
+  defp function_def(name, params, body, opts) do
     {:function_def, [name: name, params: params] ++ opts, [body]}
   end
 

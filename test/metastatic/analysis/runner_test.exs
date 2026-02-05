@@ -11,9 +11,6 @@ defmodule Metastatic.Analysis.RunnerTest do
   defp binary_op(category, operator, left, right),
     do: {:binary_op, [category: category, operator: operator], [left, right]}
 
-  defp unary_op(category, operator, operand),
-    do: {:unary_op, [category: category, operator: operator], [operand]}
-
   defp block(children), do: {:block, [], children}
   defp assignment(target, value), do: {:assignment, [], [target, value]}
   defp early_return(value), do: {:early_return, [], value}

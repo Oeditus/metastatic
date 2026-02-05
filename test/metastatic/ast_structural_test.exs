@@ -11,7 +11,7 @@ defmodule Metastatic.ASTStructuralTest do
     {:container, meta, body}
   end
 
-  defp function_def(name, params, body, opts \\ []) do
+  defp function_def(name, params, body, opts) do
     meta = [name: name, params: params] ++ opts
     {:function_def, meta, body}
   end
@@ -44,8 +44,6 @@ defmodule Metastatic.ASTStructuralTest do
     {:function_call, [name: name], args}
   end
 
-  defp tuple_node(elements), do: {:tuple, [], elements}
-
   describe "container conformance" do
     test "valid module container conforms" do
       ast = container(:module, "MyApp.Math", [])
@@ -67,7 +65,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       ast = container(:module, "Math", [func])
       assert AST.conforms?(ast)
@@ -101,7 +101,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       assert AST.conforms?(ast)
     end
@@ -130,7 +132,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "greet",
           ["name", "greeting"],
-          [function_call("puts", [literal(:string, "Hello")])], visibility: :public)
+          [function_call("puts", [literal(:string, "Hello")])],
+          visibility: :public
+        )
 
       assert AST.conforms?(ast)
     end
@@ -243,7 +247,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "password",
           ["value"],
-          [assignment(variable("@password"), variable("value"))], visibility: :public)
+          [assignment(variable("@password"), variable("value"))],
+          visibility: :public
+        )
 
       ast = property("password", [nil, setter])
       assert AST.conforms?(ast)
@@ -271,7 +277,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       ast = container(:module, "Math", [func])
       vars = AST.variables(ast)
@@ -303,7 +311,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       vars = AST.variables(ast)
       assert MapSet.equal?(vars, MapSet.new(["x", "y"]))
@@ -323,7 +333,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "func",
           ["name"],
-          [function_call("puts", [variable("name"), variable("extra")])], visibility: :public)
+          [function_call("puts", [variable("name"), variable("extra")])],
+          visibility: :public
+        )
 
       vars = AST.variables(ast)
       assert MapSet.equal?(vars, MapSet.new(["name", "extra"]))
@@ -450,7 +462,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       validate_method =
         function_def(
@@ -473,7 +487,9 @@ defmodule Metastatic.ASTStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       validate_func =
         function_def("validate", ["x"], [literal(:boolean, true)],
@@ -519,7 +535,9 @@ defmodule Metastatic.ASTStructuralTest do
               variable("y"),
               variable("name")
             ])
-          ], visibility: :public)
+          ],
+          visibility: :public
+        )
 
       assert AST.conforms?(ast)
       vars = AST.variables(ast)

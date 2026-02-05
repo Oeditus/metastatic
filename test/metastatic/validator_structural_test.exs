@@ -9,7 +9,7 @@ defmodule Metastatic.ValidatorStructuralTest do
     {:container, meta, body}
   end
 
-  defp function_def(name, params, body, opts \\ []) do
+  defp function_def(name, params, body, opts) do
     meta = [name: name, params: params] ++ opts
     {:function_def, meta, body}
   end
@@ -92,7 +92,9 @@ defmodule Metastatic.ValidatorStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       ast = container(:class, "Calculator", [add_method])
       doc = %Document{ast: ast, language: :python, metadata: %{}}
@@ -125,7 +127,9 @@ defmodule Metastatic.ValidatorStructuralTest do
         function_def(
           "add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :public
+        )
 
       ast = container(:module, "Math", [func])
       doc = %Document{ast: ast, language: :elixir, metadata: %{}}
@@ -330,13 +334,17 @@ defmodule Metastatic.ValidatorStructuralTest do
         function_def(
           "add",
           ["a", "b"],
-          [binary_op(:arithmetic, :+, variable("a"), variable("b"))], visibility: :public)
+          [binary_op(:arithmetic, :+, variable("a"), variable("b"))],
+          visibility: :public
+        )
 
       private_func =
         function_def(
           "do_add",
           ["x", "y"],
-          [binary_op(:arithmetic, :+, variable("x"), variable("y"))], visibility: :private)
+          [binary_op(:arithmetic, :+, variable("x"), variable("y"))],
+          visibility: :private
+        )
 
       module_ast = container(:module, "Math", [public_func, private_func])
       doc = %Document{ast: module_ast, language: :elixir, metadata: %{}}
