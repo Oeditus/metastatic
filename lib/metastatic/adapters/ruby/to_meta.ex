@@ -108,6 +108,12 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     {:ok, nil, %{}}
   end
 
+  # Constant base (root namespace ::)
+  # Used in absolute constant paths like ::Array, ::SomeModule::Class
+  def transform(%{"type" => "cbase", "children" => []}) do
+    {:ok, {:literal, [subtype: :constant], ""}, %{namespace: :root}}
+  end
+
   # Array literal
   def transform(%{"type" => "array", "children" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
