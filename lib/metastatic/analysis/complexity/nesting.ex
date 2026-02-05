@@ -223,7 +223,9 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     # Walk parameters
     {_, max} =
       Enum.reduce(params, {current, max}, fn
-        {:param, _, [_name, pattern, default]}, {c, m} ->
+        {:param, meta, _name}, {c, m} when is_list(meta) ->
+          pattern = Keyword.get(meta, :pattern)
+          default = Keyword.get(meta, :default)
           {_, m} = if pattern, do: walk(pattern, c, m), else: {c, m}
           if default, do: walk(default, c, m), else: {c, m}
 

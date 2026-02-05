@@ -389,7 +389,7 @@ defmodule Metastatic.Adapters.ElixirTest do
       ast = {:fn, [], [{:->, [], [[{:x, [], nil}], {:+, [], [{:x, [], nil}, 1]}]}]}
       assert {:ok, {:lambda, meta, [_body]}, %{}} = ToMeta.transform(ast)
       params = Keyword.get(meta, :params)
-      assert [{:param, "x", nil, nil}] = params
+      assert [{:param, [], "x"}] = params
     end
   end
 
@@ -633,7 +633,7 @@ defmodule Metastatic.Adapters.ElixirTest do
   describe "FromMeta - anonymous functions" do
     test "transforms lambda back" do
       meta_ast =
-        {:lambda, [params: [{:param, "x", nil, nil}], captures: []], [{:variable, [], "x"}]}
+        {:lambda, [params: [{:param, [], "x"}], captures: []], [{:variable, [], "x"}]}
 
       assert {:ok, {:fn, [], [{:->, [], [[{:x, [], nil}], {:x, [], nil}]}]}} =
                FromMeta.transform(meta_ast, %{})

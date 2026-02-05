@@ -138,7 +138,9 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     # Walk parameters
     count =
       Enum.reduce(params, count, fn
-        {:param, _, [_name, pattern, default]}, c ->
+        {:param, meta, _name}, c when is_list(meta) ->
+          pattern = Keyword.get(meta, :pattern)
+          default = Keyword.get(meta, :default)
           c = if pattern, do: walk_statements(pattern, c), else: c
           if default, do: walk_statements(default, c), else: c
 
@@ -253,7 +255,9 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     # Walk parameters
     count =
       Enum.reduce(params, count, fn
-        {:param, _, [_name, pattern, default]}, c ->
+        {:param, meta, _name}, c when is_list(meta) ->
+          pattern = Keyword.get(meta, :pattern)
+          default = Keyword.get(meta, :default)
           c = if pattern, do: walk_returns(pattern, c), else: c
           if default, do: walk_returns(default, c), else: c
 

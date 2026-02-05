@@ -136,7 +136,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         param_name = "arg_#{n}"
 
         node_meta =
-          [params: [{:param, param_name, nil, nil}], capture_form: :argument_reference] ++
+          [params: [{:param, [], param_name}], capture_form: :argument_reference] ++
             build_meta(meta)
 
         body_ast = {:variable, [], param_name}
@@ -145,7 +145,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       # &Module.function/arity
       {:/, _, [func_ref, arity]} when is_integer(arity) ->
         func_name = extract_captured_function_name(func_ref)
-        params = for i <- 1..arity, do: {:param, "arg_#{i}", nil, nil}
+        params = for i <- 1..arity, do: {:param, [], "arg_#{i}"}
         args = for i <- 1..arity, do: {:variable, [], "arg_#{i}"}
         body_ast = {:function_call, [name: func_name], args}
         node_meta = [params: params, capture_form: :named_function] ++ build_meta(meta)
@@ -160,7 +160,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
           node_meta = [params: [], capture_form: :no_arguments] ++ build_meta(meta)
           {:lambda, node_meta, [transformed_body]}
         else
-          params = for i <- 1..arg_count, do: {:param, "arg_#{i}", nil, nil}
+          params = for i <- 1..arg_count, do: {:param, [], "arg_#{i}"}
 
           node_meta =
             [params: params, capture_form: :expression, arity: arg_count] ++ build_meta(meta)
@@ -883,7 +883,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       [{:<-, _, [var, collection]}] ->
         # Simple map-like comprehension
         var_name = extract_var_name(var)
-        param = {:param, var_name, nil, nil}
+        param = {:param, [], var_name}
         lambda = {:lambda, [params: [param]], flatten_body(body)}
         node_meta = [op_type: :map, original_form: :comprehension] ++ build_meta(meta)
         {{:collection_op, node_meta, [lambda, collection]}, ctx}
@@ -1056,10 +1056,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp extract_param_names(params) when is_list(params) do
     Enum.map(params, fn
       {name, _, context} when is_atom(name) and is_atom(context) ->
-        {:param, Atom.to_string(name), nil, nil}
+        {:param, [], Atom.to_string(name)}
 
       _ ->
-        {:param, "_", nil, nil}
+        {:param, [], "_"}
     end)
   end
 
@@ -1072,8 +1072,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Extract parameter names from already-transformed MetaAST params
   defp extract_param_names_from_meta_ast(params) when is_list(params) do
     Enum.map(params, fn
-      {:variable, _, name} -> {:param, name, nil, nil}
-      _ -> {:param, "_", nil, nil}
+      {:variable, _, name} -> {:param, [], name}
+      _ -> {:param, [], "_"}
     end)
   end
 
@@ -1104,11 +1104,11 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Without args: signature becomes {:variable, meta, "func_name"}
   defp extract_signature_from_meta_ast({:function_call, meta, params}) do
     func_name = Keyword.get(meta, :name, "anonymous")
-    # Convert parameter MetaAST nodes to {:param, name, nil, nil} format
+    # Convert parameter MetaAST nodes to {:param, [], name} format
     param_list =
       Enum.map(params, fn
-        {:variable, _, name} -> {:param, name, nil, nil}
-        _ -> {:param, "_", nil, nil}
+        {:variable, _, name} -> {:param, [], name}
+        _ -> {:param, [], "_"}
       end)
 
     {func_name, param_list, nil}

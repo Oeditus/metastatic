@@ -49,7 +49,7 @@ defmodule Metastatic.Adapters.Elixir.GuardsTest do
       # Non-guarded functions use standard lambda
       assert {:lambda, meta, [body]} = result
       params = get_params(meta)
-      assert [{:param, "x", nil, nil}] = params
+      assert [{:param, [], "x"}] = params
       assert {:binary_op, op_meta, [left, right]} = body
       assert Keyword.get(op_meta, :category) == :arithmetic
       assert Keyword.get(op_meta, :operator) == :+

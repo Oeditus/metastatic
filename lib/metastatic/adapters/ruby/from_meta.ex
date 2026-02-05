@@ -308,15 +308,31 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   defp build_args_ast(params) when is_list(params) do
     children =
       Enum.map(params, fn
+        {:param, meta, name} when is_binary(name) ->
+          # New 3-tuple format: {:param, [pattern: pattern, default: default], name}
+          pattern = Keyword.get(meta, :pattern)
+          default = Keyword.get(meta, :default)
+
+          cond do
+            pattern != nil ->
+              %{"type" => "arg", "children" => ["_pattern"]}
+
+            default != nil ->
+              %{"type" => "optarg", "children" => [name]}
+
+            true ->
+              %{"type" => "arg", "children" => [name]}
+          end
+
         param when is_binary(param) ->
           %{"type" => "arg", "children" => [param]}
 
         {:pattern, _meta} ->
-          # Pattern parameters - simplified for now
+          # Legacy pattern parameters
           %{"type" => "arg", "children" => ["_pattern"]}
 
         {:default, name, _default_val} ->
-          # Default parameters - simplified for now
+          # Legacy default parameters
           %{"type" => "arg", "children" => [name]}
       end)
 

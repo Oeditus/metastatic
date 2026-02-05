@@ -238,7 +238,9 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
         # Walk parameters
         acc =
           Enum.reduce(params, acc, fn
-            {:param, _, [param_name, pattern, default]}, a ->
+            {:param, meta, param_name}, a when is_list(meta) and is_binary(param_name) ->
+              pattern = Keyword.get(meta, :pattern)
+              default = Keyword.get(meta, :default)
               a = %{a | operands: [param_name | a.operands]}
               a = if pattern, do: walk(pattern, a), else: a
               if default, do: walk(default, a), else: a

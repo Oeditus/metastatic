@@ -13,7 +13,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [1]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:variable, [], "arg_1"} = body
       assert get_capture_form(meta) == :argument_reference
     end
@@ -22,7 +22,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [2]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_2", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_2"}] = get_params(meta)
       assert {:variable, [], "arg_2"} = body
       assert get_capture_form(meta) == :argument_reference
     end
@@ -31,7 +31,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [3]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_3", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_3"}] = get_params(meta)
       assert {:variable, [], "arg_3"} = body
     end
   end
@@ -43,7 +43,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
         {:&, [], [{:/, [], [{{:., [], [{:__aliases__, [], [:Integer]}, :parse]}, [], []}, 1]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:function_call, call_meta, [arg]} = body
       assert Keyword.get(call_meta, :name) == "Integer.parse"
       assert {:variable, [], "arg_1"} = arg
@@ -57,7 +57,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
       params = get_params(meta)
       assert [_, _] = params
-      assert [{:param, "arg_1", nil, nil}, {:param, "arg_2", nil, nil}] = params
+      assert [{:param, [], "arg_1"}, {:param, [], "arg_2"}] = params
       assert {:function_call, call_meta, args} = body
       assert Keyword.get(call_meta, :name) == "Enum.map"
       assert [_, _] = args
@@ -69,7 +69,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
         {:&, [], [{:/, [], [{{:., [], [{:__aliases__, [], [:String]}, :upcase]}, [], []}, 1]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:function_call, call_meta, _args} = body
       assert Keyword.get(call_meta, :name) == "String.upcase"
     end
@@ -81,7 +81,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [{:+, [], [{:&, [], [1]}, 1]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:binary_op, op_meta, [left, right]} = body
       assert Keyword.get(op_meta, :category) == :arithmetic
       assert Keyword.get(op_meta, :operator) == :+
@@ -98,7 +98,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
       params = get_params(meta)
       assert [_, _] = params
-      assert [{:param, "arg_1", nil, nil}, {:param, "arg_2", nil, nil}] = params
+      assert [{:param, [], "arg_1"}, {:param, [], "arg_2"}] = params
       assert {:binary_op, op_meta, [left, right]} = body
       assert Keyword.get(op_meta, :category) == :arithmetic
       assert Keyword.get(op_meta, :operator) == :+
@@ -126,7 +126,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [{{:., [], [{:__aliases__, [], [:String]}, :upcase]}, [], [{:&, [], [1]}]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:function_call, call_meta, args} = body
       assert Keyword.get(call_meta, :name) == "String.upcase"
       assert [arg] = args
@@ -140,7 +140,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [{:elem, [], [{:&, [], [1]}, 0]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:function_call, call_meta, args} = body
       assert Keyword.get(call_meta, :name) == "elem"
       assert [_, _] = args
@@ -151,7 +151,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [{:>, [], [{:&, [], [1]}, 0]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:binary_op, op_meta, [left, right]} = body
       assert Keyword.get(op_meta, :category) == :comparison
       assert Keyword.get(op_meta, :operator) == :>
@@ -192,9 +192,9 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       assert length(params) == 3
 
       assert [
-               {:param, "arg_1", nil, nil},
-               {:param, "arg_2", nil, nil},
-               {:param, "arg_3", nil, nil}
+               {:param, [], "arg_1"},
+               {:param, [], "arg_2"},
+               {:param, [], "arg_3"}
              ] = params
 
       assert get_arity(meta) == 3
@@ -207,7 +207,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [{{:., [], [{:__aliases__, [], [:Map]}, :get]}, [], [{:&, [], [1]}, :key]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:function_call, call_meta, args} = body
       assert Keyword.get(call_meta, :name) == "Map.get"
       assert [var, key] = args
@@ -258,7 +258,7 @@ defmodule Metastatic.Adapters.Elixir.CapturesTest do
       ast = {:&, [], [{{:., [], [{:__aliases__, [], [:String]}, :length]}, [], [inner_call]}]}
 
       assert {:ok, {:lambda, meta, [body]}, _ctx} = ToMeta.transform(ast)
-      assert [{:param, "arg_1", nil, nil}] = get_params(meta)
+      assert [{:param, [], "arg_1"}] = get_params(meta)
       assert {:function_call, call_meta, [inner]} = body
       assert Keyword.get(call_meta, :name) == "String.length"
       assert {:function_call, _, _} = inner

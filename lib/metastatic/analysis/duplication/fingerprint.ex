@@ -471,14 +471,16 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   # Helper for extracting tokens from function parameters
   defp extract_param_tokens(param, acc) when is_binary(param), do: [:param | acc]
 
-  # New format: {:param, name, pattern, default}
-  defp extract_param_tokens({:param, _name, pattern, default}, acc) do
+  # New format: {:param, [pattern: pattern, default: default], name}
+  defp extract_param_tokens({:param, meta, _name}, acc) when is_list(meta) do
+    pattern = Keyword.get(meta, :pattern)
+    default = Keyword.get(meta, :default)
     acc = [:param | acc]
     acc = if pattern, do: extract_tokens(pattern, acc), else: acc
     if default, do: extract_tokens(default, acc), else: acc
   end
 
-  # Old format compatibility
+  # Legacy format compatibility
   defp extract_param_tokens({:pattern, pattern}, acc),
     do: extract_tokens(pattern, [:pattern_param | acc])
 

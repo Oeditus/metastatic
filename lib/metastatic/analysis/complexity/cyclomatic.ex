@@ -236,7 +236,9 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
     # Walk parameters (for pattern params with embedded conditionals)
     count =
       Enum.reduce(params, count, fn
-        {:param, _, [_name, pattern, default]}, c ->
+        {:param, meta, _name}, c when is_list(meta) ->
+          pattern = Keyword.get(meta, :pattern)
+          default = Keyword.get(meta, :default)
           c = if pattern, do: walk(pattern, c), else: c
           if default, do: walk(default, c), else: c
 

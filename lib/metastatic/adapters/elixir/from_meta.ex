@@ -322,7 +322,7 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
     params_ex =
       Enum.map(params, fn
-        {:param, name, _type, _default} ->
+        {:param, _meta, name} when is_binary(name) ->
           {String.to_atom(name), [], nil}
 
         name when is_binary(name) ->
@@ -409,7 +409,7 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
     params_ex =
       Enum.map(params, fn
-        {:param, param_name, _type, _default} ->
+        {:param, _meta, param_name} when is_binary(param_name) ->
           {String.to_atom(param_name), [], nil}
 
         param_name when is_binary(param_name) ->

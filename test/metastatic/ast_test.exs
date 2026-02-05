@@ -375,13 +375,14 @@ defmodule Metastatic.ASTTest do
     end
 
     test "exception_handling" do
+      # Exception handlers should be :match_arm nodes
       ast =
         {:exception_handling, [],
          [
            {:block, [], [{:function_call, [name: "risky"], []}]},
            [
-             {:error, {:variable, [], "e"},
-              {:function_call, [name: "handle"], [{:variable, [], "e"}]}}
+             {:match_arm, [pattern: {:variable, [], "e"}],
+              [{:function_call, [name: "handle"], [{:variable, [], "e"}]}]}
            ],
            {:function_call, [name: "cleanup"], []}
          ]}

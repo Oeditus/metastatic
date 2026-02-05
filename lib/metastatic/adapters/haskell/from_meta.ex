@@ -57,7 +57,13 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
 
   def transform({:lambda, meta, [body]}, _metadata) when is_list(meta) do
     params = Keyword.get(meta, :params, [])
-    patterns = Enum.map(params, fn param -> %{"type" => "var_pat", "name" => param} end)
+
+    patterns =
+      Enum.map(params, fn
+        {:param, _meta, name} when is_binary(name) -> %{"type" => "var_pat", "name" => name}
+        name when is_binary(name) -> %{"type" => "var_pat", "name" => name}
+        _ -> %{"type" => "var_pat", "name" => "_"}
+      end)
 
     with {:ok, body_ast} <- transform(body, %{}) do
       {:ok,

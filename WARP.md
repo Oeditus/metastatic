@@ -88,9 +88,9 @@ flowchart TD
 - Examples: loops (while/for), map/filter/reduce operations
 
 **M2.2s Structural/Organizational Layer** - Top-level constructs for modules and classes
-- Types: `container`, `function_def`, `attribute_access`, `augmented_assignment`, `property`
+- Types: `container`, `function_def`, `param`, `attribute_access`, `augmented_assignment`, `property`
 - Enables cross-language structural analysis and architectural transformations
-- Examples: modules, classes, function definitions, method signatures
+- Examples: modules, classes, function definitions, method signatures, function parameters
 
 **M2.3 Native Layer** - Language-specific escape hatches
 - Type: `language_specific` (embeds M1 directly when needed)
@@ -222,6 +222,8 @@ All MetaAST nodes now use a uniform structure: `{type_atom, keyword_meta, childr
 {:function_call, [name: "Repo.all"], [args...]}
 {:collection_op, [op_type: :map], [lambda, collection]}
 {:function_def, [name: "create", params: [...], visibility: :public], [body...]}
+{:param, [pattern: nil, default: nil], "name"}  # Function parameter
+{:param, [pattern: nil, default: {:literal, [subtype: :integer], 0}], "count"}  # With default
 ```
 
 **Critical naming:**

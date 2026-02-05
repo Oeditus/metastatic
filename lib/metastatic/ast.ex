@@ -104,6 +104,7 @@ defmodule Metastatic.AST do
   @type structural_type ::
           :container
           | :function_def
+          | :param
           | :attribute_access
           | :augmented_assignment
           | :property
@@ -177,6 +178,7 @@ defmodule Metastatic.AST do
   @structural_types [
     :container,
     :function_def,
+    :param,
     :attribute_access,
     :augmented_assignment,
     :property
@@ -573,7 +575,7 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:lambda, meta, body) do
     params = Keyword.get(meta, :params, [])
-    is_list(params) and is_list(body) and Enum.all?(body, &conforms?/1)
+    is_list(params) and valid_params?(params) and is_list(body) and Enum.all?(body, &conforms?/1)
   end
 
   defp valid_node?(:collection_op, meta, children) do
@@ -632,9 +634,20 @@ defmodule Metastatic.AST do
     name = Keyword.get(meta, :name)
     params = Keyword.get(meta, :params, [])
 
-    is_binary(name) and is_list(params) and
+    is_binary(name) and is_list(params) and valid_params?(params) and
       is_list(body) and Enum.all?(body, &conforms?/1)
   end
+
+  # Param node: {:param, [pattern: pattern, default: default], name}
+  defp valid_node?(:param, meta, name) when is_binary(name) do
+    pattern = Keyword.get(meta, :pattern)
+    default = Keyword.get(meta, :default)
+
+    (is_nil(pattern) or conforms?(pattern)) and
+      (is_nil(default) or conforms?(default))
+  end
+
+  defp valid_node?(:param, _meta, _), do: false
 
   defp valid_node?(:attribute_access, meta, [receiver]) do
     attribute = Keyword.get(meta, :attribute)
@@ -674,11 +687,30 @@ defmodule Metastatic.AST do
   end
 
   defp valid_exception_handlers?(handlers) when is_list(handlers) do
-    Enum.all?(handlers, fn
-      {:error, var, body} -> conforms?(var) and conforms?(body)
-      handler -> conforms?(handler)
+    # Exception handlers should be :match_arm nodes
+    Enum.all?(handlers, &conforms?/1)
+  end
+
+  # Validate params list in function definitions and lambdas
+  defp valid_params?(params) when is_list(params) do
+    Enum.all?(params, fn
+      {:param, meta, name} when is_list(meta) and is_binary(name) ->
+        pattern = Keyword.get(meta, :pattern)
+        default = Keyword.get(meta, :default)
+
+        (is_nil(pattern) or conforms?(pattern)) and
+          (is_nil(default) or conforms?(default))
+
+      # Also accept simple string params for backward compatibility during transition
+      name when is_binary(name) ->
+        true
+
+      _ ->
+        false
     end)
   end
+
+  defp valid_params?(_), do: false
 
   # Validate literal values match their subtype
   defp valid_literal_value?(:integer, value), do: is_integer(value)

@@ -356,13 +356,15 @@ defmodule Metastatic.CLI.Formatter do
     "#{indent}#{inspect(ast)}"
   end
 
-  # 3-tuple params: {:param, meta, [name, type_hint, default]}
-  defp format_param({:param, _meta, [name, type_hint, default]}) do
+  # 3-tuple params: {:param, [pattern: pattern, default: default], name}
+  defp format_param({:param, meta, name}) when is_binary(name) do
+    pattern = Keyword.get(meta, :pattern)
+    default = Keyword.get(meta, :default)
     parts = [name]
 
     parts =
-      if type_hint do
-        parts ++ [": #{type_hint}"]
+      if pattern do
+        parts ++ [" (pattern: #{inspect(pattern)})"]
       else
         parts
       end

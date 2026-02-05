@@ -243,6 +243,12 @@ defmodule Metastatic.Analysis.UnusedVariables do
     update_current_scope(ctx, fn scope -> [var | scope] end)
   end
 
+  # New 3-tuple param format: {:param, [pattern: pattern, default: default], name}
+  defp track_writes({:param, _meta, name}, category, ctx) when is_binary(name) do
+    var = %{name: name, category: category, was_read: false}
+    update_current_scope(ctx, fn scope -> [var | scope] end)
+  end
+
   defp track_writes(_, _category, ctx), do: ctx
 
   # Track variable reads

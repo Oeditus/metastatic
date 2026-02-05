@@ -229,9 +229,15 @@ defmodule Metastatic.Adapters.Python.FromMeta do
 
             case params do
               [param] ->
+                param_name = extract_param_name(param)
+
                 with {:ok, elt_py} <- transform(body, metadata),
                      {:ok, iter_py} <- transform(collection, metadata) do
-                  target = %{"_type" => "Name", "id" => param, "ctx" => %{"_type" => "Store"}}
+                  target = %{
+                    "_type" => "Name",
+                    "id" => param_name,
+                    "ctx" => %{"_type" => "Store"}
+                  }
 
                   generator = %{
                     "_type" => "comprehension",
@@ -498,7 +504,8 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   defp build_lambda_args(params) when is_list(params) do
     args =
       Enum.map(params, fn param ->
-        %{"_type" => "arg", "arg" => param, "annotation" => nil}
+        param_name = extract_param_name(param)
+        %{"_type" => "arg", "arg" => param_name, "annotation" => nil}
       end)
 
     %{
@@ -512,6 +519,11 @@ defmodule Metastatic.Adapters.Python.FromMeta do
       "kwarg" => nil
     }
   end
+
+  # Extract param name from various formats
+  defp extract_param_name({:param, _meta, name}) when is_binary(name), do: name
+  defp extract_param_name(name) when is_binary(name), do: name
+  defp extract_param_name(_), do: "_"
 
   defp transform_exception_handlers(clauses, metadata) when is_list(clauses) do
     clauses

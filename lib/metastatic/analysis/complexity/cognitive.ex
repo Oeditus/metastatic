@@ -258,7 +258,9 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
 
     acc =
       Enum.reduce(params, acc, fn
-        {:param, _, [_name, pattern, default]}, a ->
+        {:param, meta, _name}, a when is_list(meta) ->
+          pattern = Keyword.get(meta, :pattern)
+          default = Keyword.get(meta, :default)
           a = if pattern, do: walk(pattern, nesting, a), else: a
           if default, do: walk(default, nesting, a), else: a
 
