@@ -236,24 +236,25 @@ defmodule Metastatic.Analysis.Complexity do
     end
   end
 
-  # 3-tuple format: {:container, meta, [body]}
-  defp extract_per_function_metrics({:container, meta, [body]}, _doc_metadata)
-       when is_list(meta) do
+  # 3-tuple format: {:container, meta, children}
+  # Children can be a list of function definitions directly, or a single body element
+  defp extract_per_function_metrics({:container, meta, children}, _doc_metadata)
+       when is_list(meta) and is_list(children) do
     members =
-      case body do
-        {:block, _, statements} when is_list(statements) ->
+      case children do
+        # Single block element containing statements
+        [{:block, _, statements}] when is_list(statements) ->
           statements
 
-        list when is_list(list) ->
-          list
-
-        single_item ->
-          [single_item]
+        # Direct list of function definitions or other nodes
+        _ ->
+          children
       end
 
     members
     |> Enum.filter(&match?(ast when is_tuple(ast) and elem(ast, 0) == :function_def, &1))
     |> Enum.map(&analyze_function_def/1)
+    |> Enum.reject(&is_nil/1)
   end
 
   defp extract_per_function_metrics(_ast, _metadata) do
@@ -317,9 +318,19 @@ defmodule Metastatic.Analysis.Complexity do
 
   defp analyze_function(_), do: nil
 
-  # 3-tuple format: {:function_def, meta, [body]}
-  defp analyze_function_def({:function_def, meta, [body]}) when is_list(meta) do
+  # 3-tuple format: {:function_def, meta, children}
+  # Children can be a single body element or a list of statements
+  defp analyze_function_def({:function_def, meta, children}) when is_list(meta) do
     name = Keyword.get(meta, :name, "unknown")
+
+    # Wrap children in a block for consistent analysis
+    body =
+      case children do
+        [single] -> single
+        statements when is_list(statements) -> {:block, [], statements}
+        other -> other
+      end
+
     variables = Metastatic.AST.variables(body)
 
     %{
