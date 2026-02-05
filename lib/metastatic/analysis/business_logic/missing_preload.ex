@@ -67,7 +67,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
   alias Metastatic.Analysis.Analyzer
 
   @query_functions ~w[
-    all find get query select fetch load
+    all find query select fetch load
     findall getall findMany where filter
   ]
 

@@ -75,16 +75,20 @@ defmodule Metastatic.Analysis.BusinessLogic.BlockingInPlug do
   @behaviour Metastatic.Analysis.Analyzer
   alias Metastatic.Analysis.Analyzer
 
-  @middleware_indicators ~w[
+  @middleware_indicators Application.compile_env(:metastatic, :middleware_indicators, ~w[
     middleware plug handler interceptor
     filter guard decorator before_action
     process_request prehandle
-  ]
+  ])
 
-  @blocking_operations ~w[
+  @non_blocking_operations Application.compile_env(:metastatic, :non_blocking_operations, ~w[
+    keyword. map.
+  ])
+
+  @blocking_operations Application.compile_env(:metastatic, :blocking_operations, ~w[
     get post query find read write
     sleep wait block fetch load
-  ]
+  ])
 
   @impl true
   def info do
@@ -103,8 +107,7 @@ defmodule Metastatic.Analysis.BusinessLogic.BlockingInPlug do
     fn_name = Keyword.get(meta, :name, "")
     fn_lower = String.downcase(fn_name)
 
-    if in_middleware_context?(context) and
-         String.contains?(fn_lower, @blocking_operations) do
+    if in_middleware_context?(context) and has_blocking_operations?(fn_lower) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
@@ -134,5 +137,10 @@ defmodule Metastatic.Analysis.BusinessLogic.BlockingInPlug do
     [fn_name, module_name]
     |> Enum.map(&String.downcase/1)
     |> Enum.any?(&String.contains?(&1, @middleware_indicators))
+  end
+
+  defp has_blocking_operations?(fn_lower) do
+    not String.contains?(fn_lower, @non_blocking_operations) and
+      String.contains?(fn_lower, @blocking_operations)
   end
 end

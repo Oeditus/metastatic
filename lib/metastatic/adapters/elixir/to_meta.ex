@@ -38,6 +38,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
        [{:variable, [original_meta: [line: 1]], "x"},
         {:literal, [subtype: :integer], 5}]}
   """
+  require Logger
 
   # Arithmetic operators
   @arithmetic_ops [:+, :-, :*, :/, :rem, :div]
@@ -45,6 +46,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   @comparison_ops [:==, :!=, :<, :>, :<=, :>=, :===, :!==]
   # Boolean operators
   @boolean_ops [:and, :or, :&&, :||]
+
+  @map {:__aliases__, [alias: false], [:Map]}
 
   @doc """
   Transform Elixir AST to MetaAST.
@@ -93,6 +96,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {ast, %{ctx | module: module_name}}
   end
 
+  # Track entering a guarded function
+  defp pre_transform({func_type, _meta, [{:when, _, [{name, _, args} | _]} | _]} = ast, ctx)
+       when func_type in [:def, :defp, :defmacro, :defmacrop] and is_atom(name) do
+    arity = if is_list(args), do: length(args), else: 0
+    visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
+    {ast, %{ctx | function: Atom.to_string(name), arity: arity, visibility: visibility}}
+  end
+
   # Track entering a function
   defp pre_transform({func_type, _meta, [{name, _, args} | _]} = ast, ctx)
        when func_type in [:def, :defp, :defmacro, :defmacrop] and is_atom(name) do
@@ -101,12 +112,21 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {ast, %{ctx | function: Atom.to_string(name), arity: arity, visibility: visibility}}
   end
 
-  # Track entering a guarded function
-  defp pre_transform({func_type, _meta, [{:when, _, [{name, _, args} | _]} | _]} = ast, ctx)
-       when func_type in [:def, :defp, :defmacro, :defmacrop] and is_atom(name) do
-    arity = if is_list(args), do: length(args), else: 0
-    visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
-    {ast, %{ctx | function: Atom.to_string(name), arity: arity, visibility: visibility}}
+  # Map update syntactic sugar → Map.merge/2
+  defp pre_transform({:%{}, meta, [{:|, inner_meta, [name, values]}]}, ctx) do
+    ast =
+      {{:., meta, [@map, :merge]}, inner_meta,
+       [name, {{:., inner_meta, [@map, :new]}, inner_meta, [values]}]}
+
+    {ast, ctx}
+  end
+
+  # {{:., [], [{:foo, [], Elixir}, :bar]}, [no_parens: true], []}
+  # {{:., [], [{:__aliases__, [alias: false], [:Map]}, :fetch!]}, [], [{:foo, [], Elixir}, :bar]}
+  defp pre_transform({{:., dot_meta, [{_map, _, _}, _key] = args}, meta, []}, ctx) do
+    ast = {{:., dot_meta, [@map, :fetch!]}, Keyword.delete(meta, :no_parens), args}
+
+    {ast, ctx}
   end
 
   # Handle function captures in pre_transform to prevent Macro.traverse from
@@ -153,19 +173,19 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
       # &(&1 + &2) - expression capture
       _ ->
-        {transformed_body, arg_count} = transform_capture_body_recursive(body)
+        case transform_capture_body_recursive(body) do
+          {transformed_body, 0} ->
+            # No capture arguments - treat as zero-arity lambda
+            node_meta = [params: [], capture_form: :no_arguments] ++ build_meta(meta)
+            {:lambda, node_meta, [transformed_body]}
 
-        if arg_count == 0 do
-          # No capture arguments - treat as zero-arity lambda
-          node_meta = [params: [], capture_form: :no_arguments] ++ build_meta(meta)
-          {:lambda, node_meta, [transformed_body]}
-        else
-          params = for i <- 1..arg_count, do: {:param, [], "arg_#{i}"}
+          {transformed_body, arg_count} ->
+            params = for i <- 1..arg_count//1, do: {:param, [], "arg_#{i}"}
 
-          node_meta =
-            [params: params, capture_form: :expression, arity: arg_count] ++ build_meta(meta)
+            node_meta =
+              [params: params, capture_form: :expression, arity: arg_count] ++ build_meta(meta)
 
-          {:lambda, node_meta, [transformed_body]}
+            {:lambda, node_meta, [transformed_body]}
         end
     end
   end
@@ -178,6 +198,16 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp do_transform_capture_body({:&, _, [n]}, max_arg) when is_integer(n) do
     # Replace &1, &2, etc. with variable references
     {{:variable, [], "arg_#{n}"}, max(max_arg, n)}
+  end
+
+  defp do_transform_capture_body({{:., dot_meta, [{:&, _, [n]}, key]}, _meta, []}, max_arg)
+       when is_integer(n) do
+    {{:function_call,
+      [
+        name: "Map.fetch!",
+        original_meta: dot_meta,
+        line: Keyword.get(dot_meta, :line, 1)
+      ], [{:variable, [], "arg_#{n}"}, {:literal, [subtype: :symbol], key}]}, max(max_arg, n)}
   end
 
   defp do_transform_capture_body({op, meta, args}, max_arg) when is_atom(op) and is_list(args) do
@@ -213,8 +243,9 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         func_name = Atom.to_string(op)
         {{:function_call, [name: func_name] ++ build_meta(meta), transformed_args}, new_max}
 
-      :unknown ->
+      unknown ->
         # Keep as-is but with transformed children
+        Logger.warning("Unexpected OP: " <> inspect(unknown))
         {{op, meta, transformed_args}, new_max}
     end
   end
@@ -530,6 +561,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     # Transform pairs to {:pair, [], [key, value]} format
     pair_nodes =
       Enum.map(pairs, fn
+        # Map update
+        {:function_call, [{:name, "|"} | _], [struct, list]} ->
+          Logger.warning("Unexpected struct update: (#{inspect(struct)} with #{inspect(list)})")
+
         # Already transformed as tuple: {:tuple, [], [key_ast, value_ast]}
         {:tuple, _, [key_ast, value_ast]} ->
           {:pair, [], [key_ast, value_ast]}
