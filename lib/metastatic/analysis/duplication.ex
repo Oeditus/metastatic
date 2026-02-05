@@ -15,8 +15,8 @@ defmodule Metastatic.Analysis.Duplication do
       alias Metastatic.{Document, Analysis.Duplication}
 
       # Create two documents
-      ast1 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
-      ast2 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast1 = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+      ast2 = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -29,7 +29,7 @@ defmodule Metastatic.Analysis.Duplication do
   ## Examples
 
       # Type I: Exact clone
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> doc1 = Metastatic.Document.new(ast, :elixir)
       iex> doc2 = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Duplication.detect(doc1, doc2)
@@ -39,8 +39,8 @@ defmodule Metastatic.Analysis.Duplication do
       :type_i
 
       # No duplication
-      iex> ast1 = {:literal, :integer, 42}
-      iex> ast2 = {:literal, :string, "hello"}
+      iex> ast1 = {:literal, [subtype: :integer], 42}
+      iex> ast2 = {:literal, [subtype: :string], "hello"}
       iex> doc1 = Metastatic.Document.new(ast1, :elixir)
       iex> doc2 = Metastatic.Document.new(ast2, :elixir)
       iex> {:ok, result} = Metastatic.Analysis.Duplication.detect(doc1, doc2)
@@ -82,16 +82,16 @@ defmodule Metastatic.Analysis.Duplication do
 
   ## Examples
 
-      iex> ast1 = {:literal, :integer, 42}
-      iex> ast2 = {:literal, :integer, 42}
+      iex> ast1 = {:literal, [subtype: :integer], 42}
+      iex> ast2 = {:literal, [subtype: :integer], 42}
       iex> doc1 = Metastatic.Document.new(ast1, :elixir)
       iex> doc2 = Metastatic.Document.new(ast2, :elixir)
       iex> {:ok, result} = Metastatic.Analysis.Duplication.detect(doc1, doc2)
       iex> result.duplicate?
       true
 
-      iex> ast1 = {:variable, "x"}
-      iex> ast2 = {:literal, :integer, 42}
+      iex> ast1 = {:variable, [], "x"}
+      iex> ast2 = {:literal, [subtype: :integer], 42}
       iex> doc1 = Metastatic.Document.new(ast1, :elixir)
       iex> doc2 = Metastatic.Document.new(ast2, :elixir)
       iex> {:ok, result} = Metastatic.Analysis.Duplication.detect(doc1, doc2)
@@ -138,7 +138,7 @@ defmodule Metastatic.Analysis.Duplication do
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> doc1 = Metastatic.Document.new(ast, :elixir)
       iex> doc2 = Metastatic.Document.new(ast, :elixir)
       iex> result = Metastatic.Analysis.Duplication.detect!(doc1, doc2)
@@ -158,13 +158,13 @@ defmodule Metastatic.Analysis.Duplication do
 
   ## Examples
 
-      iex> ast1 = {:literal, :integer, 42}
-      iex> ast2 = {:literal, :integer, 42}
+      iex> ast1 = {:literal, [subtype: :integer], 42}
+      iex> ast2 = {:literal, [subtype: :integer], 42}
       iex> Metastatic.Analysis.Duplication.similarity(ast1, ast2)
       1.0
 
-      iex> ast1 = {:literal, :integer, 42}
-      iex> ast2 = {:literal, :string, "hello"}
+      iex> ast1 = {:literal, [subtype: :integer], 42}
+      iex> ast2 = {:literal, [subtype: :string], "hello"}
       iex> score = Metastatic.Analysis.Duplication.similarity(ast1, ast2)
       iex> score > 0.0 and score < 0.5
       true
@@ -186,11 +186,11 @@ defmodule Metastatic.Analysis.Duplication do
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> docs = [
       ...>   Metastatic.Document.new(ast, :elixir),
       ...>   Metastatic.Document.new(ast, :python),
-      ...>   Metastatic.Document.new({:literal, :string, "hello"}, :elixir)
+      ...>   Metastatic.Document.new({:literal, [subtype: :string], "hello"}, :elixir)
       ...> ]
       iex> {:ok, groups} = Metastatic.Analysis.Duplication.detect_in_list(docs)
       iex> length(groups) > 0
@@ -246,7 +246,7 @@ defmodule Metastatic.Analysis.Duplication do
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> docs = [Metastatic.Document.new(ast, :elixir), Metastatic.Document.new(ast, :python)]
       iex> groups = Metastatic.Analysis.Duplication.detect_in_list!(docs)
       iex> is_list(groups)
@@ -266,13 +266,13 @@ defmodule Metastatic.Analysis.Duplication do
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> fp = Metastatic.Analysis.Duplication.fingerprint(ast)
       iex> is_binary(fp) and String.length(fp) > 0
       true
 
-      iex> ast1 = {:literal, :integer, 42}
-      iex> ast2 = {:literal, :integer, 42}
+      iex> ast1 = {:literal, [subtype: :integer], 42}
+      iex> ast2 = {:literal, [subtype: :integer], 42}
       iex> Metastatic.Analysis.Duplication.fingerprint(ast1) == Metastatic.Analysis.Duplication.fingerprint(ast2)
       true
   """

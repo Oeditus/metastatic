@@ -88,11 +88,13 @@ alias Metastatic.{Adapter, Document}
 
 # Parse Elixir source code
 {:ok, doc} = Adapter.abstract(Elixir, "x + 5", :elixir)
-doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+doc.ast  # => {:binary_op, [category: :arithmetic, operator: :+], 
+         #      [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
 # Parse Erlang source code
 {:ok, doc} = Adapter.abstract(Erlang, "X + 5.", :erlang)
-doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "X"}, {:literal, :integer, 5}}
+doc.ast  # => {:binary_op, [category: :arithmetic, operator: :+], 
+         #      [{:variable, [], "X"}, {:literal, [subtype: :integer], 5}]}
 
 # Round-trip transformation
 source = "x + y * 2"
@@ -120,7 +122,8 @@ alias Metastatic.Adapters.Python
 
 # Parse Python arithmetic
 {:ok, doc} = Adapter.abstract(Python, "x + 5", :python)
-doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+doc.ast  # => {:binary_op, [category: :arithmetic, operator: :+], 
+         #      [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
 # Parse Python class
 source = """
@@ -143,7 +146,8 @@ alias Metastatic.Adapters.Ruby
 
 # Parse Ruby code
 {:ok, doc} = Adapter.abstract(Ruby, "x + 5", :ruby)
-doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+doc.ast  # => {:binary_op, [category: :arithmetic, operator: :+], 
+         #      [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
 # Parse Ruby class with method chaining
 source = """
@@ -171,7 +175,8 @@ alias Metastatic.Adapters.Haskell
 
 # Parse Haskell arithmetic
 {:ok, doc} = Adapter.abstract(Haskell, "x + 5", :haskell)
-doc.ast  # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+doc.ast  # => {:binary_op, [category: :arithmetic, operator: :+], 
+         #      [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
 # Parse Haskell function with type signature
 source = """
@@ -193,8 +198,9 @@ source = "data Maybe a = Nothing | Just a"
 ```elixir
 alias Metastatic.{AST, Document, Validator}
 
-# Create a MetaAST document
-ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+# Create a MetaAST document (uniform 3-tuple format)
+ast = {:binary_op, [category: :arithmetic, operator: :+], 
+       [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 doc = Document.new(ast, :elixir)
 
 # Validate conformance
@@ -259,9 +265,11 @@ mix metastatic.detect_duplicates --dir lib/ --format detailed --output report.tx
 alias Metastatic.{Document, Analysis.Duplication}
 alias Metastatic.Analysis.Duplication.Reporter
 
-# Detect duplication between two documents
-ast1 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
-ast2 = {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 5}}
+# Detect duplication between two documents (uniform 3-tuple format)
+ast1 = {:binary_op, [category: :arithmetic, operator: :+], 
+        [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+ast2 = {:binary_op, [category: :arithmetic, operator: :+], 
+        [{:variable, [], "y"}, {:literal, [subtype: :integer], 5}]}
 doc1 = Document.new(ast1, :python)
 doc2 = Document.new(ast2, :elixir)
 
@@ -278,7 +286,8 @@ Reporter.format(result, :text)
 #  ..."
 
 # Detect across multiple documents
-ast3 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+ast3 = {:binary_op, [category: :arithmetic, operator: :+], 
+        [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 doc3 = Document.new(ast3, :elixir)
 
 {:ok, groups} = Duplication.detect_in_list([doc1, doc2, doc3])
@@ -324,8 +333,9 @@ mix metastatic.purity_check my_file.erl --format json
 ```elixir
 alias Metastatic.{Document, Analysis.Purity}
 
-# Pure arithmetic
-ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+# Pure arithmetic (uniform 3-tuple format)
+ast = {:binary_op, [category: :arithmetic, operator: :+], 
+       [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 doc = Document.new(ast, :python)
 {:ok, result} = Purity.analyze(doc)
 
@@ -334,7 +344,7 @@ result.effects            # => []
 result.confidence         # => :high
 
 # Impure with I/O
-ast = {:function_call, "print", [{:literal, :string, "hello"}]}
+ast = {:function_call, [name: "print"], [{:literal, [subtype: :string], "hello"}]}
 doc = Document.new(ast, :python)
 {:ok, result} = Purity.analyze(doc)
 
@@ -399,10 +409,14 @@ mix metastatic.complexity my_file.py --max-cyclomatic 15 --max-cognitive 20
 ```elixir
 alias Metastatic.{Document, Analysis.Complexity}
 
-# Analyze all metrics
-ast = {:conditional, {:variable, "x"}, 
-  {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-  {:literal, :integer, 3}}
+# Analyze all metrics (uniform 3-tuple format)
+ast = {:conditional, [], [
+  {:variable, [], "x"}, 
+  {:conditional, [], [
+    {:variable, [], "y"}, 
+    {:literal, [subtype: :integer], 1}, 
+    {:literal, [subtype: :integer], 2}]},
+  {:literal, [subtype: :integer], 3}]}
 doc = Document.new(ast, :python)
 {:ok, result} = Complexity.analyze(doc)
 
@@ -451,10 +465,10 @@ mix metastatic.dead_code my_file.rb --confidence high
 ```elixir
 alias Metastatic.{Document, Analysis.DeadCode}
 
-# Code after return statement
-ast = {:block, [
-  {:early_return, {:literal, :integer, 42}},
-  {:function_call, "print", [{:literal, :string, "unreachable"}]}
+# Code after return statement (uniform 3-tuple format)
+ast = {:block, [], [
+  {:early_return, [], [{:literal, [subtype: :integer], 42}]},
+  {:function_call, [name: "print"], [{:literal, [subtype: :string], "unreachable"}]}
 ]}
 doc = Document.new(ast, :python)
 {:ok, result} = DeadCode.analyze(doc)
@@ -487,10 +501,10 @@ mix metastatic.unused_vars my_file.erl --format json
 ```elixir
 alias Metastatic.Analysis.UnusedVariables
 
-ast = {:block, [
-  {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-  {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
-  {:variable, "y"}
+ast = {:block, [], [
+  {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
+  {:assignment, [], [{:variable, [], "y"}, {:literal, [subtype: :integer], 10}]},
+  {:variable, [], "y"}
 ]}
 doc = Document.new(ast, :python)
 {:ok, result} = UnusedVariables.analyze(doc)
@@ -523,10 +537,11 @@ mix metastatic.control_flow my_file.rb --format text
 ```elixir
 alias Metastatic.Analysis.ControlFlow
 
-ast = {:conditional, {:variable, "x"}, 
-  {:early_return, {:literal, :integer, 1}},
-  {:literal, :integer, 2}
-}
+ast = {:conditional, [], [
+  {:variable, [], "x"}, 
+  {:early_return, [], [{:literal, [subtype: :integer], 1}]},
+  {:literal, [subtype: :integer], 2}
+]}
 doc = Document.new(ast, :python)
 {:ok, result} = ControlFlow.analyze(doc)
 
@@ -564,8 +579,8 @@ mix metastatic.taint_check my_file.ex --format json
 alias Metastatic.Analysis.Taint
 
 # Dangerous pattern: eval(input())
-ast = {:function_call, "eval", [
-  {:function_call, "input", []}
+ast = {:function_call, [name: "eval"], [
+  {:function_call, [name: "input"], []}
 ]}
 doc = Document.new(ast, :python)
 {:ok, result} = Taint.analyze(doc)
@@ -599,7 +614,7 @@ mix metastatic.security_scan my_file.ex --format json
 alias Metastatic.Analysis.Security
 
 # Hardcoded password
-ast = {:assignment, {:variable, "password"}, {:literal, :string, "admin123"}}
+ast = {:assignment, [], [{:variable, [], "password"}, {:literal, [subtype: :string], "admin123"}]}
 doc = Document.new(ast, :python)
 {:ok, result} = Security.analyze(doc)
 
@@ -678,12 +693,17 @@ mix metastatic.analyze --format json my_file.rb
 alias Metastatic.Analysis.Runner
 alias Metastatic.Document
 
-# Run all analyzers
-ast = {:conditional, {:variable, "x"},
-  {:conditional, {:variable, "y"}, 
-    {:conditional, {:variable, "z"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-    {:literal, :integer, 3}},
-  {:literal, :integer, 4}}
+# Run all analyzers (uniform 3-tuple format)
+ast = {:conditional, [], [
+  {:variable, [], "x"},
+  {:conditional, [], [
+    {:variable, [], "y"}, 
+    {:conditional, [], [
+      {:variable, [], "z"}, 
+      {:literal, [subtype: :integer], 1}, 
+      {:literal, [subtype: :integer], 2}]},
+    {:literal, [subtype: :integer], 3}]},
+  {:literal, [subtype: :integer], 4}]}
 doc = Document.new(ast, :python)
 
 {:ok, issues} = Runner.run(doc)

@@ -211,6 +211,19 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   end
 
   @impl true
+  # New 3-tuple format: {:function_def, [name: name, params: [...], ...], body_list}
+  # Body is the entire children list (function body statements)
+  def analyze({:function_def, meta, children} = node, _context) when is_list(meta) do
+    name = Keyword.get(meta, :name)
+
+    if name != nil do
+      # Check against all children (the function body statements)
+      check_recursive_telemetry(name, children, node)
+    else
+      []
+    end
+  end
+
   # Function definition without location metadata (6-tuple)
   def analyze({:function_def, name, _params, _return_type, _opts, body} = node, _context)
       when is_atom(name) or is_binary(name) do
@@ -256,12 +269,29 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   end
 
   # Check if AST contains call to specific function
+  # New 3-tuple format: {:block, meta, statements}
+  defp contains_call_to?({:block, _meta, statements}, target_name) when is_list(statements) do
+    Enum.any?(statements, &contains_call_to?(&1, target_name))
+  end
+
   defp contains_call_to?({:block, statements}, target_name) when is_list(statements) do
     Enum.any?(statements, &contains_call_to?(&1, target_name))
   end
 
+  # New 3-tuple function_call: {:function_call, [name: name], args}
+  defp contains_call_to?({:function_call, meta, _args}, target_name) when is_list(meta) do
+    name = Keyword.get(meta, :name, "")
+    normalize_name(name) == normalize_name(target_name)
+  end
+
   defp contains_call_to?({:function_call, name, _args}, target_name) do
     normalize_name(name) == normalize_name(target_name)
+  end
+
+  # New 3-tuple: {:conditional, meta, [cond, then, else]}
+  defp contains_call_to?({:conditional, _meta, [_cond, then_branch, else_branch]}, target_name) do
+    contains_call_to?(then_branch, target_name) or
+      contains_call_to?(else_branch || {:block, [], []}, target_name)
   end
 
   defp contains_call_to?({:conditional, _cond, then_branch, else_branch}, target_name) do
@@ -282,16 +312,37 @@ defmodule Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction do
   defp contains_call_to?(_, _), do: false
 
   # Check if body contains telemetry calls
+  # New 3-tuple format: {:block, meta, statements}
+  defp contains_telemetry?({:block, _meta, statements}) when is_list(statements) do
+    Enum.any?(statements, &contains_telemetry?/1)
+  end
+
   defp contains_telemetry?({:block, statements}) when is_list(statements) do
     Enum.any?(statements, &contains_telemetry?/1)
+  end
+
+  # New 3-tuple function_call: {:function_call, [name: name], args}
+  defp contains_telemetry?({:function_call, meta, _args}) when is_list(meta) do
+    func_name = Keyword.get(meta, :name, "")
+    telemetry_function?(func_name)
   end
 
   defp contains_telemetry?({:function_call, func_name, _args}) do
     telemetry_function?(func_name)
   end
 
+  # New 3-tuple: {:attribute_access, meta, [obj, method]}
+  defp contains_telemetry?({:attribute_access, _meta, [_obj, method]}) when is_atom(method) do
+    telemetry_function?(method)
+  end
+
   defp contains_telemetry?({:attribute_access, _obj, method}) when is_atom(method) do
     telemetry_function?(method)
+  end
+
+  # New 3-tuple: {:conditional, meta, [cond, then, else]}
+  defp contains_telemetry?({:conditional, _meta, [_cond, then_branch, else_branch]}) do
+    contains_telemetry?(then_branch) or contains_telemetry?(else_branch || {:block, [], []})
   end
 
   defp contains_telemetry?({:conditional, _cond, then_branch, else_branch}) do

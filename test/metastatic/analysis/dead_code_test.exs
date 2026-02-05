@@ -6,9 +6,27 @@ defmodule Metastatic.Analysis.DeadCodeTest do
   doctest Metastatic.Analysis.DeadCode
   doctest Metastatic.Analysis.DeadCode.Result
 
+  # Helper functions for building 3-tuple MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+  defp block(stmts), do: {:block, [], stmts}
+  defp early_return(value), do: {:early_return, [], [value]}
+  defp conditional(cond, then_b, else_b), do: {:conditional, [], [cond, then_b, else_b]}
+  defp assignment(target, value), do: {:assignment, [], [target, value]}
+
+  defp binary_op(cat, op, left, right),
+    do: {:binary_op, [category: cat, operator: op], [left, right]}
+
+  defp function_call(name, args), do: {:function_call, [name: name], args}
+  defp loop(loop_type, condition, body), do: {:loop, [loop_type: loop_type], [condition, body]}
+  defp lambda(params, body), do: {:lambda, [params: params], [body]}
+
+  defp exception_handling(try_block, catches, finally),
+    do: {:exception_handling, [], [try_block, catches, finally]}
+
   describe "analyze/1 - no dead code" do
     test "simple literal has no dead code" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -19,7 +37,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "binary operation has no dead code" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -28,7 +46,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "function call has no dead code" do
-      ast = {:function_call, "print", [{:literal, :string, "hello"}]}
+      ast = function_call("print", [literal(:string, "hello")])
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -37,9 +55,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "conditional with both branches has no dead code" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -49,12 +65,11 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
     test "block with multiple statements has no dead code" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 1}},
-           {:assignment, {:variable, "y"}, {:literal, :integer, 2}},
-           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 1)),
+          assignment(variable("y"), literal(:integer, 2)),
+          binary_op(:arithmetic, :+, variable("x"), variable("y"))
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -67,11 +82,10 @@ defmodule Metastatic.Analysis.DeadCodeTest do
   describe "analyze/1 - unreachable after return" do
     test "detects code after early_return" do
       ast =
-        {:block,
-         [
-           {:early_return, {:literal, :integer, 42}},
-           {:function_call, "print", [{:literal, :string, "unreachable"}]}
-         ]}
+        block([
+          early_return(literal(:integer, 42)),
+          function_call("print", [literal(:string, "unreachable")])
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -86,12 +100,11 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
     test "detects multiple unreachable statements after return" do
       ast =
-        {:block,
-         [
-           {:early_return, {:literal, :integer, 1}},
-           {:literal, :integer, 2},
-           {:literal, :integer, 3}
-         ]}
+        block([
+          early_return(literal(:integer, 1)),
+          literal(:integer, 2),
+          literal(:integer, 3)
+        ])
 
       doc = Document.new(ast, :elixir)
 
@@ -104,9 +117,11 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
     test "detects unreachable code in conditional branch" do
       ast =
-        {:conditional, {:variable, "x"},
-         {:block, [{:early_return, {:literal, :integer, 1}}, {:literal, :integer, 2}]},
-         {:literal, :integer, 3}}
+        conditional(
+          variable("x"),
+          block([early_return(literal(:integer, 1)), literal(:integer, 2)]),
+          literal(:integer, 3)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -119,8 +134,11 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
     test "detects unreachable code in loop body" do
       ast =
-        {:loop, :while, {:literal, :boolean, true},
-         {:block, [{:early_return, {:literal, :integer, 1}}, {:literal, :integer, 2}]}}
+        loop(
+          :while,
+          literal(:boolean, true),
+          block([early_return(literal(:integer, 1)), literal(:integer, 2)])
+        )
 
       doc = Document.new(ast, :python)
 
@@ -133,8 +151,10 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
     test "detects unreachable code in lambda body" do
       ast =
-        {:lambda, ["x"],
-         {:block, [{:early_return, {:literal, :integer, 1}}, {:literal, :integer, 2}]}}
+        lambda(
+          ["x"],
+          block([early_return(literal(:integer, 1)), literal(:integer, 2)])
+        )
 
       doc = Document.new(ast, :elixir)
 
@@ -147,9 +167,9 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
     test "detects unreachable code in exception handling" do
       try_block =
-        {:block, [{:early_return, {:literal, :integer, 1}}, {:literal, :integer, 2}]}
+        block([early_return(literal(:integer, 1)), literal(:integer, 2)])
 
-      ast = {:exception_handling, try_block, [], nil}
+      ast = exception_handling(try_block, [], nil)
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -162,10 +182,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
   describe "analyze/1 - constant conditionals" do
     test "detects unreachable else branch with constant true" do
-      ast =
-        {:conditional, {:literal, :boolean, true}, {:literal, :integer, 1},
-         {:literal, :integer, 2}}
-
+      ast = conditional(literal(:boolean, true), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -178,10 +195,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "detects unreachable then branch with constant false" do
-      ast =
-        {:conditional, {:literal, :boolean, false}, {:literal, :integer, 1},
-         {:literal, :integer, 2}}
-
+      ast = conditional(literal(:boolean, false), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -193,9 +207,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "treats integer 0 as constant false" do
-      ast =
-        {:conditional, {:literal, :integer, 0}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(literal(:integer, 0), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -206,9 +218,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "treats non-zero integer as constant true" do
-      ast =
-        {:conditional, {:literal, :integer, 1}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(literal(:integer, 1), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -219,9 +229,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "treats null/nil as constant false" do
-      ast =
-        {:conditional, {:literal, :null, nil}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(literal(:null, nil), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -232,9 +240,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "treats empty string as constant false" do
-      ast =
-        {:conditional, {:literal, :string, ""}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(literal(:string, ""), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -243,10 +249,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "treats non-empty string as constant true" do
-      ast =
-        {:conditional, {:literal, :string, "hello"}, {:literal, :integer, 1},
-         {:literal, :integer, 2}}
-
+      ast = conditional(literal(:string, "hello"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -257,9 +260,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "does not flag non-constant conditionals" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :elixir)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -268,11 +269,8 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "detects nested constant conditionals" do
-      inner =
-        {:conditional, {:literal, :boolean, true}, {:literal, :integer, 1},
-         {:literal, :integer, 2}}
-
-      outer = {:conditional, {:literal, :boolean, false}, inner, {:literal, :integer, 3}}
+      inner = conditional(literal(:boolean, true), literal(:integer, 1), literal(:integer, 2))
+      outer = conditional(literal(:boolean, false), inner, literal(:integer, 3))
       doc = Document.new(outer, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -283,7 +281,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "does not report unreachable when else branch is nil" do
-      ast = {:conditional, {:literal, :boolean, true}, {:literal, :integer, 1}, nil}
+      ast = conditional(literal(:boolean, true), literal(:integer, 1), nil)
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -295,9 +293,9 @@ defmodule Metastatic.Analysis.DeadCodeTest do
   describe "analyze/1 - combined patterns" do
     test "detects both unreachable after return and constant conditional" do
       # Block with return followed by code
-      block = {:block, [{:early_return, {:literal, :integer, 1}}, {:literal, :integer, 2}]}
+      blk = block([early_return(literal(:integer, 1)), literal(:integer, 2)])
       # Constant conditional
-      ast = {:conditional, {:literal, :boolean, true}, block, {:literal, :integer, 3}}
+      ast = conditional(literal(:boolean, true), blk, literal(:integer, 3))
       doc = Document.new(ast, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
@@ -312,14 +310,10 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "complex nested structure with multiple dead code patterns" do
-      inner_block =
-        {:block, [{:early_return, {:literal, :integer, 1}}, {:literal, :integer, 2}]}
-
-      conditional =
-        {:conditional, {:literal, :boolean, false}, inner_block, {:literal, :integer, 3}}
-
-      outer_block = {:block, [conditional, {:literal, :integer, 4}]}
-      doc = Document.new(outer_block, :python)
+      inner_blk = block([early_return(literal(:integer, 1)), literal(:integer, 2)])
+      cond_ast = conditional(literal(:boolean, false), inner_blk, literal(:integer, 3))
+      outer_blk = block([cond_ast, literal(:integer, 4)])
+      doc = Document.new(outer_blk, :python)
 
       {:ok, result} = DeadCode.analyze(doc)
 
@@ -330,13 +324,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
   describe "analyze/1 - options" do
     test "min_confidence filters low confidence results" do
-      ast =
-        {:block,
-         [
-           {:early_return, {:literal, :integer, 1}},
-           {:literal, :integer, 2}
-         ]}
-
+      ast = block([early_return(literal(:integer, 1)), literal(:integer, 2)])
       doc = Document.new(ast, :python)
 
       {:ok, result_all} = DeadCode.analyze(doc, min_confidence: :low)
@@ -351,7 +339,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
 
   describe "analyze!/1" do
     test "returns result directly" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       result = DeadCode.analyze!(doc)
@@ -360,13 +348,7 @@ defmodule Metastatic.Analysis.DeadCodeTest do
     end
 
     test "works with dead code" do
-      ast =
-        {:block,
-         [
-           {:early_return, {:literal, :integer, 1}},
-           {:literal, :integer, 2}
-         ]}
-
+      ast = block([early_return(literal(:integer, 1)), literal(:integer, 2)])
       doc = Document.new(ast, :python)
 
       result = DeadCode.analyze!(doc)

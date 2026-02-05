@@ -3,7 +3,7 @@ defmodule Metastatic.Test.AdapterHelperTest do
 
   import Metastatic.Test.AdapterHelper
 
-  # Mock adapter for testing
+  # Mock adapter for testing - uses 3-tuple format
   defmodule TestAdapter do
     @behaviour Metastatic.Adapter
 
@@ -15,13 +15,13 @@ defmodule Metastatic.Test.AdapterHelperTest do
 
     @impl true
     def to_meta(%{source: source}) do
-      # Convert to a simple literal MetaAST
+      # Convert to a simple literal MetaAST in 3-tuple format
       value = String.to_integer(String.trim(source))
-      {:ok, {:literal, :integer, value}, %{original: source}}
+      {:ok, {:literal, [subtype: :integer], value}, %{original: source}}
     end
 
     @impl true
-    def from_meta({:literal, :integer, value}, metadata) do
+    def from_meta({:literal, _meta, value}, metadata) do
       # Convert back to native AST
       {:ok, %{source: metadata[:original] || to_string(value)}}
     end
@@ -79,7 +79,7 @@ defmodule Metastatic.Test.AdapterHelperTest do
       source = "42"
       doc = assert_valid_meta_ast(TestAdapter, source, language: :test)
 
-      assert doc.ast == {:literal, :integer, 42}
+      assert doc.ast == {:literal, [subtype: :integer], 42}
       assert doc.language == :test
     end
 
@@ -100,7 +100,7 @@ defmodule Metastatic.Test.AdapterHelperTest do
 
   describe "assert_valid_reification/3" do
     test "reifies MetaAST to source" do
-      ast = {:literal, :integer, 42}
+      ast = {:literal, [subtype: :integer], 42}
       metadata = %{original: "42"}
 
       source = assert_valid_reification(TestAdapter, ast, metadata)
@@ -114,7 +114,7 @@ defmodule Metastatic.Test.AdapterHelperTest do
         @impl true
         def parse(_), do: {:ok, %{}}
         @impl true
-        def to_meta(_), do: {:ok, {:literal, :integer, 1}, %{}}
+        def to_meta(_), do: {:ok, {:literal, [subtype: :integer], 1}, %{}}
         @impl true
         def from_meta(_, _), do: {:ok, %{}}
         @impl true
@@ -123,7 +123,7 @@ defmodule Metastatic.Test.AdapterHelperTest do
         def file_extensions, do: [".empty"]
       end
 
-      ast = {:literal, :integer, 42}
+      ast = {:literal, [subtype: :integer], 42}
 
       assert_raise ExUnit.AssertionError, ~r/produced empty or invalid source/, fn ->
         assert_valid_reification(EmptyAdapter, ast, %{})
@@ -131,7 +131,7 @@ defmodule Metastatic.Test.AdapterHelperTest do
     end
 
     test "fails on reification error" do
-      ast = {:literal, :integer, 42}
+      ast = {:literal, [subtype: :integer], 42}
 
       assert_raise ExUnit.AssertionError, ~r/Reification failed/, fn ->
         assert_valid_reification(FailingAdapter, ast, %{})
@@ -225,12 +225,12 @@ defmodule Metastatic.Test.AdapterHelperTest do
       expected_dir = Path.join(dir, "expected")
       File.mkdir_p!(expected_dir)
 
-      # Create test file and expected AST
+      # Create test file and expected AST (in 3-tuple format)
       File.write!(Path.join(dir, "test.py"), "x = 1")
-      File.write!(Path.join(expected_dir, "test.exs"), "{:literal, :integer, 1}")
+      File.write!(Path.join(expected_dir, "test.exs"), "{:literal, [subtype: :integer], 1}")
 
       fixtures = load_fixtures(dir)
-      assert [{"test.py", "x = 1", {:literal, :integer, 1}}] = fixtures
+      assert [{"test.py", "x = 1", {:literal, [subtype: :integer], 1}}] = fixtures
 
       # Cleanup
       File.rm_rf!(dir)
@@ -265,7 +265,7 @@ defmodule Metastatic.Test.AdapterHelperTest do
 
       # Validate MetaAST production
       doc = assert_valid_meta_ast(TestAdapter, source, language: :test)
-      assert doc.ast == {:literal, :integer, 42}
+      assert doc.ast == {:literal, [subtype: :integer], 42}
 
       # Validate reification
       result_source = assert_valid_reification(TestAdapter, doc.ast, doc.metadata)

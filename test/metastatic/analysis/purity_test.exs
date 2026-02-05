@@ -7,9 +7,33 @@ defmodule Metastatic.Analysis.PurityTest do
 
   doctest Metastatic.Analysis.Purity
 
+  # Helper functions for building 3-tuple MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+  defp block(stmts), do: {:block, [], stmts}
+  defp conditional(cond_expr, then_b, else_b), do: {:conditional, [], [cond_expr, then_b, else_b]}
+  defp assignment(target, value), do: {:assignment, [], [target, value]}
+
+  defp binary_op(cat, op, left, right),
+    do: {:binary_op, [category: cat, operator: op], [left, right]}
+
+  defp function_call(name, args), do: {:function_call, [name: name], args}
+  defp loop_while(cond_expr, body), do: {:loop, [loop_type: :while], [cond_expr, body]}
+  defp loop_for(iter, coll, body), do: {:loop, [loop_type: :for, iterator: iter], [coll, body]}
+  defp lambda(params, body), do: {:lambda, [params: params], [body]}
+  defp inline_match(pattern, value), do: {:inline_match, [], [pattern, value]}
+
+  defp exception_handling(try_block, catches, finally_block),
+    do: {:exception_handling, [], [try_block, catches, finally_block]}
+
+  defp collection_op(op, func, coll), do: {:collection_op, [operation: op], [func, coll]}
+
+  defp collection_op(op, func, coll, init),
+    do: {:collection_op, [operation: op], [func, coll, init]}
+
   describe "analyze/1 - pure constructs" do
     test "literals are pure" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -19,7 +43,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "variables are pure" do
-      ast = {:variable, "x"}
+      ast = variable("x")
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -27,8 +51,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "arithmetic operations are pure" do
-      ast =
-        {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
 
       doc = Document.new(ast, :python)
 
@@ -38,8 +61,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "comparison operations are pure" do
-      ast =
-        {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 10}}
+      ast = binary_op(:comparison, :>, variable("x"), literal(:integer, 10))
 
       doc = Document.new(ast, :elixir)
 
@@ -48,8 +70,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "conditionals with pure branches are pure" do
-      ast =
-        {:conditional, {:variable, "cond"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("cond"), literal(:integer, 1), literal(:integer, 2))
 
       doc = Document.new(ast, :python)
 
@@ -59,11 +80,10 @@ defmodule Metastatic.Analysis.PurityTest do
 
     test "blocks with pure statements are pure" do
       ast =
-        {:block,
-         [
-           {:variable, "x"},
-           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}
-         ]}
+        block([
+          variable("x"),
+          binary_op(:arithmetic, :+, variable("x"), literal(:integer, 1))
+        ])
 
       doc = Document.new(ast, :elixir)
 
@@ -73,8 +93,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
     test "lambdas with pure bodies are pure" do
       ast =
-        {:lambda, [{:variable, "x"}],
-         {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}}
+        lambda([variable("x")], binary_op(:arithmetic, :*, variable("x"), literal(:integer, 2)))
 
       doc = Document.new(ast, :python)
 
@@ -83,8 +102,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "pattern matching is pure (BEAM)" do
-      ast =
-        {:inline_match, {:variable, "x"}, {:literal, :integer, 42}}
+      ast = inline_match(variable("x"), literal(:integer, 42))
 
       doc = Document.new(ast, :elixir)
 
@@ -95,7 +113,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze/1 - impure I/O operations" do
     test "print function is impure" do
-      ast = {:function_call, "print", [{:literal, :string, "hello"}]}
+      ast = function_call("print", [literal(:string, "hello")])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -106,7 +124,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "IO.puts is impure" do
-      ast = {:function_call, "IO.puts", [{:literal, :string, "hello"}]}
+      ast = function_call("IO.puts", [literal(:string, "hello")])
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -115,7 +133,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "file operations are impure" do
-      ast = {:function_call, "File.read", [{:literal, :string, "file.txt"}]}
+      ast = function_call("File.read", [literal(:string, "file.txt")])
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -124,7 +142,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "open function is impure" do
-      ast = {:function_call, "open", [{:literal, :string, "file.txt"}]}
+      ast = function_call("open", [literal(:string, "file.txt")])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -133,7 +151,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "input function is impure" do
-      ast = {:function_call, "input", [{:literal, :string, "Enter value: "}]}
+      ast = function_call("input", [literal(:string, "Enter value: ")])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -144,7 +162,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze/1 - impure mutations" do
     test "assignment outside loop is not mutation" do
-      ast = {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = assignment(variable("x"), literal(:integer, 5))
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -154,12 +172,15 @@ defmodule Metastatic.Analysis.PurityTest do
 
     test "assignment inside while loop is mutation" do
       ast =
-        {:loop, :while, {:variable, "condition"},
-         {:block,
-          [
-            {:assignment, {:variable, "x"},
-             {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
-          ]}}
+        loop_while(
+          variable("condition"),
+          block([
+            assignment(
+              variable("x"),
+              binary_op(:arithmetic, :+, variable("x"), literal(:integer, 1))
+            )
+          ])
+        )
 
       doc = Document.new(ast, :python)
 
@@ -170,12 +191,16 @@ defmodule Metastatic.Analysis.PurityTest do
 
     test "assignment inside for loop is mutation" do
       ast =
-        {:loop, :for, {:variable, "i"}, {:variable, "range"},
-         {:block,
-          [
-            {:assignment, {:variable, "sum"},
-             {:binary_op, :arithmetic, :+, {:variable, "sum"}, {:variable, "i"}}}
-          ]}}
+        loop_for(
+          variable("i"),
+          variable("range"),
+          block([
+            assignment(
+              variable("sum"),
+              binary_op(:arithmetic, :+, variable("sum"), variable("i"))
+            )
+          ])
+        )
 
       doc = Document.new(ast, :python)
 
@@ -187,7 +212,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze/1 - impure random operations" do
     test "random function is impure" do
-      ast = {:function_call, "random", []}
+      ast = function_call("random", [])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -196,8 +221,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "randint is impure" do
-      ast =
-        {:function_call, "random.randint", [{:literal, :integer, 1}, {:literal, :integer, 10}]}
+      ast = function_call("random.randint", [literal(:integer, 1), literal(:integer, 10)])
 
       doc = Document.new(ast, :python)
 
@@ -207,7 +231,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test ":rand.uniform is impure" do
-      ast = {:function_call, ":rand.uniform", []}
+      ast = function_call(":rand.uniform", [])
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -218,7 +242,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze/1 - impure time operations" do
     test "time function is impure" do
-      ast = {:function_call, "time", []}
+      ast = function_call("time", [])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -227,7 +251,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "DateTime.utc_now is impure" do
-      ast = {:function_call, "DateTime.utc_now", []}
+      ast = function_call("DateTime.utc_now", [])
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -236,7 +260,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "erlang:now is impure" do
-      ast = {:function_call, "erlang:now", []}
+      ast = function_call("erlang:now", [])
       doc = Document.new(ast, :erlang)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -247,7 +271,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze/1 - impure network operations" do
     test "http functions are impure" do
-      ast = {:function_call, "http.get", [{:literal, :string, "http://example.com"}]}
+      ast = function_call("http.get", [literal(:string, "http://example.com")])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -256,7 +280,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "HTTPoison calls are impure" do
-      ast = {:function_call, "HTTPoison.get", [{:literal, :string, "http://example.com"}]}
+      ast = function_call("HTTPoison.get", [literal(:string, "http://example.com")])
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -267,7 +291,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze/1 - impure database operations" do
     test "query functions are impure" do
-      ast = {:function_call, "query", [{:literal, :string, "SELECT * FROM users"}]}
+      ast = function_call("query", [literal(:string, "SELECT * FROM users")])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -276,7 +300,7 @@ defmodule Metastatic.Analysis.PurityTest do
     end
 
     test "Repo operations are impure" do
-      ast = {:function_call, "Repo.all", [{:variable, "User"}]}
+      ast = function_call("Repo.all", [variable("User")])
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -288,8 +312,11 @@ defmodule Metastatic.Analysis.PurityTest do
   describe "analyze/1 - exception handling" do
     test "exception handling is impure" do
       ast =
-        {:exception_handling, {:function_call, "risky_operation", []}, [{:variable, "error"}],
-         {:literal, :atom, :ok}}
+        exception_handling(
+          function_call("risky_operation", []),
+          [variable("error")],
+          literal(:atom, :ok)
+        )
 
       doc = Document.new(ast, :elixir)
 
@@ -301,7 +328,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze/1 - unknown functions" do
     test "unknown function calls result in low confidence" do
-      ast = {:function_call, "custom_user_function", [{:variable, "x"}]}
+      ast = function_call("custom_user_function", [variable("x")])
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Purity.analyze(doc)
@@ -313,11 +340,10 @@ defmodule Metastatic.Analysis.PurityTest do
 
     test "multiple unknown functions are tracked" do
       ast =
-        {:block,
-         [
-           {:function_call, "func1", []},
-           {:function_call, "func2", []}
-         ]}
+        block([
+          function_call("func1", []),
+          function_call("func2", [])
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -332,13 +358,14 @@ defmodule Metastatic.Analysis.PurityTest do
   describe "analyze/1 - mixed effects" do
     test "multiple effect types are detected" do
       ast =
-        {:block,
-         [
-           {:function_call, "print", [{:literal, :string, "hello"}]},
-           {:function_call, "random", []},
-           {:loop, :while, {:variable, "true"},
-            {:assignment, {:variable, "x"}, {:literal, :integer, 1}}}
-         ]}
+        block([
+          function_call("print", [literal(:string, "hello")]),
+          function_call("random", []),
+          loop_while(
+            variable("true"),
+            assignment(variable("x"), literal(:integer, 1))
+          )
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -353,7 +380,7 @@ defmodule Metastatic.Analysis.PurityTest do
 
   describe "analyze!/1" do
     test "returns result directly on success" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       result = Purity.analyze!(doc)
@@ -365,10 +392,14 @@ defmodule Metastatic.Analysis.PurityTest do
   describe "collection operations" do
     test "map operations are pure if function is pure" do
       ast =
-        {:collection_op, :map,
-         {:lambda, [{:variable, "x"}],
-          {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
-         {:variable, "list"}}
+        collection_op(
+          :map,
+          lambda(
+            [variable("x")],
+            binary_op(:arithmetic, :*, variable("x"), literal(:integer, 2))
+          ),
+          variable("list")
+        )
 
       doc = Document.new(ast, :elixir)
 
@@ -378,10 +409,15 @@ defmodule Metastatic.Analysis.PurityTest do
 
     test "reduce operations are pure if function is pure" do
       ast =
-        {:collection_op, :reduce,
-         {:lambda, [{:variable, "acc"}, {:variable, "x"}],
-          {:binary_op, :arithmetic, :+, {:variable, "acc"}, {:variable, "x"}}},
-         {:variable, "list"}, {:literal, :integer, 0}}
+        collection_op(
+          :reduce,
+          lambda(
+            [variable("acc"), variable("x")],
+            binary_op(:arithmetic, :+, variable("acc"), variable("x"))
+          ),
+          variable("list"),
+          literal(:integer, 0)
+        )
 
       doc = Document.new(ast, :elixir)
 

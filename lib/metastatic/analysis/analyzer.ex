@@ -29,7 +29,8 @@ defmodule Metastatic.Analysis.Analyzer do
         end
 
         @impl true
-        def analyze({:assignment, {:variable, name}, _value}, context) do
+        # New 3-tuple format: {:assignment, meta, [target, value]}
+        def analyze({:assignment, _meta, [{:variable, _, name}, _value]}, context) do
           # Track assignment and return issues
           []
         end
@@ -166,19 +167,25 @@ defmodule Metastatic.Analysis.Analyzer do
   ## Examples
 
       @impl true
-      def analyze({:literal, :integer, value}, _context) when value > 1000 do
-        [
-          %{
-            analyzer: __MODULE__,
-            category: :style,
-            severity: :warning,
-            message: "Large literal value \#{value}",
-            node: {:literal, :integer, value},
-            location: %{line: nil, column: nil, path: nil},
-            suggestion: nil,
-            metadata: %{value: value}
-          }
-        ]
+      # New 3-tuple format: {:literal, [subtype: :integer, ...], value}
+      def analyze({:literal, meta, value} = node, _context) do
+        subtype = Keyword.get(meta, :subtype)
+        if subtype == :integer and value > 1000 do
+          [
+            %{
+              analyzer: __MODULE__,
+              category: :style,
+              severity: :warning,
+              message: "Large literal value \#{value}",
+              node: node,
+              location: %{line: nil, column: nil, path: nil},
+              suggestion: nil,
+              metadata: %{value: value}
+            }
+          ]
+        else
+          []
+        end
       end
 
       def analyze(_node, _context), do: []
@@ -245,7 +252,7 @@ defmodule Metastatic.Analysis.Analyzer do
             category: :correctness,
             severity: :warning,
             message: "Variable '\#{var}' is assigned but never used",
-            node: {:variable, var},
+            node: {:variable, [], var},  # New 3-tuple format
             location: %{line: nil, column: nil, path: nil},
             suggestion: nil,
             metadata: %{variable: var}
@@ -270,26 +277,27 @@ defmodule Metastatic.Analysis.Analyzer do
 
   ## Examples
 
+      # New 3-tuple format example
       iex> Analyzer.issue(
       ...>   analyzer: MyAnalyzer,
       ...>   category: :style,
       ...>   severity: :warning,
       ...>   message: "Found an issue",
-      ...>   node: {:literal, :integer, 42}
+      ...>   node: {:literal, [subtype: :integer], 42}
       ...> )
       %{
         analyzer: MyAnalyzer,
         category: :style,
         severity: :warning,
         message: "Found an issue",
-        node: {:literal, :integer, 42},
+        node: {:literal, [subtype: :integer], 42},
         location: %{line: nil, column: nil, path: nil},
         suggestion: nil,
         metadata: %{}
       }
 
-      # With M1 context metadata in node:
-      iex> node_with_context = {:variable, "x", %{line: 10, module: "MyApp", function: "foo", arity: 2}}
+      # With M1 context metadata in node (new 3-tuple format):
+      iex> node_with_context = {:variable, [line: 10, module: "MyApp", function: "foo", arity: 2], "x"}
       iex> Analyzer.issue(
       ...>   analyzer: MyAnalyzer,
       ...>   category: :style,
@@ -332,27 +340,35 @@ defmodule Metastatic.Analysis.Analyzer do
   end
 
   # Extract location information from a MetaAST node
+  # The new 3-tuple format stores location in keyword meta: {type, keyword_meta, children}
+  # AST.location/1 returns a keyword list (or nil), so we use Keyword.get
   defp extract_location_from_node(node) do
     node_loc = AST.location(node)
 
     if node_loc do
-      # Build location map with all available metadata
+      # Build location map with all available metadata from keyword list
+      # AST.location/1 already returns a keyword list extracted from meta
       %{
-        line: Map.get(node_loc, :line),
-        column: Map.get(node_loc, :col),
-        path: Map.get(node_loc, :file)
+        line: get_loc_value(node_loc, :line),
+        column: get_loc_value(node_loc, :col) || get_loc_value(node_loc, :column),
+        path: get_loc_value(node_loc, :file) || get_loc_value(node_loc, :path)
       }
-      |> maybe_add(:module, Map.get(node_loc, :module))
-      |> maybe_add(:function, Map.get(node_loc, :function))
-      |> maybe_add(:arity, Map.get(node_loc, :arity))
-      |> maybe_add(:container, Map.get(node_loc, :container))
-      |> maybe_add(:visibility, Map.get(node_loc, :visibility))
-      |> maybe_add(:language, Map.get(node_loc, :language))
+      |> maybe_add(:module, get_loc_value(node_loc, :module))
+      |> maybe_add(:function, get_loc_value(node_loc, :function))
+      |> maybe_add(:arity, get_loc_value(node_loc, :arity))
+      |> maybe_add(:container, get_loc_value(node_loc, :container))
+      |> maybe_add(:visibility, get_loc_value(node_loc, :visibility))
+      |> maybe_add(:language, get_loc_value(node_loc, :language))
     else
       # No location metadata in node
       %{line: nil, column: nil, path: nil}
     end
   end
+
+  # Helper to get value from either keyword list or map
+  defp get_loc_value(loc, key) when is_list(loc), do: Keyword.get(loc, key)
+  defp get_loc_value(loc, key) when is_map(loc), do: Map.get(loc, key)
+  defp get_loc_value(_, _), do: nil
 
   # Helper to conditionally add key to map if value is not nil
   defp maybe_add(map, _key, nil), do: map
@@ -365,12 +381,12 @@ defmodule Metastatic.Analysis.Analyzer do
 
       iex> Analyzer.suggestion(
       ...>   type: :replace,
-      ...>   replacement: {:variable, "CONSTANT"},
+      ...>   replacement: {:variable, [], "CONSTANT"},
       ...>   message: "Extract to constant"
       ...> )
       %{
         type: :replace,
-        replacement: {:variable, "CONSTANT"},
+        replacement: {:variable, [], "CONSTANT"},
         message: "Extract to constant"
       }
   """

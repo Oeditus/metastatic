@@ -33,70 +33,45 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   """
   @spec transform(term(), map()) :: {:ok, map()} | {:error, String.t()}
 
-  # Literals - M2.1 Core Layer
+  # Literals - M2.1 Core Layer (New 3-tuple format)
 
-  # Literals with location (4-tuple) - delegate to 3-tuple version
-  def transform({:literal, type, value, _loc}, metadata),
-    do: transform({:literal, type, value}, metadata)
-
-  def transform({:literal, :integer, value}, _metadata) do
+  def transform({:literal, meta, value}, _metadata) when is_list(meta) do
     {:ok, %{"_type" => "Constant", "value" => value, "kind" => nil}}
   end
 
-  def transform({:literal, :float, value}, _metadata) do
-    {:ok, %{"_type" => "Constant", "value" => value, "kind" => nil}}
-  end
-
-  def transform({:literal, :string, value}, _metadata) do
-    {:ok, %{"_type" => "Constant", "value" => value, "kind" => nil}}
-  end
-
-  def transform({:literal, :boolean, value}, _metadata) do
-    {:ok, %{"_type" => "Constant", "value" => value, "kind" => nil}}
-  end
-
-  def transform({:literal, :null, nil}, _metadata) do
-    {:ok, %{"_type" => "Constant", "value" => nil, "kind" => nil}}
-  end
-
-  # Lists - M2.1 Core Layer
-  # Lists with location
-  def transform({:list, elements, _loc}, metadata), do: transform({:list, elements}, metadata)
-
-  def transform({:list, elements}, metadata) do
+  # Lists - M2.1 Core Layer (New 3-tuple format)
+  def transform({:list, meta, elements}, metadata) when is_list(meta) do
     with {:ok, elements_py} <- transform_list(elements, metadata) do
       {:ok, %{"_type" => "List", "elts" => elements_py, "ctx" => %{"_type" => "Load"}}}
     end
   end
 
-  # Maps (Dicts) - M2.1 Core Layer
-  # Maps with location
-  def transform({:map, pairs, _loc}, metadata), do: transform({:map, pairs}, metadata)
+  # Maps (Dicts) - M2.1 Core Layer (New 3-tuple format)
+  def transform({:map, meta, pairs}, metadata) when is_list(meta) do
+    # Pairs are now {:pair, [], [key, value]} tuples
+    {keys, values} =
+      Enum.reduce(pairs, {[], []}, fn
+        {:pair, _, [k, v]}, {ks, vs} -> {[k | ks], [v | vs]}
+        # fallback for old tuple format
+        {k, v}, {ks, vs} -> {[k | ks], [v | vs]}
+      end)
 
-  def transform({:map, pairs}, metadata) do
-    {keys, values} = Enum.unzip(pairs)
-
-    with {:ok, keys_py} <- transform_list(keys, metadata),
-         {:ok, values_py} <- transform_list(values, metadata) do
+    with {:ok, keys_py} <- transform_list(Enum.reverse(keys), metadata),
+         {:ok, values_py} <- transform_list(Enum.reverse(values), metadata) do
       {:ok, %{"_type" => "Dict", "keys" => keys_py, "values" => values_py}}
     end
   end
 
-  # Variables - M2.1 Core Layer
-  # Variables with location
-  def transform({:variable, name, _loc}, metadata), do: transform({:variable, name}, metadata)
-
-  def transform({:variable, name}, _metadata) when is_binary(name) do
+  # Variables - M2.1 Core Layer (New 3-tuple format)
+  def transform({:variable, meta, name}, _metadata) when is_list(meta) and is_binary(name) do
     {:ok, %{"_type" => "Name", "id" => name, "ctx" => %{"_type" => "Load"}}}
   end
 
-  # Binary Operators - M2.1 Core Layer
-  # Binary operators with location
-  def transform({:binary_op, category, op, left, right, _loc}, metadata) do
-    transform({:binary_op, category, op, left, right}, metadata)
-  end
+  # Binary Operators - M2.1 Core Layer (New 3-tuple format)
+  def transform({:binary_op, meta, [left, right]}, metadata) when is_list(meta) do
+    category = Keyword.get(meta, :category)
+    op = Keyword.get(meta, :operator)
 
-  def transform({:binary_op, category, op, left, right}, metadata) do
     case category do
       :arithmetic ->
         transform_binop(op, left, right, metadata)
@@ -109,46 +84,37 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
-  # Unary Operators - M2.1 Core Layer
-  # Unary operators with location
-  def transform({:unary_op, category, op, operand, _loc}, metadata) do
-    transform({:unary_op, category, op, operand}, metadata)
-  end
+  # Unary Operators - M2.1 Core Layer (New 3-tuple format)
+  def transform({:unary_op, meta, [operand]}, metadata) when is_list(meta) do
+    category = Keyword.get(meta, :category)
+    op = Keyword.get(meta, :operator)
 
-  def transform({:unary_op, category, op, operand}, metadata) do
     with {:ok, operand_py} <- transform(operand, metadata),
          {:ok, op_py} <- python_unary_op(category, op) do
       {:ok, %{"_type" => "UnaryOp", "op" => op_py, "operand" => operand_py}}
     end
   end
 
-  # Function Calls - M2.1 Core Layer
-  # Function calls with location
-  def transform({:function_call, name, args, _loc}, metadata) do
-    transform({:function_call, name, args}, metadata)
-  end
+  # Function Calls - M2.1 Core Layer (New 3-tuple format)
+  def transform({:function_call, meta, args}, metadata) when is_list(meta) do
+    name = Keyword.get(meta, :name)
 
-  def transform({:function_call, name, args}, metadata) do
     with {:ok, func_py} <- build_function_ref(name),
          {:ok, args_py} <- transform_list(args, metadata) do
       {:ok, %{"_type" => "Call", "func" => func_py, "args" => args_py, "keywords" => []}}
     end
   end
 
-  # Conditionals - M2.1 Core Layer
-  # Conditionals with location
-  def transform({:conditional, condition, then_branch, else_branch, _loc}, metadata) do
-    transform({:conditional, condition, then_branch, else_branch}, metadata)
-  end
-
-  def transform({:conditional, condition, then_branch, else_branch}, metadata) do
+  # Conditionals - M2.1 Core Layer (New 3-tuple format)
+  def transform({:conditional, meta, [condition, then_branch, else_branch]}, metadata)
+      when is_list(meta) do
     with {:ok, cond_py} <- transform(condition, metadata),
          {:ok, then_py} <- transform(then_branch, metadata),
          {:ok, else_py} <- transform_or_empty(else_branch, metadata) do
       # Check if this should be an IfExp (ternary) or If statement
       case {then_branch, else_branch} do
         # Both are expressions - use IfExp
-        {{_, _, _}, {_, _, _}} when not is_tuple(then_branch) or elem(then_branch, 0) != :block ->
+        {{_, _, _}, {_, _, _}} when elem(then_branch, 0) != :block ->
           {:ok, %{"_type" => "IfExp", "test" => cond_py, "body" => then_py, "orelse" => else_py}}
 
         _ ->
@@ -160,12 +126,8 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
-  # Blocks - M2.1 Core Layer
-  # Blocks with location
-  def transform({:block, statements, _loc}, metadata),
-    do: transform({:block, statements}, metadata)
-
-  def transform({:block, statements}, metadata) do
+  # Blocks - M2.1 Core Layer (New 3-tuple format)
+  def transform({:block, meta, statements}, metadata) when is_list(meta) do
     with {:ok, stmts_py} <- transform_list(statements, metadata) do
       case stmts_py do
         [] -> {:ok, %{"_type" => "Pass"}}
@@ -175,172 +137,169 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
-  # Early Returns - M2.1 Core Layer
-  # Early returns with location (3-tuple: type, value, location)
-  def transform({:early_return, value, _loc}, metadata) when not is_atom(value) do
-    # New format without kind - delegate to internal handler
-    with {:ok, value_py} <- transform_or_nil(value, metadata) do
-      {:ok, %{"_type" => "Return", "value" => value_py}}
+  # Early Returns - M2.1 Core Layer (New 3-tuple format)
+  def transform({:early_return, meta, [value]}, metadata) when is_list(meta) do
+    kind = Keyword.get(meta, :kind, :return)
+
+    case kind do
+      :return ->
+        with {:ok, value_py} <- transform_or_nil(value, metadata) do
+          {:ok, %{"_type" => "Return", "value" => value_py}}
+        end
+
+      :break ->
+        {:ok, %{"_type" => "Break"}}
+
+      :continue ->
+        {:ok, %{"_type" => "Continue"}}
     end
   end
 
-  # Legacy format with kind (4-tuple)
-  def transform({:early_return, :return, value}, metadata) do
-    with {:ok, value_py} <- transform_or_nil(value, metadata) do
-      {:ok, %{"_type" => "Return", "value" => value_py}}
-    end
-  end
-
-  def transform({:early_return, :break, _}, _metadata) do
-    {:ok, %{"_type" => "Break"}}
-  end
-
-  def transform({:early_return, :continue, _}, _metadata) do
-    {:ok, %{"_type" => "Continue"}}
-  end
-
-  # Assignments - M2.1 Core Layer
-  # Assignments with location
-  def transform({:assignment, target, value, _loc}, metadata) do
-    transform({:assignment, target, value}, metadata)
-  end
-
-  def transform({:assignment, target, value}, metadata) do
+  # Assignments - M2.1 Core Layer (New 3-tuple format)
+  def transform({:assignment, meta, [target, value]}, metadata) when is_list(meta) do
     with {:ok, target_py} <- transform_assignment_target(target, metadata),
          {:ok, value_py} <- transform(value, metadata) do
       {:ok, %{"_type" => "Assign", "targets" => [target_py], "value" => value_py}}
     end
   end
 
-  # Tuples - M2.1 Core Layer
-
-  def transform({:tuple, elements}, metadata) do
+  # Tuples - M2.1 Core Layer (New 3-tuple format)
+  def transform({:tuple, meta, elements}, metadata) when is_list(meta) do
     with {:ok, elts_py} <- transform_list(elements, metadata) do
       {:ok, %{"_type" => "Tuple", "elts" => elts_py, "ctx" => %{"_type" => "Load"}}}
     end
   end
 
-  # Loops - M2.2 Extended Layer
-
-  # Handle loops with location (6-tuple)
-  def transform({:loop, :while, condition, body, _loc}, metadata) do
-    transform({:loop, :while, condition, body}, metadata)
-  end
-
-  def transform({:loop, :while, condition, body}, metadata) do
-    with {:ok, test_py} <- transform(condition, metadata),
-         {:ok, body_py} <- transform_to_body(body, metadata) do
-      {:ok, %{"_type" => "While", "test" => test_py, "body" => body_py, "orelse" => []}}
+  # Pairs (used in maps)
+  def transform({:pair, meta, [key, value]}, metadata) when is_list(meta) do
+    # Pairs are handled within map transformation, but if called directly:
+    with {:ok, key_py} <- transform(key, metadata),
+         {:ok, value_py} <- transform(value, metadata) do
+      {:ok, {key_py, value_py}}
     end
   end
 
-  # Handle for loops with location (6-tuple)
-  def transform({:loop, :for_each, iterator, collection, body, _loc}, metadata) do
-    transform({:loop, :for_each, iterator, collection, body}, metadata)
-  end
+  # Loops - M2.2 Extended Layer (New 3-tuple format)
+  def transform({:loop, meta, children}, metadata) when is_list(meta) do
+    loop_type = Keyword.get(meta, :loop_type)
 
-  def transform({:loop, :for_each, iterator, collection, body}, metadata) do
-    with {:ok, target_py} <- transform(iterator, metadata),
-         {:ok, iter_py} <- transform(collection, metadata),
-         {:ok, body_py} <- transform_to_body(body, metadata) do
-      {:ok,
-       %{
-         "_type" => "For",
-         "target" => target_py,
-         "iter" => iter_py,
-         "body" => body_py,
-         "orelse" => []
-       }}
+    case {loop_type, children} do
+      {:while, [condition, body]} ->
+        with {:ok, test_py} <- transform(condition, metadata),
+             {:ok, body_py} <- transform_to_body(body, metadata) do
+          {:ok, %{"_type" => "While", "test" => test_py, "body" => body_py, "orelse" => []}}
+        end
+
+      {:for_each, [iterator, collection, body]} ->
+        with {:ok, target_py} <- transform(iterator, metadata),
+             {:ok, iter_py} <- transform(collection, metadata),
+             {:ok, body_py} <- transform_to_body(body, metadata) do
+          {:ok,
+           %{
+             "_type" => "For",
+             "target" => target_py,
+             "iter" => iter_py,
+             "body" => body_py,
+             "orelse" => []
+           }}
+        end
     end
   end
 
-  # Lambdas - M2.2 Extended Layer
+  # Lambdas - M2.2 Extended Layer (New 3-tuple format)
+  def transform({:lambda, meta, [body]}, metadata) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
 
-  def transform({:lambda, params, _captures, body}, metadata) do
     with {:ok, body_py} <- transform(body, metadata) do
       args_node = build_lambda_args(params)
       {:ok, %{"_type" => "Lambda", "args" => args_node, "body" => body_py}}
     end
   end
 
-  # Collection Operations - M2.2 Extended Layer
+  # Collection Operations - M2.2 Extended Layer (New 3-tuple format)
+  def transform({:collection_op, meta, [func, collection]}, metadata) when is_list(meta) do
+    op_type = Keyword.get(meta, :op_type)
 
-  # Map operation: transform to list comprehension if lambda is simple
-  def transform({:collection_op, :map, {:lambda, [param], [], body}, collection}, metadata) do
-    with {:ok, elt_py} <- transform(body, metadata),
-         {:ok, iter_py} <- transform(collection, metadata) do
-      target = %{"_type" => "Name", "id" => param, "ctx" => %{"_type" => "Store"}}
+    case op_type do
+      :map ->
+        # Check if func is a simple lambda
+        case func do
+          {:lambda, lambda_meta, [body]} when is_list(lambda_meta) ->
+            params = Keyword.get(lambda_meta, :params, [])
 
-      generator = %{
-        "_type" => "comprehension",
-        "target" => target,
-        "iter" => iter_py,
-        "ifs" => [],
-        "is_async" => 0
-      }
+            case params do
+              [param] ->
+                with {:ok, elt_py} <- transform(body, metadata),
+                     {:ok, iter_py} <- transform(collection, metadata) do
+                  target = %{"_type" => "Name", "id" => param, "ctx" => %{"_type" => "Store"}}
 
-      {:ok, %{"_type" => "ListComp", "elt" => elt_py, "generators" => [generator]}}
+                  generator = %{
+                    "_type" => "comprehension",
+                    "target" => target,
+                    "iter" => iter_py,
+                    "ifs" => [],
+                    "is_async" => 0
+                  }
+
+                  {:ok, %{"_type" => "ListComp", "elt" => elt_py, "generators" => [generator]}}
+                end
+
+              _ ->
+                transform_map_fallback(func, collection, metadata)
+            end
+
+          _ ->
+            transform_map_fallback(func, collection, metadata)
+        end
+
+      :filter ->
+        with {:ok, pred_py} <- transform(func, metadata),
+             {:ok, collection_py} <- transform(collection, metadata) do
+          filter_func = %{"_type" => "Name", "id" => "filter", "ctx" => %{"_type" => "Load"}}
+
+          {:ok,
+           %{
+             "_type" => "Call",
+             "func" => filter_func,
+             "args" => [pred_py, collection_py],
+             "keywords" => []
+           }}
+        end
     end
   end
 
-  # Map operation: fallback to map() function call
-  def transform({:collection_op, :map, func, collection}, metadata) do
-    with {:ok, func_py} <- transform(func, metadata),
-         {:ok, collection_py} <- transform(collection, metadata) do
-      map_func = %{"_type" => "Name", "id" => "map", "ctx" => %{"_type" => "Load"}}
+  # Collection op with initial value (reduce)
+  def transform({:collection_op, meta, [func, collection, initial]}, metadata)
+      when is_list(meta) do
+    op_type = Keyword.get(meta, :op_type)
 
-      {:ok,
-       %{
-         "_type" => "Call",
-         "func" => map_func,
-         "args" => [func_py, collection_py],
-         "keywords" => []
-       }}
+    case op_type do
+      :reduce ->
+        with {:ok, func_py} <- transform(func, metadata),
+             {:ok, collection_py} <- transform(collection, metadata),
+             {:ok, initial_py} <- transform(initial, metadata) do
+          # Build functools.reduce reference
+          reduce_func = %{
+            "_type" => "Attribute",
+            "value" => %{"_type" => "Name", "id" => "functools", "ctx" => %{"_type" => "Load"}},
+            "attr" => "reduce",
+            "ctx" => %{"_type" => "Load"}
+          }
+
+          {:ok,
+           %{
+             "_type" => "Call",
+             "func" => reduce_func,
+             "args" => [func_py, collection_py, initial_py],
+             "keywords" => []
+           }}
+        end
     end
   end
 
-  # Filter operation: transform to filter() call
-  def transform({:collection_op, :filter, predicate, collection}, metadata) do
-    with {:ok, pred_py} <- transform(predicate, metadata),
-         {:ok, collection_py} <- transform(collection, metadata) do
-      filter_func = %{"_type" => "Name", "id" => "filter", "ctx" => %{"_type" => "Load"}}
-
-      {:ok,
-       %{
-         "_type" => "Call",
-         "func" => filter_func,
-         "args" => [pred_py, collection_py],
-         "keywords" => []
-       }}
-    end
-  end
-
-  # Reduce operation: transform to functools.reduce() call
-  def transform({:collection_op, :reduce, func, collection, initial}, metadata) do
-    with {:ok, func_py} <- transform(func, metadata),
-         {:ok, collection_py} <- transform(collection, metadata),
-         {:ok, initial_py} <- transform(initial, metadata) do
-      # Build functools.reduce reference
-      reduce_func = %{
-        "_type" => "Attribute",
-        "value" => %{"_type" => "Name", "id" => "functools", "ctx" => %{"_type" => "Load"}},
-        "attr" => "reduce",
-        "ctx" => %{"_type" => "Load"}
-      }
-
-      {:ok,
-       %{
-         "_type" => "Call",
-         "func" => reduce_func,
-         "args" => [func_py, collection_py, initial_py],
-         "keywords" => []
-       }}
-    end
-  end
-
-  # Exception Handling - M2.2 Extended Layer
-
-  def transform({:exception_handling, try_block, rescue_clauses, finally_block}, metadata) do
+  # Exception Handling - M2.2 Extended Layer (New 3-tuple format)
+  def transform({:exception_handling, meta, [try_block, rescue_clauses, finally_block]}, metadata)
+      when is_list(meta) do
     with {:ok, body_py} <- transform_to_body(try_block, metadata),
          {:ok, handlers_py} <- transform_exception_handlers(rescue_clauses, metadata),
          {:ok, finally_py} <- transform_to_body_or_empty(finally_block, metadata) do
@@ -355,14 +314,14 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
-  # Language-Specific - M2.3 Native Layer
+  # Language-Specific - M2.3 Native Layer (New 3-tuple format)
+  def transform({:language_specific, meta, native_ast}, _metadata) when is_list(meta) do
+    language = Keyword.get(meta, :language)
 
-  def transform({:language_specific, :python, native_ast, _hint}, _metadata) do
-    {:ok, native_ast}
-  end
-
-  def transform({:language_specific, other_lang, _ast, _hint}, _metadata) do
-    {:error, "Cannot reify #{other_lang} language-specific construct to Python"}
+    case language do
+      :python -> {:ok, native_ast}
+      other -> {:error, "Cannot reify #{other} language-specific construct to Python"}
+    end
   end
 
   # Catch-all
@@ -373,19 +332,27 @@ defmodule Metastatic.Adapters.Python.FromMeta do
 
   # Helper Functions
 
-  defp transform_assignment_target({:variable, name, _loc}, metadata) do
-    transform_assignment_target({:variable, name}, metadata)
+  defp transform_map_fallback(func, collection, metadata) do
+    with {:ok, func_py} <- transform(func, metadata),
+         {:ok, collection_py} <- transform(collection, metadata) do
+      map_func = %{"_type" => "Name", "id" => "map", "ctx" => %{"_type" => "Load"}}
+
+      {:ok,
+       %{
+         "_type" => "Call",
+         "func" => map_func,
+         "args" => [func_py, collection_py],
+         "keywords" => []
+       }}
+    end
   end
 
-  defp transform_assignment_target({:variable, name}, _metadata) when is_binary(name) do
+  defp transform_assignment_target({:variable, meta, name}, _metadata)
+       when is_list(meta) and is_binary(name) do
     {:ok, %{"_type" => "Name", "id" => name, "ctx" => %{"_type" => "Store"}}}
   end
 
-  defp transform_assignment_target({:tuple, elements, _loc}, metadata) do
-    transform_assignment_target({:tuple, elements}, metadata)
-  end
-
-  defp transform_assignment_target({:tuple, elements}, metadata) do
+  defp transform_assignment_target({:tuple, meta, elements}, metadata) when is_list(meta) do
     with {:ok, elts_py} <- transform_assignment_targets(elements, metadata) do
       {:ok, %{"_type" => "Tuple", "elts" => elts_py, "ctx" => %{"_type" => "Store"}}}
     end
@@ -515,7 +482,7 @@ defmodule Metastatic.Adapters.Python.FromMeta do
 
   # Extended layer helpers
 
-  defp transform_to_body({:block, statements}, metadata) do
+  defp transform_to_body({:block, _meta, statements}, metadata) do
     transform_list(statements, metadata)
   end
 
@@ -578,6 +545,6 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   end
 
   defp extract_var_name(nil), do: {:ok, nil}
-  defp extract_var_name({:variable, name}), do: {:ok, name}
+  defp extract_var_name({:variable, _meta, name}), do: {:ok, name}
   defp extract_var_name(_), do: {:ok, "e"}
 end

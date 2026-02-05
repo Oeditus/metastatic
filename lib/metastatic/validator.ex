@@ -5,6 +5,12 @@ defmodule Metastatic.Validator do
   This module provides formal M1 → M2 conformance checking and validation
   of MetaAST structures according to the theoretical foundations.
 
+  ## New 3-Tuple Format
+
+  All MetaAST nodes are uniform 3-element tuples:
+
+      {type_atom, keyword_meta, children_or_value}
+
   ## Conformance Rules (Definition 8 from THEORETICAL_FOUNDATIONS.md)
 
   A term `t ∈ M1` conforms to M2 if it can be represented by M2 meta-types
@@ -31,7 +37,8 @@ defmodule Metastatic.Validator do
       alias Metastatic.Validator
 
       doc = %Metastatic.Document{
-        ast: {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}},
+        ast: {:binary_op, [category: :arithmetic, operator: :+],
+              [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
         language: :python,
         metadata: %{}
       }
@@ -73,14 +80,14 @@ defmodule Metastatic.Validator do
 
   ## Examples
 
-      iex> doc = %Metastatic.Document{ast: {:literal, :integer, 42}, language: :python, metadata: %{}}
+      iex> doc = %Metastatic.Document{ast: {:literal, [subtype: :integer], 42}, language: :python, metadata: %{}}
       iex> {:ok, meta} = Metastatic.Validator.validate(doc)
       iex> meta.level
       :core
 
-      iex> invalid_doc = %Metastatic.Document{ast: {:invalid_type, "oops"}, language: :python, metadata: %{}}
+      iex> invalid_doc = %Metastatic.Document{ast: {:invalid_type, [], "oops"}, language: :python, metadata: %{}}
       iex> Metastatic.Validator.validate(invalid_doc)
-      {:error, {:invalid_structure, {:invalid_type, "oops"}}}
+      {:error, {:invalid_structure, {:invalid_type, [], "oops"}}}
   """
   @spec validate(Document.t(), keyword()) :: validation_result()
   def validate(%Document{} = document, opts \\ []) do
@@ -100,11 +107,11 @@ defmodule Metastatic.Validator do
 
   ## Examples
 
-      iex> doc = %Metastatic.Document{ast: {:literal, :integer, 42}, language: :python, metadata: %{}}
+      iex> doc = %Metastatic.Document{ast: {:literal, [subtype: :integer], 42}, language: :python, metadata: %{}}
       iex> Metastatic.Validator.valid?(doc)
       true
 
-      iex> invalid_doc = %Metastatic.Document{ast: {:bad, "ast"}, language: :python, metadata: %{}}
+      iex> invalid_doc = %Metastatic.Document{ast: {:bad, [], "ast"}, language: :python, metadata: %{}}
       iex> Metastatic.Validator.valid?(invalid_doc)
       false
   """
@@ -121,12 +128,12 @@ defmodule Metastatic.Validator do
 
   ## Examples
 
-      iex> {:ok, meta} = Metastatic.Validator.validate_ast({:literal, :integer, 42})
+      iex> {:ok, meta} = Metastatic.Validator.validate_ast({:literal, [subtype: :integer], 42})
       iex> meta.level
       :core
 
-      iex> Metastatic.Validator.validate_ast({:invalid, "nope"})
-      {:error, {:invalid_structure, {:invalid, "nope"}}}
+      iex> Metastatic.Validator.validate_ast({:invalid, [], "nope"})
+      {:error, {:invalid_structure, {:invalid, [], "nope"}}}
   """
   @spec validate_ast(AST.meta_ast(), keyword()) :: validation_result()
   def validate_ast(ast, opts \\ []) do
@@ -166,6 +173,26 @@ defmodule Metastatic.Validator do
     {:ok, meta}
   end
 
+  # Extended layer types (M2.2 + M2.2s)
+  @extended_types [
+    :loop,
+    :lambda,
+    :collection_op,
+    :pattern_match,
+    :match_arm,
+    :exception_handling,
+    :async_operation,
+    # M2.2s: Structural/Organizational layer
+    :container,
+    :function_def,
+    :attribute_access,
+    :augmented_assignment,
+    :property
+  ]
+
+  # Native layer types (M2.3)
+  @native_types [:language_specific]
+
   # Determine highest M2 level used
 
   defp determine_level(ast) do
@@ -181,36 +208,25 @@ defmodule Metastatic.Validator do
   end
 
   defp has_extended?(ast) do
-    walk_ast(ast, false, fn
-      # M2.2: Extended layer - Common patterns with variations
-      {:loop, _, _, _}, _acc -> true
-      {:lambda, _, _, _}, _acc -> true
-      {:collection_op, _, _, _}, _acc -> true
-      {:pattern_match, _, _}, _acc -> true
-      {:exception_handling, _, _, _}, _acc -> true
-      {:async_operation, _, _}, _acc -> true
-      # M2.2s: Structural/Organizational layer
-      # NEW format: {:container, type, name, parent, type_params, implements, body}
-      {:container, _, _, _, _, _, _}, _acc -> true
-      # NEW format: {:function_def, name, params, ret_type, opts, body}
-      {:function_def, _, _, _, _, _}, _acc -> true
-      {:attribute_access, _, _}, _acc -> true
-      {:augmented_assignment, _, _, _}, _acc -> true
-      {:property, _, _, _, _}, _acc -> true
-      # M2.1 Core: list and map are NOT extended
-      # {:list, _}, _acc -> false
-      # {:map, _}, _acc -> false
-      _node, acc -> acc
-    end)
+    {_ast, found} =
+      AST.traverse(ast, false, fn node, acc -> {node, acc} end, fn
+        {type, _meta, _children}, _acc when type in @extended_types -> {nil, true}
+        node, acc -> {node, acc}
+      end)
+
+    found
   end
 
   # Count M2.3 native constructs
 
   defp count_native(ast) do
-    walk_ast(ast, 0, fn
-      {:language_specific, _, _}, acc -> acc + 1
-      _node, acc -> acc
-    end)
+    {_ast, count} =
+      AST.traverse(ast, 0, fn node, acc -> {node, acc} end, fn
+        {type, _meta, _children}, acc when type in @native_types -> {nil, acc + 1}
+        node, acc -> {node, acc}
+      end)
+
+    count
   end
 
   # Generate validation warnings
@@ -279,70 +295,45 @@ defmodule Metastatic.Validator do
     end
   end
 
-  # AST traversal utilities
+  # AST traversal utilities using the new 3-tuple format
 
-  defp calculate_depth(ast, current_depth \\ 0)
+  # Calculate depth using AST.traverse
+  # Tracks {current_depth, max_depth_seen} during traversal
+  defp calculate_depth(ast) do
+    {_ast, {_current, max_depth}} =
+      AST.traverse(ast, {0, 0}, &depth_pre/2, &depth_post/2)
 
-  defp calculate_depth({type, _} = ast, current_depth)
-       when type in [:literal, :variable] do
-    max(current_depth + 1, depth_of_children(ast, current_depth + 1))
+    max_depth
   end
 
-  defp calculate_depth(ast, current_depth) when is_tuple(ast) do
-    max(current_depth + 1, depth_of_children(ast, current_depth + 1))
+  # Pre: increment current depth when entering a node
+  defp depth_pre({type, meta, _children} = node, {current, max_depth})
+       when is_atom(type) and is_list(meta) do
+    new_current = current + 1
+    {node, {new_current, max(max_depth, new_current)}}
   end
 
-  defp calculate_depth(_ast, current_depth), do: current_depth
+  defp depth_pre(node, acc), do: {node, acc}
 
-  defp depth_of_children(ast, current_depth) when is_tuple(ast) do
-    ast
-    |> Tuple.to_list()
-    |> Enum.reduce(current_depth, fn
-      child, max_depth when is_tuple(child) ->
-        max(max_depth, calculate_depth(child, current_depth))
-
-      child, max_depth when is_list(child) ->
-        child_depths =
-          Enum.map(child, fn item ->
-            if is_tuple(item), do: calculate_depth(item, current_depth), else: current_depth
-          end)
-
-        max(max_depth, Enum.max(child_depths ++ [current_depth]))
-
-      _other, max_depth ->
-        max_depth
-    end)
+  # Post: decrement current depth when leaving a node
+  defp depth_post({type, meta, _children} = node, {current, max_depth})
+       when is_atom(type) and is_list(meta) do
+    {node, {max(0, current - 1), max_depth}}
   end
 
-  defp depth_of_children(_ast, current_depth), do: current_depth
+  defp depth_post(node, acc), do: {node, acc}
 
+  # Count nodes using AST.traverse
   defp count_nodes(ast) do
-    walk_ast(ast, 0, fn _node, acc -> acc + 1 end)
-  end
+    {_ast, count} =
+      AST.traverse(ast, 0, fn node, acc -> {node, acc} end, fn
+        {type, meta, _children}, acc when is_atom(type) and is_list(meta) ->
+          {nil, acc + 1}
 
-  defp walk_ast(ast, acc, fun) when is_tuple(ast) do
-    acc = fun.(ast, acc)
+        node, acc ->
+          {node, acc}
+      end)
 
-    ast
-    |> Tuple.to_list()
-    |> Enum.reduce(acc, fn
-      child, acc when is_tuple(child) -> walk_ast(child, acc, fun)
-      children, acc when is_list(children) -> walk_ast_list(children, acc, fun)
-      _other, acc -> acc
-    end)
-  end
-
-  defp walk_ast(ast, acc, fun) when is_list(ast) do
-    walk_ast_list(ast, acc, fun)
-  end
-
-  defp walk_ast(_ast, acc, _fun), do: acc
-
-  defp walk_ast_list(list, acc, fun) do
-    Enum.reduce(list, acc, fn
-      item, acc when is_tuple(item) -> walk_ast(item, acc, fun)
-      item, acc when is_list(item) -> walk_ast_list(item, acc, fun)
-      _other, acc -> acc
-    end)
+    count
   end
 end

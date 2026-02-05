@@ -16,13 +16,15 @@ defmodule Metastatic.CLI.Formatter do
   @doc """
   Format a MetaAST node for display.
 
+  Uses 3-tuple format: {type, meta, children_or_value}
+
   ## Examples
 
-      iex> format({:literal, :integer, 42}, :plain)
+      iex> format({:literal, [subtype: :integer], 42}, :plain)
       "literal(integer, 42)"
 
-      iex> format({:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}, :tree)
-      "binary_op (arithmetic: +)\\n├─ variable: x\\n└─ literal (integer): 5"
+      iex> format({:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}, :tree)
+      "binary_op (arithmetic: +)\\n  variable: x\\n  literal (integer): 5"
   """
   @spec format(meta_ast(), format()) :: String.t()
   def format(ast, :tree), do: format_tree(ast, 0)
@@ -47,6 +49,7 @@ defmodule Metastatic.CLI.Formatter do
   end
 
   # Tree format - human-readable with tree structure
+  # 3-tuple format: {type, meta, children_or_value}
 
   @spec format_tree(meta_ast(), non_neg_integer()) :: String.t()
   defp format_tree(ast, depth) do
@@ -54,49 +57,54 @@ defmodule Metastatic.CLI.Formatter do
     format_tree_node(ast, indent, depth)
   end
 
-  # Handle location-aware nodes by stripping location and recursing
-  defp format_tree_node({:literal, type, value, _loc}, indent, depth) do
-    format_tree_node({:literal, type, value}, indent, depth)
-  end
-
-  defp format_tree_node({:literal, type, value}, indent, _depth) do
+  # 3-tuple: {:literal, [subtype: type], value}
+  defp format_tree_node({:literal, meta, value}, indent, _depth) when is_list(meta) do
+    type = Keyword.get(meta, :subtype, :unknown)
     "#{indent}literal (#{type}): #{inspect(value)}"
   end
 
-  defp format_tree_node({:variable, name, _loc}, indent, depth) do
-    format_tree_node({:variable, name}, indent, depth)
-  end
-
-  defp format_tree_node({:variable, name}, indent, _depth) do
+  # 3-tuple: {:variable, meta, name}
+  defp format_tree_node({:variable, _meta, name}, indent, _depth) do
     "#{indent}variable: #{name}"
   end
 
-  defp format_tree_node({:list, elements}, indent, depth) do
+  # 3-tuple: {:list, meta, elements}
+  defp format_tree_node({:list, _meta, elements}, indent, depth) when is_list(elements) do
     element_lines = Enum.map(elements, &format_tree(&1, depth + 1))
     lines = ["#{indent}list" | element_lines]
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:map, pairs}, indent, depth) do
+  # 3-tuple: {:map, meta, pairs}
+  defp format_tree_node({:map, _meta, pairs}, indent, depth) when is_list(pairs) do
     pair_lines =
-      Enum.flat_map(pairs, fn {key, value} ->
-        [
-          "#{indent}  key:",
-          format_tree(key, depth + 2),
-          "#{indent}  value:",
-          format_tree(value, depth + 2)
-        ]
+      Enum.flat_map(pairs, fn
+        {:pair, _, [key, value]} ->
+          [
+            "#{indent}  key:",
+            format_tree(key, depth + 2),
+            "#{indent}  value:",
+            format_tree(value, depth + 2)
+          ]
+
+        {key, value} ->
+          [
+            "#{indent}  key:",
+            format_tree(key, depth + 2),
+            "#{indent}  value:",
+            format_tree(value, depth + 2)
+          ]
       end)
 
     lines = ["#{indent}map" | pair_lines]
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:binary_op, category, op, left, right, _loc}, indent, depth) do
-    format_tree_node({:binary_op, category, op, left, right}, indent, depth)
-  end
+  # 3-tuple: {:binary_op, [category: cat, operator: op], [left, right]}
+  defp format_tree_node({:binary_op, meta, [left, right]}, indent, depth) when is_list(meta) do
+    category = Keyword.get(meta, :category, :unknown)
+    op = Keyword.get(meta, :operator, :unknown)
 
-  defp format_tree_node({:binary_op, category, op, left, right}, indent, depth) do
     lines = [
       "#{indent}binary_op (#{category}: #{op})",
       format_tree(left, depth + 1),
@@ -106,11 +114,11 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:unary_op, category, op, operand, _loc}, indent, depth) do
-    format_tree_node({:unary_op, category, op, operand}, indent, depth)
-  end
+  # 3-tuple: {:unary_op, [category: cat, operator: op], [operand]}
+  defp format_tree_node({:unary_op, meta, [operand]}, indent, depth) when is_list(meta) do
+    category = Keyword.get(meta, :category, :unknown)
+    op = Keyword.get(meta, :operator, :unknown)
 
-  defp format_tree_node({:unary_op, category, op, operand}, indent, depth) do
     lines = [
       "#{indent}unary_op (#{category}: #{op})",
       format_tree(operand, depth + 1)
@@ -119,11 +127,9 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:function_call, name, args, _loc}, indent, depth) do
-    format_tree_node({:function_call, name, args}, indent, depth)
-  end
-
-  defp format_tree_node({:function_call, name, args}, indent, depth) do
+  # 3-tuple: {:function_call, [name: name], args}
+  defp format_tree_node({:function_call, meta, args}, indent, depth) when is_list(meta) do
+    name = Keyword.get(meta, :name, "unknown")
     arg_lines = Enum.map(args, &format_tree(&1, depth + 1))
 
     lines = ["#{indent}function_call: #{name}" | arg_lines]
@@ -131,11 +137,14 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:conditional, condition, then_branch, else_branch, _loc}, indent, depth) do
-    format_tree_node({:conditional, condition, then_branch, else_branch}, indent, depth)
-  end
+  # 3-tuple: {:conditional, meta, [condition, then_branch, else_branch?]}
+  defp format_tree_node({:conditional, _meta, children}, indent, depth) when is_list(children) do
+    {condition, then_branch, else_branch} =
+      case children do
+        [c, t, e] -> {c, t, e}
+        [c, t] -> {c, t, nil}
+      end
 
-  defp format_tree_node({:conditional, condition, then_branch, else_branch}, indent, depth) do
     lines = [
       "#{indent}conditional",
       "#{indent}  condition:",
@@ -158,21 +167,18 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:block, statements, _loc}, indent, depth) do
-    format_tree_node({:block, statements}, indent, depth)
-  end
-
-  defp format_tree_node({:block, statements}, indent, depth) do
+  # 3-tuple: {:block, meta, statements}
+  defp format_tree_node({:block, _meta, statements}, indent, depth) when is_list(statements) do
     statement_lines = Enum.map(statements, &format_tree(&1, depth + 1))
     lines = ["#{indent}block" | statement_lines]
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:early_return, kind, value, _loc}, indent, depth) do
-    format_tree_node({:early_return, kind, value}, indent, depth)
-  end
+  # 3-tuple: {:early_return, meta, [value]}
+  defp format_tree_node({:early_return, meta, children}, indent, depth) when is_list(meta) do
+    kind = Keyword.get(meta, :kind, :return)
+    value = if is_list(children) and children != [], do: hd(children), else: nil
 
-  defp format_tree_node({:early_return, kind, value}, indent, depth) do
     lines = [
       "#{indent}early_return (#{kind})"
     ]
@@ -187,112 +193,106 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:loop, :while, condition, body, _loc}, indent, depth) do
-    format_tree_node({:loop, :while, condition, body}, indent, depth)
+  # 3-tuple: {:loop, [loop_type: :while], [condition, body]}
+  defp format_tree_node({:loop, meta, children}, indent, depth) when is_list(meta) do
+    loop_type = Keyword.get(meta, :loop_type, :unknown)
+
+    case {loop_type, children} do
+      {:while, [condition, body]} ->
+        lines = [
+          "#{indent}loop (while)",
+          "#{indent}  condition:",
+          format_tree(condition, depth + 2),
+          "#{indent}  body:",
+          format_tree(body, depth + 2)
+        ]
+
+        Enum.join(lines, "\n")
+
+      {kind, [iterator, collection, body]} when kind in [:for, :for_each] ->
+        lines = [
+          "#{indent}loop (#{kind})",
+          "#{indent}  iterator:",
+          format_tree(iterator, depth + 2),
+          "#{indent}  collection:",
+          format_tree(collection, depth + 2),
+          "#{indent}  body:",
+          format_tree(body, depth + 2)
+        ]
+
+        Enum.join(lines, "\n")
+
+      _ ->
+        "#{indent}loop (#{loop_type})"
+    end
   end
 
-  defp format_tree_node({:loop, :while, condition, body}, indent, depth) do
-    lines = [
-      "#{indent}loop (while)",
-      "#{indent}  condition:",
-      format_tree(condition, depth + 2),
-      "#{indent}  body:",
-      format_tree(body, depth + 2)
-    ]
-
-    Enum.join(lines, "\n")
-  end
-
-  defp format_tree_node({:loop, kind, iterator, collection, body, _loc}, indent, depth)
-       when kind in [:for, :for_each] do
-    format_tree_node({:loop, kind, iterator, collection, body}, indent, depth)
-  end
-
-  defp format_tree_node({:loop, kind, iterator, collection, body}, indent, depth)
-       when kind in [:for, :for_each] do
-    lines = [
-      "#{indent}loop (#{kind})",
-      "#{indent}  iterator:",
-      format_tree(iterator, depth + 2),
-      "#{indent}  collection:",
-      format_tree(collection, depth + 2),
-      "#{indent}  body:",
-      format_tree(body, depth + 2)
-    ]
-
-    Enum.join(lines, "\n")
-  end
-
-  defp format_tree_node({:lambda, params, captures, body, _loc}, indent, depth) do
-    format_tree_node({:lambda, params, captures, body}, indent, depth)
-  end
-
-  defp format_tree_node({:lambda, params, captures, body}, indent, depth) do
+  # 3-tuple: {:lambda, [params: params, captures: caps], [body]}
+  defp format_tree_node({:lambda, meta, children}, indent, depth) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
+    captures = Keyword.get(meta, :captures, [])
+    body = if is_list(children) and children != [], do: List.last(children), else: nil
     param_str = Enum.map_join(params, ", ", &format_param/1)
 
     lines = [
       "#{indent}lambda (#{param_str})",
-      "#{indent}  captures: #{inspect(captures)}",
-      "#{indent}  body:",
-      format_tree(body, depth + 2)
+      "#{indent}  captures: #{inspect(captures)}"
     ]
+
+    lines =
+      if body do
+        lines ++ ["#{indent}  body:", format_tree(body, depth + 2)]
+      else
+        lines
+      end
 
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:collection_op, op, lambda, collection, _loc}, indent, depth)
-       when op in [:map, :filter] do
-    format_tree_node({:collection_op, op, lambda, collection}, indent, depth)
+  # 3-tuple: {:collection_op, [op: :map|:filter], [lambda, collection]}
+  defp format_tree_node({:collection_op, meta, children}, indent, depth) when is_list(meta) do
+    op = Keyword.get(meta, :op, :unknown)
+
+    case {op, children} do
+      {op, [lambda, collection]} when op in [:map, :filter] ->
+        lines = [
+          "#{indent}collection_op (#{op})",
+          "#{indent}  lambda:",
+          format_tree(lambda, depth + 2),
+          "#{indent}  collection:",
+          format_tree(collection, depth + 2)
+        ]
+
+        Enum.join(lines, "\n")
+
+      {:reduce, [lambda, collection, initial]} ->
+        lines = [
+          "#{indent}collection_op (reduce)",
+          "#{indent}  lambda:",
+          format_tree(lambda, depth + 2),
+          "#{indent}  collection:",
+          format_tree(collection, depth + 2),
+          "#{indent}  initial:",
+          format_tree(initial, depth + 2)
+        ]
+
+        Enum.join(lines, "\n")
+
+      _ ->
+        "#{indent}collection_op (#{op})"
+    end
   end
 
-  defp format_tree_node({:collection_op, op, lambda, collection}, indent, depth)
-       when op in [:map, :filter] do
-    lines = [
-      "#{indent}collection_op (#{op})",
-      "#{indent}  lambda:",
-      format_tree(lambda, depth + 2),
-      "#{indent}  collection:",
-      format_tree(collection, depth + 2)
-    ]
+  # 3-tuple: {:exception_handling, meta, [body, rescue_clauses, finally]}
+  defp format_tree_node({:exception_handling, _meta, children}, indent, depth)
+       when is_list(children) do
+    {body, rescue_clauses, finally_clause} =
+      case children do
+        [b, r, f] -> {b, r, f}
+        [b, r] -> {b, r, nil}
+        [b] -> {b, [], nil}
+      end
 
-    Enum.join(lines, "\n")
-  end
-
-  defp format_tree_node(
-         {:collection_op, :reduce, lambda, collection, initial, _loc},
-         indent,
-         depth
-       ) do
-    format_tree_node({:collection_op, :reduce, lambda, collection, initial}, indent, depth)
-  end
-
-  defp format_tree_node({:collection_op, :reduce, lambda, collection, initial}, indent, depth) do
-    lines = [
-      "#{indent}collection_op (reduce)",
-      "#{indent}  lambda:",
-      format_tree(lambda, depth + 2),
-      "#{indent}  collection:",
-      format_tree(collection, depth + 2),
-      "#{indent}  initial:",
-      format_tree(initial, depth + 2)
-    ]
-
-    Enum.join(lines, "\n")
-  end
-
-  defp format_tree_node(
-         {:exception_handling, body, rescue_clauses, finally_clause, _loc},
-         indent,
-         depth
-       ) do
-    format_tree_node({:exception_handling, body, rescue_clauses, finally_clause}, indent, depth)
-  end
-
-  defp format_tree_node(
-         {:exception_handling, body, rescue_clauses, finally_clause},
-         indent,
-         depth
-       ) do
     lines = [
       "#{indent}exception_handling",
       "#{indent}  body:",
@@ -300,14 +300,26 @@ defmodule Metastatic.CLI.Formatter do
       "#{indent}  rescue:"
     ]
 
+    rescue_list = if is_list(rescue_clauses), do: rescue_clauses, else: []
+
     rescue_lines =
-      Enum.flat_map(rescue_clauses, fn {:rescue, pattern, handler} ->
-        [
-          "#{indent}    pattern:",
-          format_tree(pattern, depth + 3),
-          "#{indent}    handler:",
-          format_tree(handler, depth + 3)
-        ]
+      Enum.flat_map(rescue_list, fn
+        {:catch_clause, _, [_type, _var, handler]} ->
+          [
+            "#{indent}    handler:",
+            format_tree(handler, depth + 3)
+          ]
+
+        {:rescue, _, [pattern, handler]} ->
+          [
+            "#{indent}    pattern:",
+            format_tree(pattern, depth + 3),
+            "#{indent}    handler:",
+            format_tree(handler, depth + 3)
+          ]
+
+        other ->
+          ["#{indent}    #{inspect(other)}"]
       end)
 
     lines = lines ++ rescue_lines
@@ -326,15 +338,26 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(lines, "\n")
   end
 
-  defp format_tree_node({:language_specific, language, _native_ast, hint}, indent, _depth) do
+  # 3-tuple: {:language_specific, [language: lang, hint: hint], native_ast}
+  defp format_tree_node({:language_specific, meta, _native_ast}, indent, _depth)
+       when is_list(meta) do
+    language = Keyword.get(meta, :language, :unknown)
+    hint = Keyword.get(meta, :hint)
     "#{indent}language_specific (#{language}, hint: #{inspect(hint)})"
+  end
+
+  # Fallback for any unrecognized 3-tuple
+  defp format_tree_node({type, meta, _children}, indent, _depth)
+       when is_atom(type) and is_list(meta) do
+    "#{indent}#{type}"
   end
 
   defp format_tree_node(ast, indent, _depth) do
     "#{indent}#{inspect(ast)}"
   end
 
-  defp format_param({:param, name, type_hint, default}) do
+  # 3-tuple params: {:param, meta, [name, type_hint, default]}
+  defp format_param({:param, _meta, [name, type_hint, default]}) do
     parts = [name]
 
     parts =
@@ -359,6 +382,7 @@ defmodule Metastatic.CLI.Formatter do
   defp format_param(other), do: inspect(other)
 
   # JSON format - machine-readable
+  # 3-tuple format: {type, meta, children_or_value}
 
   @spec format_json(meta_ast()) :: String.t()
   defp format_json(ast) do
@@ -367,38 +391,39 @@ defmodule Metastatic.CLI.Formatter do
     |> Jason.encode!(pretty: true)
   end
 
-  defp ast_to_map({:literal, type, value, _loc}) do
-    ast_to_map({:literal, type, value})
-  end
-
-  defp ast_to_map({:literal, type, value}) do
+  # 3-tuple: {:literal, [subtype: type], value}
+  defp ast_to_map({:literal, meta, value}) when is_list(meta) do
+    type = Keyword.get(meta, :subtype, :unknown)
     %{type: "literal", semantic_type: type, value: value}
   end
 
-  defp ast_to_map({:variable, name, _loc}) do
-    ast_to_map({:variable, name})
-  end
-
-  defp ast_to_map({:variable, name}) do
+  # 3-tuple: {:variable, meta, name}
+  defp ast_to_map({:variable, _meta, name}) do
     %{type: "variable", name: name}
   end
 
-  defp ast_to_map({:list, elements}) do
+  # 3-tuple: {:list, meta, elements}
+  defp ast_to_map({:list, _meta, elements}) when is_list(elements) do
     %{type: "list", elements: Enum.map(elements, &ast_to_map/1)}
   end
 
-  defp ast_to_map({:map, pairs}) do
+  # 3-tuple: {:map, meta, pairs}
+  defp ast_to_map({:map, _meta, pairs}) when is_list(pairs) do
     %{
       type: "map",
-      pairs: Enum.map(pairs, fn {k, v} -> %{key: ast_to_map(k), value: ast_to_map(v)} end)
+      pairs:
+        Enum.map(pairs, fn
+          {:pair, _, [k, v]} -> %{key: ast_to_map(k), value: ast_to_map(v)}
+          {k, v} -> %{key: ast_to_map(k), value: ast_to_map(v)}
+        end)
     }
   end
 
-  defp ast_to_map({:binary_op, category, op, left, right, _loc}) do
-    ast_to_map({:binary_op, category, op, left, right})
-  end
+  # 3-tuple: {:binary_op, [category: cat, operator: op], [left, right]}
+  defp ast_to_map({:binary_op, meta, [left, right]}) when is_list(meta) do
+    category = Keyword.get(meta, :category, :unknown)
+    op = Keyword.get(meta, :operator, :unknown)
 
-  defp ast_to_map({:binary_op, category, op, left, right}) do
     %{
       type: "binary_op",
       category: category,
@@ -408,11 +433,11 @@ defmodule Metastatic.CLI.Formatter do
     }
   end
 
-  defp ast_to_map({:unary_op, category, op, operand, _loc}) do
-    ast_to_map({:unary_op, category, op, operand})
-  end
+  # 3-tuple: {:unary_op, [category: cat, operator: op], [operand]}
+  defp ast_to_map({:unary_op, meta, [operand]}) when is_list(meta) do
+    category = Keyword.get(meta, :category, :unknown)
+    op = Keyword.get(meta, :operator, :unknown)
 
-  defp ast_to_map({:unary_op, category, op, operand}) do
     %{
       type: "unary_op",
       category: category,
@@ -421,11 +446,10 @@ defmodule Metastatic.CLI.Formatter do
     }
   end
 
-  defp ast_to_map({:function_call, name, args, _loc}) do
-    ast_to_map({:function_call, name, args})
-  end
+  # 3-tuple: {:function_call, [name: name], args}
+  defp ast_to_map({:function_call, meta, args}) when is_list(meta) do
+    name = Keyword.get(meta, :name, "unknown")
 
-  defp ast_to_map({:function_call, name, args}) do
     %{
       type: "function_call",
       name: name,
@@ -433,11 +457,14 @@ defmodule Metastatic.CLI.Formatter do
     }
   end
 
-  defp ast_to_map({:conditional, condition, then_branch, else_branch, _loc}) do
-    ast_to_map({:conditional, condition, then_branch, else_branch})
-  end
+  # 3-tuple: {:conditional, meta, [condition, then_branch, else_branch?]}
+  defp ast_to_map({:conditional, _meta, children}) when is_list(children) do
+    {condition, then_branch, else_branch} =
+      case children do
+        [c, t, e] -> {c, t, e}
+        [c, t] -> {c, t, nil}
+      end
 
-  defp ast_to_map({:conditional, condition, then_branch, else_branch}) do
     %{
       type: "conditional",
       condition: ast_to_map(condition),
@@ -446,18 +473,19 @@ defmodule Metastatic.CLI.Formatter do
     }
   end
 
-  defp ast_to_map({:block, statements, _loc}) do
-    ast_to_map({:block, statements})
-  end
-
-  defp ast_to_map({:block, statements}) do
+  # 3-tuple: {:block, meta, statements}
+  defp ast_to_map({:block, _meta, statements}) when is_list(statements) do
     %{
       type: "block",
       statements: Enum.map(statements, &ast_to_map/1)
     }
   end
 
-  defp ast_to_map({:language_specific, language, _native_ast, hint}) do
+  # 3-tuple: {:language_specific, [language: lang, hint: hint], native_ast}
+  defp ast_to_map({:language_specific, meta, _native_ast}) when is_list(meta) do
+    language = Keyword.get(meta, :language, :unknown)
+    hint = Keyword.get(meta, :hint)
+
     %{
       type: "language_specific",
       language: language,
@@ -465,52 +493,61 @@ defmodule Metastatic.CLI.Formatter do
     }
   end
 
+  # Fallback for other 3-tuple types
+  defp ast_to_map({type, meta, children}) when is_atom(type) and is_list(meta) do
+    %{type: to_string(type), meta: Map.new(meta), children: format_children(children)}
+  end
+
   defp ast_to_map(ast) do
     %{type: "unknown", data: inspect(ast)}
   end
 
-  # Plain format - simple text representation
-
-  @spec format_plain(meta_ast()) :: String.t()
-  defp format_plain({:literal, type, value, _loc}) do
-    format_plain({:literal, type, value})
+  defp format_children(children) when is_list(children) do
+    Enum.map(children, &ast_to_map/1)
   end
 
-  defp format_plain({:literal, type, value}) do
+  defp format_children(value), do: value
+
+  # Plain format - simple text representation
+  # 3-tuple format: {type, meta, children_or_value}
+
+  @spec format_plain(meta_ast()) :: String.t()
+
+  # 3-tuple: {:literal, [subtype: type], value}
+  defp format_plain({:literal, meta, value}) when is_list(meta) do
+    type = Keyword.get(meta, :subtype, :unknown)
     "literal(#{type}, #{inspect(value)})"
   end
 
-  defp format_plain({:variable, name, _loc}) do
-    format_plain({:variable, name})
-  end
-
-  defp format_plain({:variable, name}) do
+  # 3-tuple: {:variable, meta, name}
+  defp format_plain({:variable, _meta, name}) do
     "variable(#{name})"
   end
 
-  defp format_plain({:binary_op, category, op, left, right, _loc}) do
-    format_plain({:binary_op, category, op, left, right})
-  end
-
-  defp format_plain({:binary_op, category, op, left, right}) do
+  # 3-tuple: {:binary_op, [category: cat, operator: op], [left, right]}
+  defp format_plain({:binary_op, meta, [left, right]}) when is_list(meta) do
+    category = Keyword.get(meta, :category, :unknown)
+    op = Keyword.get(meta, :operator, :unknown)
     "binary_op(#{category}, #{op}, #{format_plain(left)}, #{format_plain(right)})"
   end
 
-  defp format_plain({:unary_op, category, op, operand, _loc}) do
-    format_plain({:unary_op, category, op, operand})
-  end
-
-  defp format_plain({:unary_op, category, op, operand}) do
+  # 3-tuple: {:unary_op, [category: cat, operator: op], [operand]}
+  defp format_plain({:unary_op, meta, [operand]}) when is_list(meta) do
+    category = Keyword.get(meta, :category, :unknown)
+    op = Keyword.get(meta, :operator, :unknown)
     "unary_op(#{category}, #{op}, #{format_plain(operand)})"
   end
 
-  defp format_plain({:function_call, name, args, _loc}) do
-    format_plain({:function_call, name, args})
-  end
-
-  defp format_plain({:function_call, name, args}) do
+  # 3-tuple: {:function_call, [name: name], args}
+  defp format_plain({:function_call, meta, args}) when is_list(meta) do
+    name = Keyword.get(meta, :name, "unknown")
     args_str = Enum.map_join(args, ", ", &format_plain/1)
     "function_call(#{name}, [#{args_str}])"
+  end
+
+  # Fallback for other 3-tuples
+  defp format_plain({type, _meta, _children}) when is_atom(type) do
+    to_string(type)
   end
 
   defp format_plain(ast) do

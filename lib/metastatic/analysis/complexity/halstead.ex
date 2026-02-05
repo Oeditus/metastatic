@@ -33,7 +33,7 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
 
   ## Examples
 
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> metrics = Metastatic.Analysis.Complexity.Halstead.calculate(ast)
       iex> metrics.distinct_operators
       1
@@ -62,7 +62,7 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> metrics = Metastatic.Analysis.Complexity.Halstead.calculate(ast)
       iex> metrics.total_operands
       1
@@ -104,236 +104,233 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
 
   defp walk(ast, acc) do
     case ast do
-      # Binary operators
-      {:binary_op, category, op, left, right} ->
+      # Binary operators (3-tuple)
+      {:binary_op, meta, [left, right]} when is_list(meta) ->
+        category = Keyword.get(meta, :category)
+        op = Keyword.get(meta, :operator)
         operator = operator_name(category, op)
         acc = %{acc | operators: [operator | acc.operators]}
         acc = walk(left, acc)
         walk(right, acc)
 
-      # Unary operators
-      {:unary_op, category, op, operand} ->
+      # Unary operators (3-tuple)
+      {:unary_op, meta, [operand]} when is_list(meta) ->
+        category = Keyword.get(meta, :category)
+        op = Keyword.get(meta, :operator)
         operator = operator_name(category, op)
         acc = %{acc | operators: [operator | acc.operators]}
         walk(operand, acc)
 
-      # Conditional (if operator)
-      {:conditional, cond, then_br, else_br} ->
+      # Conditional (3-tuple)
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
         acc = %{acc | operators: ["if" | acc.operators]}
-        acc = walk(cond, acc)
+        acc = walk(cond_expr, acc)
         acc = walk(then_br, acc)
         walk(else_br, acc)
 
-      # Loop (while/for operator)
-      {:loop, :while, cond, body} ->
-        acc = %{acc | operators: ["while" | acc.operators]}
-        acc = walk(cond, acc)
-        walk(body, acc)
+      # Loop (3-tuple)
+      {:loop, meta, children} when is_list(meta) ->
+        loop_type = Keyword.get(meta, :loop_type, :for)
+        acc = %{acc | operators: [to_string(loop_type) | acc.operators]}
+        Enum.reduce(children, acc, fn child, a -> walk(child, a) end)
 
-      {:loop, :for, iter, coll, body} ->
-        acc = %{acc | operators: ["for" | acc.operators]}
-        acc = walk(iter, acc)
-        acc = walk(coll, acc)
-        walk(body, acc)
-
-      {:loop, type, iter, coll, body} ->
-        acc = %{acc | operators: [to_string(type) | acc.operators]}
-        acc = walk(iter, acc)
-        acc = walk(coll, acc)
-        walk(body, acc)
-
-      # Assignment (= operator)
-      {:assignment, target, value} ->
+      # Assignment (3-tuple)
+      {:assignment, _meta, [target, value]} ->
         acc = %{acc | operators: ["=" | acc.operators]}
         acc = walk(target, acc)
         walk(value, acc)
 
-      # Inline match (= operator)
-      {:inline_match, pattern, value} ->
+      # Inline match (3-tuple)
+      {:inline_match, _meta, [pattern, value]} ->
         acc = %{acc | operators: ["=" | acc.operators]}
         acc = walk(pattern, acc)
         walk(value, acc)
 
-      # Function call (function name is operand, () is operator)
-      {:function_call, name, args} ->
+      # Function call (3-tuple)
+      {:function_call, meta, args} when is_list(meta) and is_list(args) ->
+        name = Keyword.get(meta, :name, "anonymous")
         acc = %{acc | operators: ["()" | acc.operators]}
         acc = %{acc | operands: [name | acc.operands]}
         Enum.reduce(args, acc, fn arg, a -> walk(arg, a) end)
 
-      # Exception handling (try operator)
-      {:exception_handling, try_block, catches, else_block} ->
+      # Exception handling (3-tuple)
+      {:exception_handling, _meta, [try_block, catches, else_block]} ->
         acc = %{acc | operators: ["try" | acc.operators]}
         acc = walk(try_block, acc)
 
+        catches_list = if is_list(catches), do: catches, else: []
+
         acc =
-          Enum.reduce(catches, acc, fn {_type, var, catch_body}, a ->
-            a = walk(var, a)
-            walk(catch_body, a)
+          Enum.reduce(catches_list, acc, fn catch_clause, a ->
+            walk(catch_clause, a)
           end)
 
         walk(else_block, acc)
 
-      # Pattern match (case operator)
-      {:pattern_match, value, branches} ->
+      # Pattern match (3-tuple)
+      {:pattern_match, _meta, [value, branches | _]} ->
         acc = %{acc | operators: ["case" | acc.operators]}
         acc = walk(value, acc)
 
-        Enum.reduce(branches, acc, fn
-          {:match_arm, pattern, guard, body}, a ->
+        branches_list = if is_list(branches), do: branches, else: []
+
+        Enum.reduce(branches_list, acc, fn
+          {:match_arm, _, [pattern, guard, body]}, a ->
             a = walk(pattern, a)
             a = if guard, do: walk(guard, a), else: a
             walk(body, a)
 
-          {pattern, branch}, a ->
+          {:pair, _, [pattern, branch]}, a ->
             a = walk(pattern, a)
             walk(branch, a)
+
+          other, a ->
+            walk(other, a)
         end)
 
-      # Match arm
-      {:match_arm, pattern, guard, body} ->
+      # Match arm (3-tuple)
+      {:match_arm, _meta, [pattern, guard, body]} ->
         acc = walk(pattern, acc)
         acc = if guard, do: walk(guard, acc), else: acc
         walk(body, acc)
 
-      # Early return
-      {:early_return, value} ->
+      # Early return (3-tuple)
+      {:early_return, _meta, [value]} ->
         acc = %{acc | operators: ["return" | acc.operators]}
         walk(value, acc)
 
-      # Block
-      {:block, stmts} when is_list(stmts) ->
+      # Block (3-tuple)
+      {:block, _meta, stmts} when is_list(stmts) ->
         Enum.reduce(stmts, acc, fn stmt, a -> walk(stmt, a) end)
 
-      # Lambda
-      {:lambda, params, body} ->
+      # Lambda (3-tuple)
+      {:lambda, meta, [body]} when is_list(meta) ->
+        params = Keyword.get(meta, :params, [])
         acc = %{acc | operators: ["lambda" | acc.operators]}
-        acc = Enum.reduce(params, acc, fn param, a -> walk(param, a) end)
+
+        acc =
+          Enum.reduce(params, acc, fn param, a ->
+            %{a | operands: [param | a.operands]}
+          end)
+
         walk(body, acc)
 
-      # M2.2s: Structural/Organizational Types
+      # M2.2s: Structural/Organizational Types (3-tuple format)
 
-      # Container: walk all members, count container type as operator
-      # NEW format: {:container, type, name, parent, type_params, implements, body}
-      {:container, type, name, _parent, _type_params, _implements, body} ->
-        acc = %{acc | operators: [to_string(type) | acc.operators]}
+      # Container (3-tuple)
+      {:container, meta, [body]} when is_list(meta) ->
+        container_type = Keyword.get(meta, :container_type, :class)
+        name = Keyword.get(meta, :name, "anonymous")
+        acc = %{acc | operators: [to_string(container_type) | acc.operators]}
         acc = %{acc | operands: [name | acc.operands]}
 
         members = if is_list(body), do: body, else: [body]
         Enum.reduce(members, acc, fn member, a -> walk(member, a) end)
 
-      # Function definition: count as operator, walk parameters, guards, and body
-      # NEW format: {:function_def, name, params, ret_type, opts, body}
-      {:function_def, name, params, _ret_type, opts, body} ->
-        visibility = if is_map(opts), do: Map.get(opts, :visibility, :public), else: :public
+      # Function definition (3-tuple)
+      {:function_def, meta, [body]} when is_list(meta) ->
+        name = Keyword.get(meta, :name, "anonymous")
+        params = Keyword.get(meta, :params, [])
+        visibility = Keyword.get(meta, :visibility, :public)
         acc = %{acc | operators: ["def", to_string(visibility) | acc.operators]}
         acc = %{acc | operands: [name | acc.operands]}
 
-        # Walk parameters (handle old and new formats)
+        # Walk parameters
         acc =
           Enum.reduce(params, acc, fn
-            {:param, _name, pattern, default}, a ->
+            {:param, _, [param_name, pattern, default]}, a ->
+              a = %{a | operands: [param_name | a.operands]}
               a = if pattern, do: walk(pattern, a), else: a
               if default, do: walk(default, a), else: a
 
-            {:pattern, pattern}, a ->
-              walk(pattern, a)
+            param_name, a when is_binary(param_name) ->
+              %{a | operands: [param_name | a.operands]}
 
-            {:default, name, default}, a ->
-              a |> walk({:variable, name}) |> walk(default)
-
-            simple_param, a ->
-              walk(simple_param, a)
+            other, a ->
+              walk(other, a)
           end)
 
-        # Walk guards if present (now in opts map)
+        # Walk guards if present
         acc =
-          if is_map(opts) do
-            case Map.get(opts, :guards) do
-              nil -> acc
-              guard -> walk(guard, acc)
-            end
-          else
-            acc
+          case Keyword.get(meta, :guards) do
+            nil -> acc
+            guard -> walk(guard, acc)
           end
 
-        # Walk body
         walk(body, acc)
 
-      # Attribute access: count as operator
-      {:attribute_access, obj, attr} ->
+      # Attribute access (3-tuple)
+      {:attribute_access, _meta, [obj, attr]} ->
         acc = %{acc | operators: ["." | acc.operators]}
         acc = %{acc | operands: [attr | acc.operands]}
         walk(obj, acc)
 
-      # Augmented assignment: count operator and walk value
-      {:augmented_assignment, op, target, value} ->
+      # Augmented assignment (3-tuple)
+      {:augmented_assignment, meta, [target, value]} when is_list(meta) ->
+        op = Keyword.get(meta, :operator, :"+=")
         acc = %{acc | operators: [to_string(op) | acc.operators]}
         acc = walk(target, acc)
         walk(value, acc)
 
-      # Property: count getter/setter as operators, walk bodies
-      {:property, name, getter, setter, _metadata} ->
+      # Property (3-tuple)
+      {:property, meta, [getter, setter]} when is_list(meta) ->
+        name = Keyword.get(meta, :name, "property")
         acc = %{acc | operators: ["property" | acc.operators]}
         acc = %{acc | operands: [name | acc.operands]}
         acc = if getter, do: walk(getter, acc), else: acc
         if setter, do: walk(setter, acc), else: acc
 
-      # Collection operations
-      {:collection_op, op, func, coll} ->
+      # Collection operations (3-tuple)
+      {:collection_op, meta, children} when is_list(meta) and is_list(children) ->
+        op = Keyword.get(meta, :op, :map)
         acc = %{acc | operators: [to_string(op) | acc.operators]}
-        acc = walk(func, acc)
-        walk(coll, acc)
+        Enum.reduce(children, acc, fn child, a -> walk(child, a) end)
 
-      {:collection_op, op, func, coll, init} ->
-        acc = %{acc | operators: [to_string(op) | acc.operators]}
-        acc = walk(func, acc)
-        acc = walk(coll, acc)
-        walk(init, acc)
-
-      # Tuple/List
-      {:tuple, elems} when is_list(elems) ->
-        acc = %{acc | operators: ["tuple" | acc.operators]}
-        Enum.reduce(elems, acc, fn elem, a -> walk(elem, a) end)
-
-      {:list, elems} when is_list(elems) ->
+      # List (3-tuple)
+      {:list, _meta, elems} when is_list(elems) ->
         acc = %{acc | operators: ["list" | acc.operators]}
         Enum.reduce(elems, acc, fn elem, a -> walk(elem, a) end)
 
-      {:map, pairs} when is_list(pairs) ->
+      # Map (3-tuple)
+      {:map, _meta, pairs} when is_list(pairs) ->
         acc = %{acc | operators: ["map" | acc.operators]}
 
-        Enum.reduce(pairs, acc, fn {key, value}, a ->
-          a = walk(key, a)
-          walk(value, a)
+        Enum.reduce(pairs, acc, fn
+          {:pair, _, [key, value]}, a ->
+            a = walk(key, a)
+            walk(value, a)
+
+          other, a ->
+            walk(other, a)
         end)
 
-      # Async operation
-      {:async_operation, type, body} ->
-        acc = %{acc | operators: [to_string(type) | acc.operators]}
+      # Async operation (3-tuple)
+      {:async_operation, meta, [body]} when is_list(meta) ->
+        async_type = Keyword.get(meta, :async_type, :async)
+        acc = %{acc | operators: [to_string(async_type) | acc.operators]}
         walk(body, acc)
 
-      # Literal (operand)
-      {:literal, _type, value} ->
+      # Literal (3-tuple)
+      {:literal, _meta, value} ->
         %{acc | operands: [inspect(value) | acc.operands]}
 
-      # Variable (operand)
-      {:variable, name} ->
+      # Variable (3-tuple)
+      {:variable, _meta, name} ->
         %{acc | operands: [name | acc.operands]}
 
-      # Language-specific: traverse embedded body if present
-      {:language_specific, _, _, _, metadata} when is_map(metadata) ->
+      # Pair (3-tuple)
+      {:pair, _meta, [key, value]} ->
+        acc = walk(key, acc)
+        walk(value, acc)
+
+      # Language-specific (3-tuple)
+      {:language_specific, meta, native_ast} when is_list(meta) ->
         acc = %{acc | operators: ["native" | acc.operators]}
 
-        case Map.get(metadata, :body) do
-          nil -> acc
-          body -> walk(body, acc)
+        case native_ast do
+          %{body: body} when not is_nil(body) -> walk(body, acc)
+          _ -> acc
         end
-
-      {:language_specific, _, _, _} ->
-        %{acc | operators: ["native" | acc.operators]}
-
-      {:language_specific, _, _} ->
-        %{acc | operators: ["native" | acc.operators]}
 
       # Nil
       nil ->

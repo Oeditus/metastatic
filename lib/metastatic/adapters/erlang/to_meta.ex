@@ -27,63 +27,63 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   """
   @spec transform(term()) :: {:ok, term(), map()} | {:error, String.t()}
 
-  # Literals - M2.1 Core Layer
+  # Literals - M2.1 Core Layer (New 3-tuple format)
 
   def transform({:integer, _line, value}) do
-    {:ok, {:literal, :integer, value}, %{}}
+    {:ok, {:literal, [subtype: :integer], value}, %{}}
   end
 
   def transform({:float, _line, value}) do
-    {:ok, {:literal, :float, value}, %{}}
+    {:ok, {:literal, [subtype: :float], value}, %{}}
   end
 
   def transform({:string, _line, charlist}) when is_list(charlist) do
     # Erlang strings are charlists - convert to binary
     string = List.to_string(charlist)
-    {:ok, {:literal, :string, string}, %{}}
+    {:ok, {:literal, [subtype: :string], string}, %{}}
   end
 
   def transform({:char, _line, char}) do
     # Erlang char literal - treat as small integer
-    {:ok, {:literal, :integer, char}, %{erlang_form: :char}}
+    {:ok, {:literal, [subtype: :integer], char}, %{erlang_form: :char}}
   end
 
   # Atoms - special handling for booleans and null
   def transform({:atom, _line, true}) do
-    {:ok, {:literal, :boolean, true}, %{}}
+    {:ok, {:literal, [subtype: :boolean], true}, %{}}
   end
 
   def transform({:atom, _line, false}) do
-    {:ok, {:literal, :boolean, false}, %{}}
+    {:ok, {:literal, [subtype: :boolean], false}, %{}}
   end
 
   def transform({:atom, _line, nil}) do
-    {:ok, {:literal, :null, nil}, %{}}
+    {:ok, {:literal, [subtype: :null], nil}, %{}}
   end
 
   def transform({:atom, _line, :undefined}) do
-    {:ok, {:literal, :null, nil}, %{erlang_atom: :undefined}}
+    {:ok, {:literal, [subtype: :null], nil}, %{erlang_atom: :undefined}}
   end
 
   def transform({:atom, _line, atom}) do
-    {:ok, {:literal, :symbol, atom}, %{}}
+    {:ok, {:literal, [subtype: :symbol], atom}, %{}}
   end
 
-  # Variables - M2.1 Core Layer
+  # Variables - M2.1 Core Layer (New 3-tuple format)
 
   def transform({:var, line, name}) when is_atom(name) do
     metadata = %{line: line}
-    {:ok, {:variable, Atom.to_string(name)}, metadata}
+    {:ok, {:variable, [], Atom.to_string(name)}, metadata}
   end
 
-  # Binary Operators - M2.1 Core Layer
+  # Binary Operators - M2.1 Core Layer (New 3-tuple format)
 
   # Arithmetic operators
   def transform({:op, _line, op, left, right})
       when op in [:+, :-, :*, :/, :div, :rem, :band, :bor, :bxor, :bsl, :bsr] do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :arithmetic, op, left_meta, right_meta}, %{}}
+      {:ok, {:binary_op, [category: :arithmetic, operator: op], [left_meta, right_meta]}, %{}}
     end
   end
 
@@ -102,7 +102,9 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
 
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :comparison, normalized_op, left_meta, right_meta}, %{}}
+      {:ok,
+       {:binary_op, [category: :comparison, operator: normalized_op], [left_meta, right_meta]},
+       %{}}
     end
   end
 
@@ -117,42 +119,43 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
 
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :boolean, normalized_op, left_meta, right_meta}, %{erlang_op: op}}
+      {:ok, {:binary_op, [category: :boolean, operator: normalized_op], [left_meta, right_meta]},
+       %{erlang_op: op}}
     end
   end
 
-  # Unary Operators - M2.1 Core Layer
+  # Unary Operators - M2.1 Core Layer (New 3-tuple format)
 
   def transform({:op, _line, :not, operand}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :boolean, :not, operand_meta}, %{}}
+      {:ok, {:unary_op, [category: :boolean, operator: :not], [operand_meta]}, %{}}
     end
   end
 
   def transform({:op, _line, :-, operand}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :arithmetic, :-, operand_meta}, %{}}
+      {:ok, {:unary_op, [category: :arithmetic, operator: :-], [operand_meta]}, %{}}
     end
   end
 
   def transform({:op, _line, :+, operand}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :arithmetic, :+, operand_meta}, %{}}
+      {:ok, {:unary_op, [category: :arithmetic, operator: :+], [operand_meta]}, %{}}
     end
   end
 
   def transform({:op, _line, :bnot, operand}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok, {:unary_op, :arithmetic, :bnot, operand_meta}, %{}}
+      {:ok, {:unary_op, [category: :arithmetic, operator: :bnot], [operand_meta]}, %{}}
     end
   end
 
-  # Function Calls - M2.1 Core Layer
+  # Function Calls - M2.1 Core Layer (New 3-tuple format)
 
   # Local function call
   def transform({:call, _line, {:atom, _, func_name}, args}) when is_list(args) do
     with {:ok, args_meta} <- transform_list(args) do
-      {:ok, {:function_call, Atom.to_string(func_name), args_meta}, %{}}
+      {:ok, {:function_call, [name: Atom.to_string(func_name)], args_meta}, %{}}
     end
   end
 
@@ -161,7 +164,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
       when is_list(args) do
     with {:ok, args_meta} <- transform_list(args) do
       qualified_name = "#{module}.#{func}"
-      {:ok, {:function_call, qualified_name, args_meta}, %{call_type: :remote}}
+      {:ok, {:function_call, [name: qualified_name], args_meta}, %{call_type: :remote}}
     end
   end
 
@@ -176,22 +179,22 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     end
   end
 
-  # Case expression - M2.2 Extended Layer
+  # Case expression - M2.2 Extended Layer (New 3-tuple format)
   def transform({:case, _line, expr, clauses}) when is_list(clauses) do
     with {:ok, scrutinee_meta, _} <- transform(expr),
          {:ok, arms} <- transform_case_clauses(clauses) do
-      {:ok, {:pattern_match, scrutinee_meta, arms}, %{}}
+      {:ok, {:pattern_match, [], [scrutinee_meta, arms]}, %{}}
     end
   end
 
-  # Blocks (multiple expressions)
+  # Blocks (multiple expressions) (New 3-tuple format)
   def transform({:block, expressions}) when is_list(expressions) do
     with {:ok, exprs_meta} <- transform_list(expressions) do
-      {:ok, {:block, exprs_meta}, %{}}
+      {:ok, {:block, [], exprs_meta}, %{}}
     end
   end
 
-  # Match expression (pattern = expr) - M2.1 Core Layer
+  # Match expression (pattern = expr) - M2.1 Core Layer (New 3-tuple format)
   # In Erlang, = is pattern matching with single-assignment semantics
   def transform({:match, line, pattern, expr}) do
     with {:ok, pattern_meta, pattern_metadata} <- transform_pattern(pattern),
@@ -203,27 +206,27 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
         expr_metadata: expr_metadata
       }
 
-      {:ok, {:inline_match, pattern_meta, expr_meta}, metadata}
+      {:ok, {:inline_match, [], [pattern_meta, expr_meta]}, metadata}
     end
   end
 
-  # Tuples - M2.1 Core Layer
+  # Tuples - M2.1 Core Layer (New 3-tuple format)
   def transform({:tuple, line, elements}) when is_list(elements) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:tuple, elements_meta}, %{line: line}}
+      {:ok, {:tuple, [], elements_meta}, %{line: line}}
     end
   end
 
-  # Lists (cons and nil)
+  # Lists (cons and nil) (New 3-tuple format)
   def transform({nil, _line}) do
-    {:ok, {:literal, :collection, []}, %{collection_type: :list}}
+    {:ok, {:list, [], []}, %{collection_type: :list}}
   end
 
   def transform({:cons, _line, head, tail}) do
     with {:ok, head_meta, _} <- transform(head),
          {:ok, tail_meta, _} <- transform(tail) do
       # Represent cons as a language-specific construct
-      {:ok, {:language_specific, :erlang, {:cons, head, tail}, :list_cons},
+      {:ok, {:language_specific, [language: :erlang, hint: :list_cons], {:cons, head, tail}},
        %{head: head_meta, tail: tail_meta}}
     end
   end
@@ -250,7 +253,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   end
 
   defp transform_if_clauses([]) do
-    {:ok, {:literal, :null, nil}}
+    {:ok, {:literal, [subtype: :null], nil}}
   end
 
   defp transform_if_clauses([{:clause, _line, [], guards, body} | rest]) do
@@ -266,7 +269,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     with {:ok, cond_meta, _} <- transform(condition),
          {:ok, body_meta} <- transform_body(body),
          {:ok, else_meta} <- transform_if_clauses(rest) do
-      {:ok, {:conditional, cond_meta, body_meta, else_meta}}
+      {:ok, {:conditional, [], [cond_meta, body_meta, else_meta]}}
     end
   end
 
@@ -277,7 +280,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
            {:ok, body_meta} <- transform_body(body) do
         # Ignore guards for now
         _ = guards
-        arm = {:match_arm, pattern_meta, nil, body_meta}
+        arm = {:match_arm, [], [pattern_meta, nil, body_meta]}
         {:cont, {:ok, [arm | acc]}}
       else
         error -> {:halt, error}
@@ -297,7 +300,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   defp transform_pattern({:tuple, line, elements}) when is_list(elements) do
     # Tuple pattern: {X, Y, Z}
     with {:ok, elements_meta} <- transform_pattern_list(elements) do
-      {:ok, {:tuple, elements_meta}, %{line: line}}
+      {:ok, {:tuple, [], elements_meta}, %{line: line}}
     end
   end
 
@@ -305,13 +308,13 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     # List cons pattern: [H | T]
     with {:ok, head_meta, _} <- transform_pattern(head),
          {:ok, tail_meta, _} <- transform_pattern(tail) do
-      {:ok, {:cons_pattern, head_meta, tail_meta}, %{line: line}}
+      {:ok, {:cons_pattern, [], [head_meta, tail_meta]}, %{line: line}}
     end
   end
 
   defp transform_pattern({nil, line}) do
     # Empty list pattern: []
-    {:ok, {:literal, :collection, []}, %{collection_type: :list, line: line}}
+    {:ok, {:list, [], []}, %{collection_type: :list, line: line}}
   end
 
   defp transform_pattern(pattern) do
@@ -341,7 +344,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
 
   defp transform_body(multiple) when length(multiple) > 1 do
     with {:ok, exprs_meta} <- transform_list(multiple) do
-      {:ok, {:block, exprs_meta}}
+      {:ok, {:block, [], exprs_meta}}
     end
   end
 end

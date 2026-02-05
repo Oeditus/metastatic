@@ -5,6 +5,11 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   Implements the abstraction function α_Haskell that lifts Haskell-specific
   AST structures to the meta-level representation.
 
+  ## 3-Tuple Format
+
+  All MetaAST nodes use the uniform 3-tuple structure:
+  `{type_atom, keyword_meta, children_or_value}`
+
   ## Transformation Strategy
 
   ### M2.1 (Core Layer)
@@ -44,13 +49,13 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   # M2.1 Core Layer - Variables
 
   def transform(%{"type" => "var", "name" => name}) do
-    {:ok, {:variable, name}, %{}}
+    {:ok, {:variable, [], name}, %{}}
   end
 
   # M2.1 Core Layer - Constructors (data constructors)
 
   def transform(%{"type" => "con", "name" => name}) do
-    {:ok, {:literal, :constructor, name}, %{}}
+    {:ok, {:literal, [subtype: :constructor], name}, %{}}
   end
 
   # M2.1 Core Layer - Function Application
@@ -60,13 +65,14 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
          {:ok, arg_meta, _} <- transform(arg) do
       # Haskell function application: f x
       case func_meta do
-        {:function_call, name, args} ->
+        {:function_call, meta, args} ->
           # Accumulate curried arguments
-          {:ok, {:function_call, name, args ++ [arg_meta]}, %{}}
+          name = Keyword.get(meta, :name)
+          {:ok, {:function_call, [name: name], args ++ [arg_meta]}, %{}}
 
         _ ->
           # First application
-          {:ok, {:function_call, format_function(func_meta), [arg_meta]}, %{}}
+          {:ok, {:function_call, [name: format_function(func_meta)], [arg_meta]}, %{}}
       end
     end
   end
@@ -80,17 +86,20 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
       cond do
         is_arithmetic_op?(op_atom) ->
-          {:ok, {:binary_op, :arithmetic, op_atom, left_meta, right_meta}, %{}}
+          {:ok, {:binary_op, [category: :arithmetic, operator: op_atom], [left_meta, right_meta]},
+           %{}}
 
         is_comparison_op?(op_atom) ->
-          {:ok, {:binary_op, :comparison, op_atom, left_meta, right_meta}, %{}}
+          {:ok, {:binary_op, [category: :comparison, operator: op_atom], [left_meta, right_meta]},
+           %{}}
 
         is_boolean_op?(op_atom) ->
-          {:ok, {:binary_op, :boolean, op_atom, left_meta, right_meta}, %{}}
+          {:ok, {:binary_op, [category: :boolean, operator: op_atom], [left_meta, right_meta]},
+           %{}}
 
         true ->
           # Custom operator - treat as function call
-          {:ok, {:function_call, op, [left_meta, right_meta]}, %{custom_op: true}}
+          {:ok, {:function_call, [name: op], [left_meta, right_meta]}, %{custom_op: true}}
       end
     end
   end
@@ -100,7 +109,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   def transform(%{"type" => "lambda", "patterns" => patterns, "body" => body}) do
     with {:ok, params} <- extract_lambda_params(patterns),
          {:ok, body_meta, _} <- transform(body) do
-      {:ok, {:lambda, params, body_meta}, %{}}
+      {:ok, {:lambda, [params: params, captures: []], [body_meta]}, %{}}
     end
   end
 
@@ -111,7 +120,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
          {:ok, body_meta, _} <- transform(body) do
       # Represent as block with assignments followed by body
       statements = bindings_meta ++ [body_meta]
-      {:ok, {:block, statements}, %{construct: :let}}
+      {:ok, {:block, [construct: :let], statements}, %{construct: :let}}
     end
   end
 
@@ -121,7 +130,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     with {:ok, cond_meta, _} <- transform(cond),
          {:ok, then_meta, _} <- transform(then_exp),
          {:ok, else_meta, _} <- transform(else_exp) do
-      {:ok, {:conditional, cond_meta, then_meta, else_meta}, %{}}
+      {:ok, {:conditional, [], [cond_meta, then_meta, else_meta]}, %{}}
     end
   end
 
@@ -129,7 +138,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   def transform(%{"type" => "list", "elements" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
+      {:ok, {:list, [collection_type: :list], elements_meta}, %{collection_type: :list}}
     end
   end
 
@@ -137,7 +146,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   def transform(%{"type" => "tuple", "elements" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:literal, :collection, elements_meta}, %{collection_type: :tuple}}
+      {:ok, {:list, [collection_type: :tuple], elements_meta}, %{collection_type: :tuple}}
     end
   end
 
@@ -147,7 +156,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     with {:ok, scrutinee_meta, _} <- transform(scrutinee),
          {:ok, branches_meta} <- transform_case_alts(alts) do
       # No explicit else in Haskell case - last pattern is typically catch-all
-      {:ok, {:pattern_match, scrutinee_meta, branches_meta, nil}, %{}}
+      {:ok, {:pattern_match, [], [scrutinee_meta, branches_meta, nil]}, %{}}
     end
   end
 
@@ -160,10 +169,10 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
       }) do
     with {:ok, expr_meta, _} <- transform(expr),
          {:ok, quals_meta} <- transform_qualifiers(quals) do
-      # Represent as collection_op with custom metadata
+      # Represent as language_specific with custom metadata
       {:ok,
-       {:language_specific, :haskell, %{"expr" => expr_meta, "quals" => quals_meta}, :list_comp},
-       %{}}
+       {:language_specific, [language: :haskell, hint: :list_comp],
+        %{"expr" => expr_meta, "quals" => quals_meta}}, %{}}
     end
   end
 
@@ -171,7 +180,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   def transform(%{"type" => "do", "statements" => stmts}) do
     with {:ok, stmts_meta} <- transform_do_statements(stmts) do
-      {:ok, {:block, stmts_meta}, %{construct: :do_notation}}
+      {:ok, {:block, [construct: :do_notation], stmts_meta}, %{construct: :do_notation}}
     end
   end
 
@@ -179,7 +188,9 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   def transform(%{"type" => "module", "declarations" => decls}) do
     with {:ok, decls_meta} <- transform_declarations(decls) do
-      {:ok, {:language_specific, :haskell, %{"declarations" => decls_meta}, :module}, %{}}
+      {:ok,
+       {:language_specific, [language: :haskell, hint: :module], %{"declarations" => decls_meta}},
+       %{}}
     end
   end
 
@@ -187,8 +198,8 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   def transform(%{"type" => "type_sig", "names" => names, "signature" => sig}) do
     {:ok,
-     {:language_specific, :haskell, %{"names" => names, "signature" => sig}, :type_signature},
-     %{}}
+     {:language_specific, [language: :haskell, hint: :type_signature],
+      %{"names" => names, "signature" => sig}}, %{}}
   end
 
   # M2.3 Native Layer - Data Type Declaration
@@ -200,30 +211,32 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
         "constructors" => cons
       }) do
     {:ok,
-     {:language_specific, :haskell, %{"kind" => kind, "name" => name, "constructors" => cons},
-      :data_decl}, %{}}
+     {:language_specific, [language: :haskell, hint: :data_decl],
+      %{"kind" => kind, "name" => name, "constructors" => cons}}, %{}}
   end
 
   # M2.3 Native Layer - Type Alias
 
   def transform(%{"type" => "type_alias", "name" => name, "definition" => def_type}) do
     {:ok,
-     {:language_specific, :haskell, %{"name" => name, "definition" => def_type}, :type_alias},
-     %{}}
+     {:language_specific, [language: :haskell, hint: :type_alias],
+      %{"name" => name, "definition" => def_type}}, %{}}
   end
 
   # M2.3 Native Layer - Type Class Declaration
 
   def transform(%{"type" => "class_decl", "name" => name, "methods" => methods}) do
-    {:ok, {:language_specific, :haskell, %{"name" => name, "methods" => methods}, :class_decl},
-     %{}}
+    {:ok,
+     {:language_specific, [language: :haskell, hint: :class_decl],
+      %{"name" => name, "methods" => methods}}, %{}}
   end
 
   # M2.3 Native Layer - Instance Declaration
 
   def transform(%{"type" => "instance_decl", "rule" => rule, "methods" => methods}) do
-    {:ok, {:language_specific, :haskell, %{"rule" => rule, "methods" => methods}, :instance_decl},
-     %{}}
+    {:ok,
+     {:language_specific, [language: :haskell, hint: :instance_decl],
+      %{"rule" => rule, "methods" => methods}}, %{}}
   end
 
   # M2.3 Native Layer - Function Binding
@@ -232,10 +245,12 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     # Try to extract function name and transform to a more useful representation
     case extract_function_from_matches(matches) do
       {:ok, name, body} ->
-        {:ok, {:assignment, {:variable, name}, body}, %{construct: :function_binding}}
+        {:ok, {:assignment, [], [{:variable, [], name}, body]}, %{construct: :function_binding}}
 
       :error ->
-        {:ok, {:language_specific, :haskell, %{"matches" => matches}, :function_binding}, %{}}
+        {:ok,
+         {:language_specific, [language: :haskell, hint: :function_binding],
+          %{"matches" => matches}}, %{}}
     end
   end
 
@@ -248,19 +263,19 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   # Helper Functions
 
   defp transform_literal(%{"literalType" => "int", "value" => value}) do
-    {:ok, {:literal, :integer, value}, %{}}
+    {:ok, {:literal, [subtype: :integer], value}, %{}}
   end
 
   defp transform_literal(%{"literalType" => "float", "value" => value}) do
-    {:ok, {:literal, :float, value}, %{}}
+    {:ok, {:literal, [subtype: :float], value}, %{}}
   end
 
   defp transform_literal(%{"literalType" => "string", "value" => value}) do
-    {:ok, {:literal, :string, value}, %{}}
+    {:ok, {:literal, [subtype: :string], value}, %{}}
   end
 
   defp transform_literal(%{"literalType" => "char", "value" => value}) do
-    {:ok, {:literal, :char, value}, %{}}
+    {:ok, {:literal, [subtype: :char], value}, %{}}
   end
 
   defp transform_literal(_), do: {:error, "Unknown literal type"}
@@ -306,7 +321,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp transform_binding(%{"type" => "pat_bind", "pattern" => pat, "rhs" => rhs}) do
     with {:ok, var_name} <- extract_pattern_var(pat),
          {:ok, value_meta, _} <- transform(rhs) do
-      {:ok, {:assignment, {:variable, var_name}, value_meta}}
+      {:ok, {:assignment, [], [{:variable, [], var_name}, value_meta]}}
     end
   end
 
@@ -332,12 +347,12 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp transform_case_alt(%{"pattern" => pat, "rhs" => rhs}) do
     with {:ok, pat_meta} <- transform_pattern(pat),
          {:ok, rhs_meta, _} <- transform(rhs) do
-      {:ok, {pat_meta, rhs_meta}}
+      {:ok, {:pair, [], [pat_meta, rhs_meta]}}
     end
   end
 
   defp transform_pattern(%{"type" => "var_pat", "name" => name}) do
-    {:ok, {:variable, name}}
+    {:ok, {:variable, [], name}}
   end
 
   defp transform_pattern(%{"type" => "lit_pat", "literal" => lit}) do
@@ -370,13 +385,13 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp transform_qualifier(%{"type" => "generator", "pattern" => pat, "expression" => expr}) do
     with {:ok, pat_meta} <- transform_pattern(pat),
          {:ok, expr_meta, _} <- transform(expr) do
-      {:ok, {:generator, pat_meta, expr_meta}}
+      {:ok, {:generator, [], [pat_meta, expr_meta]}}
     end
   end
 
   defp transform_qualifier(%{"type" => "qualifier", "expression" => expr}) do
     with {:ok, expr_meta, _} <- transform(expr) do
-      {:ok, {:qualifier, expr_meta}}
+      {:ok, {:qualifier, [], [expr_meta]}}
     end
   end
 
@@ -399,7 +414,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp transform_statement(%{"type" => "generator", "pattern" => pat, "expression" => expr}) do
     with {:ok, pat_meta} <- transform_pattern(pat),
          {:ok, expr_meta, _} <- transform(expr) do
-      {:ok, {:generator, pat_meta, expr_meta}}
+      {:ok, {:generator, [], [pat_meta, expr_meta]}}
     end
   end
 
@@ -415,7 +430,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   defp transform_statement(other), do: {:error, "Unsupported statement: #{inspect(other)}"}
 
-  defp format_function({:variable, name}), do: name
+  defp format_function({:variable, _meta, name}), do: name
   defp format_function(_), do: "func"
 
   defp normalize_op(op) when is_binary(op), do: String.to_atom(op)
@@ -457,7 +472,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
           # If it has parameters, represent as lambda
           case params do
             [] -> {:ok, name, body_meta}
-            [_ | _] -> {:ok, name, {:lambda, params, body_meta}}
+            [_ | _] -> {:ok, name, {:lambda, [params: params, captures: []], [body_meta]}}
           end
         else
           _ -> :error

@@ -19,131 +19,106 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   """
   @spec transform(term(), map()) :: {:ok, term()} | {:error, String.t()}
 
-  # M2.1 Core Layer - Literals
+  # M2.1 Core Layer - Literals (New 3-tuple format)
 
-  def transform({:literal, :integer, value}, _metadata) do
-    {:ok, %{"type" => "int", "children" => [value]}}
+  def transform({:literal, meta, value}, _metadata) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype)
+
+    case subtype do
+      :integer -> {:ok, %{"type" => "int", "children" => [value]}}
+      :float -> {:ok, %{"type" => "float", "children" => [value]}}
+      :string -> {:ok, %{"type" => "str", "children" => [value]}}
+      :symbol -> {:ok, %{"type" => "sym", "children" => [value]}}
+      :boolean when value == true -> {:ok, %{"type" => "true", "children" => []}}
+      :boolean when value == false -> {:ok, %{"type" => "false", "children" => []}}
+      :null -> {:ok, %{"type" => "nil", "children" => []}}
+      :constant -> {:ok, %{"type" => "const", "children" => [nil, value]}}
+      _ -> {:error, "Unknown literal subtype: #{subtype}"}
+    end
   end
 
-  def transform({:literal, :float, value}, _metadata) do
-    {:ok, %{"type" => "float", "children" => [value]}}
-  end
-
-  def transform({:literal, :string, value}, _metadata) do
-    {:ok, %{"type" => "str", "children" => [value]}}
-  end
-
-  def transform({:literal, :symbol, value}, _metadata) do
-    {:ok, %{"type" => "sym", "children" => [value]}}
-  end
-
-  def transform({:literal, :boolean, true}, _metadata) do
-    {:ok, %{"type" => "true", "children" => []}}
-  end
-
-  def transform({:literal, :boolean, false}, _metadata) do
-    {:ok, %{"type" => "false", "children" => []}}
-  end
-
-  def transform({:literal, :null, nil}, _metadata) do
-    {:ok, %{"type" => "nil", "children" => []}}
-  end
-
-  def transform({:literal, :collection, elements}, %{collection_type: :array}) do
+  # Lists (New 3-tuple format)
+  def transform({:list, meta, elements}, _metadata) when is_list(meta) do
     with {:ok, elements_ast} <- transform_list(elements) do
       {:ok, %{"type" => "array", "children" => elements_ast}}
     end
   end
 
-  def transform({:literal, :constant, name}, _metadata) do
-    {:ok, %{"type" => "const", "children" => [nil, name]}}
-  end
-
-  # M2.1 Core Layer - Variables
-
-  def transform({:variable, name}, %{scope: :local}) do
-    {:ok, %{"type" => "lvar", "children" => [name]}}
-  end
-
-  def transform({:variable, name}, %{scope: :instance}) do
-    {:ok, %{"type" => "ivar", "children" => [name]}}
-  end
-
-  def transform({:variable, name}, %{scope: :class}) do
-    {:ok, %{"type" => "cvar", "children" => [name]}}
-  end
-
-  def transform({:variable, name}, %{scope: :global}) do
-    {:ok, %{"type" => "gvar", "children" => [name]}}
-  end
-
-  def transform({:variable, name}, _metadata) do
-    # Default to local variable
-    {:ok, %{"type" => "lvar", "children" => [name]}}
-  end
-
-  # M2.1 Core Layer - Binary Operations
-
-  def transform({:binary_op, :arithmetic, op, left, right}, _metadata) do
-    with {:ok, left_ast} <- transform(left, %{}),
-         {:ok, right_ast} <- transform(right, %{}) do
-      {:ok, %{"type" => "send", "children" => [left_ast, op, right_ast]}}
+  # Maps (New 3-tuple format)
+  def transform({:map, meta, pairs}, _metadata) when is_list(meta) do
+    with {:ok, pairs_ast} <- transform_hash_pairs(pairs) do
+      {:ok, %{"type" => "hash", "children" => pairs_ast}}
     end
   end
 
-  def transform({:binary_op, :comparison, op, left, right}, _metadata) do
-    with {:ok, left_ast} <- transform(left, %{}),
-         {:ok, right_ast} <- transform(right, %{}) do
-      {:ok, %{"type" => "send", "children" => [left_ast, op, right_ast]}}
+  # Pairs (New 3-tuple format)
+  def transform({:pair, meta, [key, value]}, _metadata) when is_list(meta) do
+    with {:ok, key_ast} <- transform(key, %{}),
+         {:ok, value_ast} <- transform(value, %{}) do
+      {:ok, %{"type" => "pair", "children" => [key_ast, value_ast]}}
     end
   end
 
-  def transform({:binary_op, :boolean, :and, left, right}, _metadata) do
-    with {:ok, left_ast} <- transform(left, %{}),
-         {:ok, right_ast} <- transform(right, %{}) do
-      {:ok, %{"type" => "and", "children" => [left_ast, right_ast]}}
+  # M2.1 Core Layer - Variables (New 3-tuple format)
+
+  def transform({:variable, meta, name}, _metadata) when is_list(meta) do
+    scope = Keyword.get(meta, :scope, :local)
+
+    case scope do
+      :local -> {:ok, %{"type" => "lvar", "children" => [name]}}
+      :instance -> {:ok, %{"type" => "ivar", "children" => [name]}}
+      :class -> {:ok, %{"type" => "cvar", "children" => [name]}}
+      :global -> {:ok, %{"type" => "gvar", "children" => [name]}}
+      :special when name == "self" -> {:ok, %{"type" => "self", "children" => []}}
+      _ -> {:ok, %{"type" => "lvar", "children" => [name]}}
     end
   end
 
-  def transform({:binary_op, :boolean, :or, left, right}, _metadata) do
+  # M2.1 Core Layer - Binary Operations (New 3-tuple format)
+
+  def transform({:binary_op, meta, [left, right]}, _metadata) when is_list(meta) do
+    category = Keyword.get(meta, :category)
+    op = Keyword.get(meta, :operator)
+
     with {:ok, left_ast} <- transform(left, %{}),
          {:ok, right_ast} <- transform(right, %{}) do
-      {:ok, %{"type" => "or", "children" => [left_ast, right_ast]}}
+      case category do
+        :arithmetic -> {:ok, %{"type" => "send", "children" => [left_ast, op, right_ast]}}
+        :comparison -> {:ok, %{"type" => "send", "children" => [left_ast, op, right_ast]}}
+        :boolean when op == :and -> {:ok, %{"type" => "and", "children" => [left_ast, right_ast]}}
+        :boolean when op == :or -> {:ok, %{"type" => "or", "children" => [left_ast, right_ast]}}
+      end
     end
   end
 
-  # M2.1 Core Layer - Unary Operations
+  # M2.1 Core Layer - Unary Operations (New 3-tuple format)
 
-  def transform({:unary_op, :arithmetic, op, operand}, _metadata) do
+  def transform({:unary_op, meta, [operand]}, _metadata) when is_list(meta) do
+    category = Keyword.get(meta, :category)
+    op = Keyword.get(meta, :operator)
+
     with {:ok, operand_ast} <- transform(operand, %{}) do
-      {:ok, %{"type" => "send", "children" => [operand_ast, op, nil]}}
+      case {category, op} do
+        {:arithmetic, _} -> {:ok, %{"type" => "send", "children" => [operand_ast, op, nil]}}
+        {:boolean, :not} -> {:ok, %{"type" => "send", "children" => [operand_ast, :!, nil]}}
+      end
     end
   end
 
-  def transform({:unary_op, :boolean, :not, operand}, _metadata) do
-    with {:ok, operand_ast} <- transform(operand, %{}) do
-      {:ok, %{"type" => "send", "children" => [operand_ast, :!, nil]}}
-    end
-  end
+  # M2.1 Core Layer - Function Calls (New 3-tuple format)
 
-  # M2.1 Core Layer - Function Calls
+  def transform({:function_call, meta, args}, _metadata) when is_list(meta) do
+    name = Keyword.get(meta, :name)
 
-  def transform({:function_call, name, args}, %{call_type: :local}) do
     with {:ok, args_ast} <- transform_list(args) do
       {:ok, %{"type" => "send", "children" => [nil, String.to_atom(name) | args_ast]}}
     end
   end
 
-  def transform({:function_call, name, args}, _metadata) do
-    # Default to local call
-    with {:ok, args_ast} <- transform_list(args) do
-      {:ok, %{"type" => "send", "children" => [nil, String.to_atom(name) | args_ast]}}
-    end
-  end
+  # M2.1 Core Layer - Conditionals (New 3-tuple format)
 
-  # M2.1 Core Layer - Conditionals
-
-  def transform({:conditional, condition, then_branch, else_branch}, _metadata) do
+  def transform({:conditional, meta, [condition, then_branch, else_branch]}, _metadata)
+      when is_list(meta) do
     with {:ok, cond_ast} <- transform(condition, %{}),
          {:ok, then_ast} <- transform_or_nil(then_branch),
          {:ok, else_ast} <- transform_or_nil(else_branch) do
@@ -151,148 +126,132 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
     end
   end
 
-  # M2.1 Core Layer - Assignment
+  # M2.1 Core Layer - Assignment (New 3-tuple format)
 
-  def transform({:assignment, {:variable, name}, value}, %{scope: :local}) do
+  def transform({:assignment, meta, [target, value]}, _metadata) when is_list(meta) do
+    scope = Keyword.get(meta, :scope, :local)
+
+    # Extract variable name from target
+    name =
+      case target do
+        {:variable, _, n} -> n
+        n when is_binary(n) -> n
+      end
+
     with {:ok, value_ast} <- transform(value, %{}) do
-      {:ok, %{"type" => "lvasgn", "children" => [name, value_ast]}}
+      case scope do
+        :local -> {:ok, %{"type" => "lvasgn", "children" => [name, value_ast]}}
+        :instance -> {:ok, %{"type" => "ivasgn", "children" => [name, value_ast]}}
+        :class -> {:ok, %{"type" => "cvasgn", "children" => [name, value_ast]}}
+        :global -> {:ok, %{"type" => "gvasgn", "children" => [name, value_ast]}}
+        _ -> {:ok, %{"type" => "lvasgn", "children" => [name, value_ast]}}
+      end
     end
   end
 
-  def transform({:assignment, {:variable, name}, value}, %{scope: :instance}) do
-    with {:ok, value_ast} <- transform(value, %{}) do
-      {:ok, %{"type" => "ivasgn", "children" => [name, value_ast]}}
-    end
-  end
+  # M2.1 Core Layer - Blocks (New 3-tuple format)
 
-  def transform({:assignment, {:variable, name}, value}, _metadata) do
-    # Default to local
-    with {:ok, value_ast} <- transform(value, %{}) do
-      {:ok, %{"type" => "lvasgn", "children" => [name, value_ast]}}
-    end
-  end
-
-  # M2.1 Core Layer - Blocks
-
-  def transform({:block, statements}, _metadata) do
+  def transform({:block, meta, statements}, _metadata) when is_list(meta) do
     with {:ok, statements_ast} <- transform_list(statements) do
       {:ok, %{"type" => "begin", "children" => statements_ast}}
     end
   end
 
-  # M2.2 Extended Layer - Loops (basic support)
+  # M2.2 Extended Layer - Loops (New 3-tuple format)
 
-  def transform({:loop, :while, condition, body}, _metadata) do
-    with {:ok, cond_ast} <- transform(condition, %{}),
-         {:ok, body_ast} <- transform_or_nil(body) do
-      {:ok, %{"type" => "while", "children" => [cond_ast, body_ast]}}
+  def transform({:loop, meta, children}, _metadata) when is_list(meta) do
+    loop_type = Keyword.get(meta, :loop_type)
+
+    case {loop_type, children} do
+      {:while, [condition, body]} ->
+        with {:ok, cond_ast} <- transform(condition, %{}),
+             {:ok, body_ast} <- transform_or_nil(body) do
+          {:ok, %{"type" => "while", "children" => [cond_ast, body_ast]}}
+        end
+
+      {:for_each, [var, collection, body]} ->
+        with {:ok, collection_ast} <- transform(collection, %{}),
+             {:ok, body_ast} <- transform_or_nil(body) do
+          var_ast = %{"type" => "lvasgn", "children" => [var]}
+          {:ok, %{"type" => "for", "children" => [var_ast, collection_ast, body_ast]}}
+        end
     end
   end
 
-  # M2.2s Structural Layer - Container support
+  # M2.2s Structural Layer - Container support (New 3-tuple format)
 
-  def transform({:container, :class, name, parent, _type_params, _implements, body}, _metadata) do
-    with {:ok, name_ast} <- build_const_ast(name),
-         {:ok, parent_ast} <- build_const_ast_or_nil(parent),
-         {:ok, body_ast} <- transform_or_nil(body) do
-      {:ok, %{"type" => "class", "children" => [name_ast, parent_ast, body_ast]}}
-    end
-  end
+  def transform({:container, meta, [body]}, _metadata) when is_list(meta) do
+    container_type = Keyword.get(meta, :container_type)
+    name = Keyword.get(meta, :name)
+    parent = Keyword.get(meta, :parent)
 
-  def transform(
-        {:container, :class, name, parent, _type_params, _implements, body, _loc},
-        metadata
-      ) do
-    # Handle version with location metadata
-    transform({:container, :class, name, parent, [], [], body}, metadata)
-  end
-
-  def transform(
-        {:container, :module, name, _parent, _type_params, _implements, body},
-        _metadata
-      ) do
     with {:ok, name_ast} <- build_const_ast(name),
          {:ok, body_ast} <- transform_or_nil(body) do
-      {:ok, %{"type" => "module", "children" => [name_ast, body_ast]}}
+      case container_type do
+        :class ->
+          {:ok, parent_ast} = build_const_ast_or_nil(parent)
+          {:ok, %{"type" => "class", "children" => [name_ast, parent_ast, body_ast]}}
+
+        :module ->
+          {:ok, %{"type" => "module", "children" => [name_ast, body_ast]}}
+      end
     end
   end
 
-  def transform(
-        {:container, :module, name, _parent, _type_params, _implements, body, _loc},
-        metadata
-      ) do
-    # Handle version with location metadata
-    transform({:container, :module, name, nil, [], [], body}, metadata)
+  # Handle container with location (4-tuple)
+  def transform({:container, meta, [body], _loc}, metadata) when is_list(meta) do
+    transform({:container, meta, [body]}, metadata)
   end
 
-  # M2.2s Structural Layer - Function definition support
+  # M2.2s Structural Layer - Function definition support (New 3-tuple format)
 
-  # Handle class methods (self.method_name) - MUST come before generic function_def
-  def transform(
-        {:function_def, "self." <> method_name, params, _ret_type, _opts, body},
-        _metadata
-      ) do
-    args_ast = build_args_ast(params)
-    self_ast = %{"type" => "self", "children" => []}
+  def transform({:function_def, meta, [body]}, _metadata) when is_list(meta) do
+    name = Keyword.get(meta, :name)
+    params = Keyword.get(meta, :params, [])
 
-    with {:ok, body_ast} <- transform_or_nil(body) do
-      {:ok, %{"type" => "defs", "children" => [self_ast, method_name, args_ast, body_ast]}}
-    end
-  end
-
-  def transform(
-        {:function_def, "self." <> method_name, params, _ret_type, _opts, body, _loc},
-        metadata
-      ) do
-    # Handle version with location metadata
-    transform({:function_def, "self." <> method_name, params, nil, %{}, body}, metadata)
-  end
-
-  # Generic function definition (regular methods)
-  def transform({:function_def, name, params, _ret_type, _opts, body}, _metadata) do
     args_ast = build_args_ast(params)
 
     with {:ok, body_ast} <- transform_or_nil(body) do
-      {:ok, %{"type" => "def", "children" => [name, args_ast, body_ast]}}
+      # Check if it's a class method (self.method_name)
+      if String.starts_with?(name, "self.") do
+        method_name = String.replace_prefix(name, "self.", "")
+        self_ast = %{"type" => "self", "children" => []}
+        {:ok, %{"type" => "defs", "children" => [self_ast, method_name, args_ast, body_ast]}}
+      else
+        {:ok, %{"type" => "def", "children" => [name, args_ast, body_ast]}}
+      end
     end
   end
 
-  def transform({:function_def, name, params, _ret_type, _opts, body, _loc}, metadata) do
-    # Handle version with location metadata
-    transform({:function_def, name, params, nil, %{}, body}, metadata)
+  # Handle function_def with location (4-tuple)
+  def transform({:function_def, meta, [body], _loc}, metadata) when is_list(meta) do
+    transform({:function_def, meta, [body]}, metadata)
   end
 
-  # M2.2s Structural Layer - Attribute access
+  # M2.2s Structural Layer - Attribute access (New 3-tuple format)
 
-  def transform({:attribute_access, receiver, attribute}, _metadata) do
+  def transform({:attribute_access, meta, [receiver]}, _metadata) when is_list(meta) do
+    attribute = Keyword.get(meta, :attribute)
+
     with {:ok, receiver_ast} <- transform(receiver, %{}) do
-      # Convert to Ruby send node (method call without args)
       {:ok, %{"type" => "send", "children" => [receiver_ast, String.to_atom(attribute)]}}
     end
   end
 
-  def transform({:attribute_access, receiver, attribute, _loc}, metadata) do
-    # Handle version with location metadata
-    transform({:attribute_access, receiver, attribute}, metadata)
-  end
+  # M2.2s Structural Layer - Augmented assignment (New 3-tuple format)
 
-  # M2.2s Structural Layer - Augmented assignment
+  def transform({:augmented_assignment, meta, [target, value]}, _metadata) when is_list(meta) do
+    op = Keyword.get(meta, :operator)
 
-  def transform({:augmented_assignment, _category, op, target, value}, _metadata) do
     with {:ok, target_ast} <- transform(target, %{}),
          {:ok, value_ast} <- transform(value, %{}) do
       {:ok, %{"type" => "op_asgn", "children" => [target_ast, op, value_ast]}}
     end
   end
 
-  def transform({:augmented_assignment, _category, op, target, value, _loc}, metadata) do
-    # Handle version with location metadata
-    transform({:augmented_assignment, :arithmetic, op, target, value}, metadata)
-  end
+  # M2.3 Native Layer - Passthrough (New 3-tuple format)
 
-  # M2.3 Native Layer - Passthrough
-
-  def transform({:language_specific, :ruby, original_ast, _construct_type}, _metadata) do
+  def transform({:language_specific, meta, original_ast}, _metadata) when is_list(meta) do
     {:ok, original_ast}
   end
 
@@ -322,6 +281,20 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
 
   defp transform_or_nil(nil), do: {:ok, nil}
   defp transform_or_nil(value), do: transform(value, %{})
+
+  defp transform_hash_pairs(pairs) when is_list(pairs) do
+    pairs
+    |> Enum.reduce_while({:ok, []}, fn pair, {:ok, acc} ->
+      case transform(pair, %{}) do
+        {:ok, ast} -> {:cont, {:ok, [ast | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, pairs_ast} -> {:ok, Enum.reverse(pairs_ast)}
+      error -> error
+    end
+  end
 
   # Helper to build constant AST node
   defp build_const_ast(name) when is_binary(name) do

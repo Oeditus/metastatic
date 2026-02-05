@@ -92,18 +92,18 @@ defmodule Metastatic.CLI.Inspector do
   end
 
   @spec filter_composite_children(AST.meta_ast(), layer()) :: AST.meta_ast() | nil
-  defp filter_composite_children({:binary_op, category, op, left, right}, layer) do
+  defp filter_composite_children({:binary_op, meta, [left, right]}, layer) do
     filtered_left = filter_by_layer(left, layer)
     filtered_right = filter_by_layer(right, layer)
 
     if filtered_left || filtered_right do
-      {:binary_op, category, op, filtered_left || left, filtered_right || right}
+      {:binary_op, meta, [filtered_left || left, filtered_right || right]}
     else
       nil
     end
   end
 
-  defp filter_composite_children({:block, statements}, layer) do
+  defp filter_composite_children({:block, meta, statements}, layer) do
     filtered_statements =
       statements
       |> Enum.map(&filter_by_layer(&1, layer))
@@ -112,7 +112,7 @@ defmodule Metastatic.CLI.Inspector do
     if Enum.empty?(filtered_statements) do
       nil
     else
-      {:block, filtered_statements}
+      {:block, meta, filtered_statements}
     end
   end
 
@@ -139,29 +139,19 @@ defmodule Metastatic.CLI.Inspector do
   defp composite_node?(_), do: false
 
   @spec calculate_depth(AST.meta_ast()) :: non_neg_integer()
-  # Handle location-aware nodes
-  defp calculate_depth({:literal, _, _, _loc}), do: 1
-  defp calculate_depth({:literal, _, _}), do: 1
-  defp calculate_depth({:variable, _, _loc}), do: 1
-  defp calculate_depth({:variable, _}), do: 1
+  # 3-tuple format: {type, meta, children_or_value}
+  defp calculate_depth({:literal, _meta, _value}), do: 1
+  defp calculate_depth({:variable, _meta, _name}), do: 1
 
-  defp calculate_depth({:binary_op, _, _, left, right, _loc}) do
+  defp calculate_depth({:binary_op, _meta, [left, right]}) do
     1 + max(calculate_depth(left), calculate_depth(right))
   end
 
-  defp calculate_depth({:binary_op, _, _, left, right}) do
-    1 + max(calculate_depth(left), calculate_depth(right))
-  end
-
-  defp calculate_depth({:unary_op, _, _, operand, _loc}) do
+  defp calculate_depth({:unary_op, _meta, [operand]}) do
     1 + calculate_depth(operand)
   end
 
-  defp calculate_depth({:unary_op, _, _, operand}) do
-    1 + calculate_depth(operand)
-  end
-
-  defp calculate_depth({:function_call, _, args, _loc}) do
+  defp calculate_depth({:function_call, _meta, args}) when is_list(args) do
     if Enum.empty?(args) do
       1
     else
@@ -169,28 +159,13 @@ defmodule Metastatic.CLI.Inspector do
     end
   end
 
-  defp calculate_depth({:function_call, _, args}) do
-    if Enum.empty?(args) do
-      1
-    else
-      1 + (Enum.map(args, &calculate_depth/1) |> Enum.max())
-    end
-  end
-
-  defp calculate_depth({:conditional, condition, then_branch, else_branch}) do
-    depths = [calculate_depth(condition), calculate_depth(then_branch)]
-
-    depths =
-      if else_branch do
-        depths ++ [calculate_depth(else_branch)]
-      else
-        depths
-      end
-
+  defp calculate_depth({:conditional, _meta, children}) when is_list(children) do
+    # children is [condition, then_branch] or [condition, then_branch, else_branch]
+    depths = Enum.map(children, &calculate_depth/1)
     1 + Enum.max(depths)
   end
 
-  defp calculate_depth({:block, statements}) do
+  defp calculate_depth({:block, _meta, statements}) when is_list(statements) do
     if Enum.empty?(statements) do
       1
     else
@@ -198,7 +173,7 @@ defmodule Metastatic.CLI.Inspector do
     end
   end
 
-  defp calculate_depth({:list, elements}) do
+  defp calculate_depth({:list, _meta, elements}) when is_list(elements) do
     if Enum.empty?(elements) do
       1
     else
@@ -206,7 +181,7 @@ defmodule Metastatic.CLI.Inspector do
     end
   end
 
-  defp calculate_depth({:map, pairs}) do
+  defp calculate_depth({:map, _meta, pairs}) when is_list(pairs) do
     if Enum.empty?(pairs) do
       1
     else
@@ -216,103 +191,94 @@ defmodule Metastatic.CLI.Inspector do
     end
   end
 
-  defp calculate_depth({:loop, _, condition, body}) do
-    1 + max(calculate_depth(condition), calculate_depth(body))
-  end
+  defp calculate_depth({:loop, meta, children}) when is_list(children) do
+    subtype = Keyword.get(meta, :subtype)
 
-  defp calculate_depth({:loop, _, iterator, collection, body}) do
-    1 + Enum.max([calculate_depth(iterator), calculate_depth(collection), calculate_depth(body)])
-  end
+    case {subtype, children} do
+      {:while, [condition, body]} ->
+        1 + max(calculate_depth(condition), calculate_depth(body))
 
-  defp calculate_depth({:lambda, _params, _captures, body}) do
-    1 + calculate_depth(body)
-  end
+      {:for, [iterator, collection, body]} ->
+        1 +
+          Enum.max([
+            calculate_depth(iterator),
+            calculate_depth(collection),
+            calculate_depth(body)
+          ])
 
-  defp calculate_depth({:collection_op, _, lambda, collection}) do
-    1 + max(calculate_depth(lambda), calculate_depth(collection))
-  end
+      {:for_each, [iterator, collection, body]} ->
+        1 +
+          Enum.max([
+            calculate_depth(iterator),
+            calculate_depth(collection),
+            calculate_depth(body)
+          ])
 
-  defp calculate_depth({:collection_op, _, lambda, collection, initial}) do
-    1 + Enum.max([calculate_depth(lambda), calculate_depth(collection), calculate_depth(initial)])
-  end
-
-  defp calculate_depth({:language_specific, _, _, _}), do: 1
-  defp calculate_depth(_), do: 1
-
-  @spec count_nodes(AST.meta_ast()) :: non_neg_integer()
-  # Handle location-aware nodes
-  defp count_nodes({:literal, _, _, _loc}), do: 1
-  defp count_nodes({:literal, _, _}), do: 1
-  defp count_nodes({:variable, _, _loc}), do: 1
-  defp count_nodes({:variable, _}), do: 1
-
-  defp count_nodes({:binary_op, _, _, left, right, _loc}) do
-    1 + count_nodes(left) + count_nodes(right)
-  end
-
-  defp count_nodes({:binary_op, _, _, left, right}) do
-    1 + count_nodes(left) + count_nodes(right)
-  end
-
-  defp count_nodes({:unary_op, _, _, operand, _loc}) do
-    1 + count_nodes(operand)
-  end
-
-  defp count_nodes({:unary_op, _, _, operand}) do
-    1 + count_nodes(operand)
-  end
-
-  defp count_nodes({:function_call, _, args, _loc}) do
-    1 + Enum.sum(Enum.map(args, &count_nodes/1))
-  end
-
-  defp count_nodes({:function_call, _, args}) do
-    1 + Enum.sum(Enum.map(args, &count_nodes/1))
-  end
-
-  defp count_nodes({:conditional, condition, then_branch, else_branch}) do
-    base = 1 + count_nodes(condition) + count_nodes(then_branch)
-
-    if else_branch do
-      base + count_nodes(else_branch)
-    else
-      base
+      _ ->
+        1 + (Enum.map(children, &calculate_depth/1) |> Enum.max(fn -> 0 end))
     end
   end
 
-  defp count_nodes({:block, statements}) do
+  defp calculate_depth({:lambda, _meta, children}) when is_list(children) do
+    # Last child is body, rest are params/captures info
+    body = List.last(children)
+    1 + calculate_depth(body)
+  end
+
+  defp calculate_depth({:collection_op, _meta, children}) when is_list(children) do
+    depths = Enum.map(children, &calculate_depth/1)
+    1 + Enum.max(depths, fn -> 0 end)
+  end
+
+  defp calculate_depth({:language_specific, _meta, _content}), do: 1
+  defp calculate_depth(_), do: 1
+
+  @spec count_nodes(AST.meta_ast()) :: non_neg_integer()
+  # 3-tuple format: {type, meta, children_or_value}
+  defp count_nodes({:literal, _meta, _value}), do: 1
+  defp count_nodes({:variable, _meta, _name}), do: 1
+
+  defp count_nodes({:binary_op, _meta, [left, right]}) do
+    1 + count_nodes(left) + count_nodes(right)
+  end
+
+  defp count_nodes({:unary_op, _meta, [operand]}) do
+    1 + count_nodes(operand)
+  end
+
+  defp count_nodes({:function_call, _meta, args}) when is_list(args) do
+    1 + Enum.sum(Enum.map(args, &count_nodes/1))
+  end
+
+  defp count_nodes({:conditional, _meta, children}) when is_list(children) do
+    1 + Enum.sum(Enum.map(children, &count_nodes/1))
+  end
+
+  defp count_nodes({:block, _meta, statements}) when is_list(statements) do
     1 + Enum.sum(Enum.map(statements, &count_nodes/1))
   end
 
-  defp count_nodes({:list, elements}) do
+  defp count_nodes({:list, _meta, elements}) when is_list(elements) do
     1 + Enum.sum(Enum.map(elements, &count_nodes/1))
   end
 
-  defp count_nodes({:map, pairs}) do
+  defp count_nodes({:map, _meta, pairs}) when is_list(pairs) do
     1 + Enum.sum(Enum.flat_map(pairs, fn {k, v} -> [count_nodes(k), count_nodes(v)] end))
   end
 
-  defp count_nodes({:loop, _, condition, body}) do
-    1 + count_nodes(condition) + count_nodes(body)
+  defp count_nodes({:loop, _meta, children}) when is_list(children) do
+    1 + Enum.sum(Enum.map(children, &count_nodes/1))
   end
 
-  defp count_nodes({:loop, _, iterator, collection, body}) do
-    1 + count_nodes(iterator) + count_nodes(collection) + count_nodes(body)
+  defp count_nodes({:lambda, _meta, children}) when is_list(children) do
+    1 + Enum.sum(Enum.map(children, &count_nodes/1))
   end
 
-  defp count_nodes({:lambda, _params, _captures, body}) do
-    1 + count_nodes(body)
+  defp count_nodes({:collection_op, _meta, children}) when is_list(children) do
+    1 + Enum.sum(Enum.map(children, &count_nodes/1))
   end
 
-  defp count_nodes({:collection_op, _, lambda, collection}) do
-    1 + count_nodes(lambda) + count_nodes(collection)
-  end
-
-  defp count_nodes({:collection_op, _, lambda, collection, initial}) do
-    1 + count_nodes(lambda) + count_nodes(collection) + count_nodes(initial)
-  end
-
-  defp count_nodes({:language_specific, _, _, _}), do: 1
+  defp count_nodes({:language_specific, _meta, _content}), do: 1
   defp count_nodes(_), do: 1
 
   @spec detect_layer(AST.meta_ast()) :: layer()
@@ -329,32 +295,38 @@ defmodule Metastatic.CLI.Inspector do
   end
 
   @spec contains_native?(AST.meta_ast()) :: boolean()
-  defp contains_native?({:language_specific, _, _, _}), do: true
+  defp contains_native?({:language_specific, _meta, _content}), do: true
 
-  defp contains_native?({:binary_op, _, _, left, right}) do
+  defp contains_native?({:binary_op, _meta, [left, right]}) do
     contains_native?(left) || contains_native?(right)
   end
 
-  defp contains_native?({:block, statements}) do
+  defp contains_native?({:block, _meta, statements}) when is_list(statements) do
     Enum.any?(statements, &contains_native?/1)
+  end
+
+  defp contains_native?({_type, _meta, children}) when is_list(children) do
+    Enum.any?(children, &contains_native?/1)
   end
 
   defp contains_native?(_), do: false
 
   @spec contains_extended?(AST.meta_ast()) :: boolean()
-  defp contains_extended?({:loop, _, _, _}), do: true
-  defp contains_extended?({:loop, _, _, _, _}), do: true
-  defp contains_extended?({:lambda, _, _, _}), do: true
-  defp contains_extended?({:collection_op, _, _, _}), do: true
-  defp contains_extended?({:collection_op, _, _, _, _}), do: true
-  defp contains_extended?({:exception_handling, _, _, _}), do: true
+  defp contains_extended?({:loop, _meta, _children}), do: true
+  defp contains_extended?({:lambda, _meta, _children}), do: true
+  defp contains_extended?({:collection_op, _meta, _children}), do: true
+  defp contains_extended?({:exception_handling, _meta, _children}), do: true
 
-  defp contains_extended?({:binary_op, _, _, left, right}) do
+  defp contains_extended?({:binary_op, _meta, [left, right]}) do
     contains_extended?(left) || contains_extended?(right)
   end
 
-  defp contains_extended?({:block, statements}) do
+  defp contains_extended?({:block, _meta, statements}) when is_list(statements) do
     Enum.any?(statements, &contains_extended?/1)
+  end
+
+  defp contains_extended?({_type, _meta, children}) when is_list(children) do
+    Enum.any?(children, &contains_extended?/1)
   end
 
   defp contains_extended?(_), do: false

@@ -29,9 +29,9 @@ defmodule Metastatic.Analysis.DeadCodeAnalyzer do
   ## Examples
 
       # Unreachable after return
-      iex> ast = {:block, [
-      ...>   {:early_return, {:literal, :integer, 1}},
-      ...>   {:literal, :integer, 2}
+      iex> ast = {:block, [], [
+      ...>   {:early_return, [], [{:literal, [subtype: :integer], 1}]},
+      ...>   {:literal, [subtype: :integer], 2}
       ...> ]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, report} = Metastatic.Analysis.Runner.run(doc,

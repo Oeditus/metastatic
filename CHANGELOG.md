@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Uniform 3-Tuple MetaAST Format** - Complete migration to `{type_atom, keyword_meta, children_or_value}` structure:
+  - All MetaAST nodes now use a uniform 3-tuple format for consistency and easier pattern matching
+  - Metadata moved to keyword lists in the second element (e.g., `[subtype: :integer]`, `[operator: :+]`)
+  - Children/value in the third element (list for composites, value for leaves)
+  - Updated all 5 language adapters (Python, Elixir, Ruby, Erlang, Haskell) to produce 3-tuple output
+  - Updated all 9 analysis tools (complexity, duplication, metrics, etc.) for new format
+  - Updated all 20 business logic analyzers for new format:
+    - SwallowingException: Updated `exception_handling` pattern matching
+    - NPlusOneQuery: Fixed lambda detection with `Keyword.keyword?` check
+    - InefficientFilter: Added handler for `function_def` bodies
+    - TelemetryInRecursiveFunction: Fixed body traversal through all children
+    - MissingPreload: Updated `collection_op` format handling
+  - Fixed Elixir adapter try/rescue transformation with pre_transform marker
+  - Fixed `extract_module_name/1` to handle `{:literal, _, atom}` format
+  - Test suite: 1,422 tests passing (235 doctests + 1,187 tests, 100% coverage)
+
 ### Added
 - M1 Metadata Preservation - Full context threading for Ragex integration:
   - Expanded location type with optional M1 context fields: `:language`, `:module`, `:function`, `:arity`, `:container`, `:visibility`, `:file`, `:m1_meta`

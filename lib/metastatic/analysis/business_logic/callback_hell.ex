@@ -88,7 +88,7 @@ defmodule Metastatic.Analysis.BusinessLogic.CallbackHell do
   end
 
   @impl true
-  def analyze({:conditional, _condition, _then_branch, _else_branch} = node, context) do
+  def analyze({:conditional, _meta, children} = node, context) when is_list(children) do
     max_nesting = Map.get(context, :max_nesting, 2)
     nesting_level = count_conditional_nesting(node)
 
@@ -113,8 +113,8 @@ defmodule Metastatic.Analysis.BusinessLogic.CallbackHell do
 
   # ----- Private Helpers -----
 
-  # Count nesting depth of conditionals
-  defp count_conditional_nesting({:conditional, _cond, then_branch, else_branch}) do
+  # Count nesting depth of conditionals - 3-tuple format
+  defp count_conditional_nesting({:conditional, _meta, [_cond, then_branch, else_branch]}) do
     then_depth = count_nested_conditionals(then_branch)
     else_depth = count_nested_conditionals(else_branch)
     1 + max(then_depth, else_depth)
@@ -122,14 +122,14 @@ defmodule Metastatic.Analysis.BusinessLogic.CallbackHell do
 
   defp count_conditional_nesting(_), do: 0
 
-  # Count nested conditionals in a branch
-  defp count_nested_conditionals({:block, statements}) when is_list(statements) do
+  # Count nested conditionals in a branch - 3-tuple format
+  defp count_nested_conditionals({:block, _meta, statements}) when is_list(statements) do
     statements
     |> Enum.map(&count_conditional_nesting/1)
     |> Enum.max(fn -> 0 end)
   end
 
-  defp count_nested_conditionals({:conditional, _, _, _} = node) do
+  defp count_nested_conditionals({:conditional, _meta, _children} = node) do
     count_conditional_nesting(node)
   end
 

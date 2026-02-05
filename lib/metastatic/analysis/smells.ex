@@ -19,7 +19,7 @@ defmodule Metastatic.Analysis.Smells do
       alias Metastatic.{Document, Analysis.Smells}
 
       # Analyze for code smells
-      ast = {:block, (for i <- 1..100, do: {:literal, :integer, i})}
+      ast = {:block, [], (for i <- 1..100, do: {:literal, [subtype: :integer], i})}
       doc = Document.new(ast, :python)
       {:ok, result} = Smells.analyze(doc)
 
@@ -30,14 +30,14 @@ defmodule Metastatic.Analysis.Smells do
   ## Examples
 
       # No code smells - using common constants 0, 1, -1
-      iex> ast = {:binary_op, :arithmetic, :+, {:literal, :integer, 1}, {:literal, :integer, 0}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 0}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Smells.analyze(doc)
       iex> result.has_smells?
       false
 
       # Magic number detected
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 42}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Smells.analyze(doc)
       iex> result.has_smells?
@@ -71,7 +71,7 @@ defmodule Metastatic.Analysis.Smells do
 
     ## Examples
 
-        iex> ast = {:literal, :integer, 42}
+        iex> ast = {:literal, [subtype: :integer], 42}
         iex> doc = Metastatic.Document.new(ast, :elixir)
         iex> {:ok, result} = Metastatic.Analysis.Smells.analyze(doc)
         iex> result.has_smells?
@@ -222,47 +222,56 @@ defmodule Metastatic.Analysis.Smells do
     end) ++ smells
   end
 
+  # 3-tuple format
   defp find_magic_numbers(ast, context, current_line) do
     case ast do
-      {:binary_op, _, _, left, right} ->
+      {:binary_op, _meta, [left, right]} ->
         # Check for numeric literals in binary operations
         find_magic_numbers(left, [:binary_op | context], current_line) ++
           find_magic_numbers(right, [:binary_op | context], current_line)
 
-      {:literal, :integer, value} when is_integer(value) and value not in [0, 1, -1] ->
-        # Report integers other than 0, 1, -1 in operation context
-        if :binary_op in context or :unary_op in context do
-          [{value, %{value: value, in_expression: true}, current_line}]
-        else
-          []
+      {:literal, meta, value} when is_list(meta) ->
+        subtype = Keyword.get(meta, :subtype)
+
+        cond do
+          subtype == :integer and is_integer(value) and value not in [0, 1, -1] ->
+            # Report integers other than 0, 1, -1 in operation context
+            if :binary_op in context or :unary_op in context do
+              [{value, %{value: value, in_expression: true}, current_line}]
+            else
+              []
+            end
+
+          subtype == :float and is_float(value) ->
+            # Report all float literals in operation context
+            if :binary_op in context or :unary_op in context do
+              [{value, %{value: value, in_expression: true}, current_line}]
+            else
+              []
+            end
+
+          true ->
+            []
         end
 
-      {:literal, :float, value} when is_float(value) ->
-        # Report all float literals in operation context
-        if :binary_op in context or :unary_op in context do
-          [{value, %{value: value, in_expression: true}, current_line}]
-        else
-          []
-        end
-
-      {:unary_op, _, _, operand} ->
+      {:unary_op, _meta, [operand]} ->
         find_magic_numbers(operand, [:unary_op | context], current_line)
 
-      {:conditional, cond, then_br, else_br} ->
-        find_magic_numbers(cond, context, current_line) ++
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
+        find_magic_numbers(cond_expr, context, current_line) ++
           find_magic_numbers(then_br, context, current_line) ++
           find_magic_numbers(else_br, context, current_line)
 
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         Enum.flat_map(statements, &find_magic_numbers(&1, context, current_line))
 
-      {:function_call, _name, args} when is_list(args) ->
+      {:function_call, _meta, args} when is_list(args) ->
         Enum.flat_map(args, &find_magic_numbers(&1, context, current_line))
 
-      {:language_specific, _lang, _native, _type, metadata} ->
+      {:language_specific, meta, native_ast} when is_list(meta) ->
         # Extract line information from language-specific wrapper
-        line = extract_line_from_metadata(metadata)
-        find_magic_numbers_in_metadata(metadata, context, line)
+        line = extract_line_from_metadata(native_ast)
+        find_magic_numbers_in_metadata(native_ast, context, line)
 
       _ ->
         []
@@ -293,10 +302,11 @@ defmodule Metastatic.Analysis.Smells do
     end) ++ smells
   end
 
+  # 3-tuple format
   defp find_complex_conditionals(ast, depth, current_line) do
     case ast do
-      {:conditional, cond, then_br, else_br} ->
-        cond_depth = count_boolean_depth(cond, 0)
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
+        cond_depth = count_boolean_depth(cond_expr, 0)
 
         results =
           if cond_depth > 2 do
@@ -309,28 +319,33 @@ defmodule Metastatic.Analysis.Smells do
           find_complex_conditionals(then_br, depth, current_line) ++
           find_complex_conditionals(else_br, depth, current_line)
 
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         Enum.flat_map(statements, &find_complex_conditionals(&1, depth, current_line))
 
-      {:loop, :while, cond, body} ->
-        cond_depth = count_boolean_depth(cond, 0)
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        loop_type = Keyword.get(meta, :loop_type, :for)
 
-        results =
-          if cond_depth > 2 do
-            [{cond_depth, current_line}]
-          else
-            []
-          end
+        case {loop_type, children} do
+          {:while, [cond_expr | rest]} ->
+            cond_depth = count_boolean_depth(cond_expr, 0)
 
-        results ++ find_complex_conditionals(body, depth, current_line)
+            results =
+              if cond_depth > 2 do
+                [{cond_depth, current_line}]
+              else
+                []
+              end
 
-      {:loop, _, _iter, _coll, body} ->
-        find_complex_conditionals(body, depth, current_line)
+            results ++ Enum.flat_map(rest, &find_complex_conditionals(&1, depth, current_line))
 
-      {:language_specific, _lang, _native, _type, metadata} ->
+          _ ->
+            Enum.flat_map(children, &find_complex_conditionals(&1, depth, current_line))
+        end
+
+      {:language_specific, meta, native_ast} when is_list(meta) ->
         # Extract line information from language-specific wrapper
-        line = extract_line_from_metadata(metadata)
-        find_complex_conditionals_in_metadata(metadata, depth, line)
+        line = extract_line_from_metadata(native_ast)
+        find_complex_conditionals_in_metadata(native_ast, depth, line)
 
       _ ->
         []
@@ -344,15 +359,31 @@ defmodule Metastatic.Analysis.Smells do
     end
   end
 
-  defp count_boolean_depth({:binary_op, :boolean, _op, left, right}, depth) do
-    max(
-      count_boolean_depth(left, depth + 1),
-      count_boolean_depth(right, depth + 1)
-    )
+  # 3-tuple format
+  defp count_boolean_depth({:binary_op, meta, [left, right]}, depth) when is_list(meta) do
+    category = Keyword.get(meta, :category)
+
+    if category == :boolean do
+      max(
+        count_boolean_depth(left, depth + 1),
+        count_boolean_depth(right, depth + 1)
+      )
+    else
+      max(
+        count_boolean_depth(left, depth),
+        count_boolean_depth(right, depth)
+      )
+    end
   end
 
-  defp count_boolean_depth({:unary_op, :boolean, _op, operand}, depth) do
-    count_boolean_depth(operand, depth + 1)
+  defp count_boolean_depth({:unary_op, meta, [operand]}, depth) when is_list(meta) do
+    category = Keyword.get(meta, :category)
+
+    if category == :boolean do
+      count_boolean_depth(operand, depth + 1)
+    else
+      count_boolean_depth(operand, depth)
+    end
   end
 
   defp count_boolean_depth(_, depth), do: depth
@@ -432,10 +463,11 @@ defmodule Metastatic.Analysis.Smells do
     end
   end
 
+  # 3-tuple format
   defp find_first_language_specific_node(ast) do
     case ast do
-      {:language_specific, _lang, _native, _type, metadata} when is_map(metadata) ->
-        {:ok, metadata}
+      {:language_specific, meta, native_ast} when is_list(meta) and is_map(native_ast) ->
+        {:ok, native_ast}
 
       tuple when is_tuple(tuple) ->
         tuple

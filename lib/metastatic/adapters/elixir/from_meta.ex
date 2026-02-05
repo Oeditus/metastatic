@@ -5,25 +5,39 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   This module implements the reification function ρ_Elixir that instantiates
   meta-level representations back into Elixir-specific AST structures.
 
+  ## New 3-Tuple Format
+
+  All MetaAST nodes are uniform 3-element tuples:
+
+      {type_atom, keyword_meta, children_or_value}
+
+  Where:
+  - `type_atom` - Node type (e.g., `:literal`, `:binary_op`, `:function_def`)
+  - `keyword_meta` - Keyword list with metadata (line, subtype, operator, etc.)
+  - `children_or_value` - Value for leaf nodes, list of children for composites
+
   ## Transformation Strategy
 
-  The transformation reverses the abstraction performed by `ToMeta`, using
-  metadata to restore M1-specific information when needed.
+  Uses `Metastatic.AST.traverse/4` for bottom-up AST transformation:
+  1. Post-order traversal: Children are transformed before parents
+  2. Metadata extraction: Node attributes extracted from keyword metadata
+  3. Original metadata restoration: Uses `:original_meta` when available
 
-  ## Round-Trip Fidelity
+  ## Examples
 
-  The transformation aims for high fidelity:
-  - Metadata preserves line numbers, contexts, and formatting hints
-  - Variable contexts are restored from metadata
-  - Special forms are reconstructed from metadata markers
+      iex> meta_ast = {:literal, [subtype: :integer], 42}
+      iex> {:ok, elixir_ast} = FromMeta.transform(meta_ast, %{})
+      iex> elixir_ast
+      42
 
-  ## Default Values
-
-  When metadata is absent or incomplete:
-  - Line number defaults to 0
-  - Variable context defaults to `Elixir`
-  - Empty metadata keyword list `[]` is used
+      iex> meta_ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+      iex> {:ok, elixir_ast} = FromMeta.transform(meta_ast, %{})
+      iex> elixir_ast
+      {:+, [], [{:x, [], nil}, 5]}
   """
+
+  alias Metastatic.AST
 
   @doc """
   Transform MetaAST back to Elixir AST.
@@ -32,437 +46,545 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   ## Examples
 
-      iex> transform({:literal, :integer, 42}, %{})
+      iex> FromMeta.transform({:literal, [subtype: :integer], 42}, %{})
       {:ok, 42}
 
-      iex> transform({:variable, "x"}, %{context: Elixir})
+      iex> FromMeta.transform({:variable, [], "x"}, %{context: Elixir})
       {:ok, {:x, [], Elixir}}
-
-      iex> transform({:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}, %{})
-      {:ok, {:+, [], [{:x, [], Elixir}, 5]}}
   """
   @spec transform(term(), map()) :: {:ok, term()} | {:error, String.t()}
+  def transform(meta_ast, metadata \\ %{}) do
+    try do
+      {elixir_ast, _acc} =
+        AST.traverse(meta_ast, metadata, &pre_transform/2, &post_transform/2)
 
-  # Literals - M2.1 Core Layer
-
-  # Location-aware literals (strip location and delegate)
-  def transform({:literal, subtype, value, _loc}, metadata) do
-    transform({:literal, subtype, value}, metadata)
-  end
-
-  def transform({:literal, :integer, value}, _metadata) do
-    {:ok, value}
-  end
-
-  def transform({:literal, :float, value}, _metadata) do
-    {:ok, value}
-  end
-
-  def transform({:literal, :string, value}, _metadata) do
-    {:ok, value}
-  end
-
-  def transform({:literal, :boolean, value}, _metadata) do
-    {:ok, value}
-  end
-
-  def transform({:literal, :null, nil}, _metadata) do
-    {:ok, nil}
-  end
-
-  def transform({:literal, :symbol, atom}, _metadata) do
-    {:ok, atom}
-  end
-
-  # Lists - M2.1 Core Layer
-  def transform({:list, items, _loc}, metadata), do: transform({:list, items}, metadata)
-
-  def transform({:list, items}, metadata) do
-    case transform_list(items, metadata) do
-      {:ok, transformed_items} ->
-        {:ok, transformed_items}
-
-      error ->
-        error
+      {:ok, elixir_ast}
+    rescue
+      e -> {:error, "Transform failed: #{Exception.message(e)}"}
+    catch
+      {:unsupported, reason} -> {:error, reason}
     end
   end
 
-  # Maps - M2.1 Core Layer
-  def transform({:map, pairs, _loc}, metadata), do: transform({:map, pairs}, metadata)
+  # ----- Pre-Transform: Pass through -----
+  # All work is done in post_transform
+  defp pre_transform(ast, acc), do: {ast, acc}
 
-  def transform({:map, pairs}, metadata) do
-    with {:ok, pairs_ex} <- transform_map_pairs(pairs, metadata) do
-      {:ok, {:%{}, [], pairs_ex}}
+  # ----- Post-Transform: Node Conversion -----
+
+  # Already-transformed Elixir AST nodes - pass through
+  # (When we recursively build, we get raw Elixir AST)
+  defp post_transform(ast, acc) when not is_tuple(ast) or tuple_size(ast) != 3 do
+    {ast, acc}
+  end
+
+  # Check if this is a MetaAST node (3-tuple with atom type and keyword meta)
+  defp post_transform({type, meta, children} = ast, acc)
+       when is_atom(type) and is_list(meta) do
+    if meta_ast_type?(type) do
+      transform_node(type, meta, children, acc)
+    else
+      # Regular Elixir AST - pass through
+      {ast, acc}
     end
   end
 
-  # Variables - M2.1 Core Layer
+  # Non-MetaAST tuples - pass through
+  defp post_transform(ast, acc), do: {ast, acc}
 
-  def transform({:variable, name, _loc}, metadata), do: transform({:variable, name}, metadata)
+  # ----- Node Type Detection -----
 
-  def transform({:variable, name}, metadata) when is_binary(name) do
+  @meta_ast_types [
+    # Core
+    :literal,
+    :variable,
+    :list,
+    :map,
+    :pair,
+    :tuple,
+    :binary_op,
+    :unary_op,
+    :function_call,
+    :conditional,
+    :early_return,
+    :block,
+    :assignment,
+    :inline_match,
+    # Extended
+    :loop,
+    :lambda,
+    :collection_op,
+    :pattern_match,
+    :match_arm,
+    :exception_handling,
+    :async_operation,
+    # Structural
+    :container,
+    :function_def,
+    :attribute_access,
+    :augmented_assignment,
+    :property,
+    # Native
+    :language_specific,
+    # Helpers
+    :pin,
+    :cons_pattern
+  ]
+
+  defp meta_ast_type?(type), do: type in @meta_ast_types
+
+  # ----- Literal Transformations -----
+
+  defp transform_node(:literal, meta, value, acc) do
+    subtype = Keyword.get(meta, :subtype)
+
+    elixir_value =
+      case subtype do
+        :integer -> value
+        :float -> value
+        :string -> value
+        :boolean -> value
+        :null -> nil
+        :symbol -> value
+        :regex -> value
+        _ -> value
+      end
+
+    {elixir_value, acc}
+  end
+
+  # ----- Variable Transformation -----
+
+  defp transform_node(:variable, meta, name, acc) when is_binary(name) do
     var_atom = String.to_atom(name)
-    # Default context depends on caller - use what's in metadata or nil
-    context = Map.get(metadata, :context, nil)
-    elixir_meta = Map.get(metadata, :elixir_meta, [])
-
-    {:ok, {var_atom, elixir_meta, context}}
+    # Use original_meta if available, otherwise build from current meta
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    context = Map.get(acc, :context, nil)
+    {{var_atom, elixir_meta, context}, acc}
   end
 
-  # Binary Operators - M2.1 Core Layer
+  # ----- Binary Operators -----
 
-  def transform({:binary_op, category, op, left, right, _loc}, metadata) do
-    transform({:binary_op, category, op, left, right}, metadata)
+  defp transform_node(:binary_op, meta, [left, right], acc) do
+    op = Keyword.get(meta, :operator)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    {{op, elixir_meta, [left, right]}, acc}
   end
 
-  def transform({:binary_op, _category, op, left, right}, metadata) do
-    with {:ok, left_ex} <- transform(left, metadata),
-         {:ok, right_ex} <- transform(right, metadata) do
-      {:ok, {op, [], [left_ex, right_ex]}}
+  # ----- Unary Operators -----
+
+  defp transform_node(:unary_op, meta, [operand], acc) do
+    op = Keyword.get(meta, :operator)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    {{op, elixir_meta, [operand]}, acc}
+  end
+
+  # ----- Inline Match (=) -----
+
+  defp transform_node(:inline_match, meta, [pattern, value], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    {{:=, elixir_meta, [pattern, value]}, acc}
+  end
+
+  # ----- Lists -----
+
+  defp transform_node(:list, _meta, elements, acc) when is_list(elements) do
+    {elements, acc}
+  end
+
+  # ----- Maps -----
+
+  defp transform_node(:map, meta, pairs, acc) when is_list(pairs) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    # pairs are already transformed - convert {:pair, [], [k, v]} → {k, v}
+    elixir_pairs = Enum.map(pairs, &pair_to_elixir/1)
+    {{:%{}, elixir_meta, elixir_pairs}, acc}
+  end
+
+  # ----- Pairs (for maps) -----
+
+  defp transform_node(:pair, _meta, [key, value], acc) do
+    # Return as Elixir pair tuple
+    {{key, value}, acc}
+  end
+
+  # ----- Tuples -----
+
+  defp transform_node(:tuple, meta, elements, acc) when is_list(elements) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    case elements do
+      [] ->
+        {{:{}, elixir_meta, []}, acc}
+
+      [e1, e2] ->
+        # Two-element tuple uses shorthand notation
+        {{e1, e2}, acc}
+
+      _ ->
+        # Three or more elements use explicit tuple syntax
+        {{:{}, elixir_meta, elements}, acc}
     end
   end
 
-  # Unary Operators - M2.1 Core Layer
+  # ----- Blocks -----
 
-  def transform({:unary_op, category, op, operand, _loc}, metadata) do
-    transform({:unary_op, category, op, operand}, metadata)
-  end
+  defp transform_node(:block, meta, statements, acc) when is_list(statements) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-  def transform({:unary_op, _category, op, operand}, metadata) do
-    with {:ok, operand_ex} <- transform(operand, metadata) do
-      {:ok, {op, [], [operand_ex]}}
+    case statements do
+      [] -> {nil, acc}
+      [single] -> {single, acc}
+      multiple -> {{:__block__, elixir_meta, multiple}, acc}
     end
   end
 
-  # Function Calls - M2.1 Core Layer
+  # ----- Function Calls -----
 
-  def transform({:function_call, name, args, _loc}, metadata) do
-    transform({:function_call, name, args}, metadata)
+  defp transform_node(:function_call, meta, args, acc) when is_list(args) do
+    name = Keyword.get(meta, :name, "unknown")
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    case String.split(name, ".") do
+      [single_name] ->
+        # Local call
+        func_atom = String.to_atom(single_name)
+        {{func_atom, elixir_meta, args}, acc}
+
+      parts when length(parts) > 1 ->
+        # Remote call
+        {func_name, module_parts} = List.pop_at(parts, -1)
+        module_ast = build_module_alias(module_parts)
+        func_atom = String.to_atom(func_name)
+        {{{:., [], [module_ast, func_atom]}, elixir_meta, args}, acc}
+    end
   end
 
-  def transform({:function_call, name, args}, metadata) do
-    with {:ok, args_ex} <- transform_list(args, metadata) do
-      # Check if this is a remote call (Module.function)
-      case String.split(name, ".") do
-        [single_name] ->
-          # Local call
-          func_atom = String.to_atom(single_name)
-          {:ok, {func_atom, [], args_ex}}
+  # ----- Conditionals -----
 
-        parts when length(parts) > 1 ->
-          # Remote call
-          {func_name, module_parts} = List.pop_at(parts, -1)
-          module_ast = build_module_alias(module_parts)
-          func_atom = String.to_atom(func_name)
+  defp transform_node(:conditional, meta, [condition, then_branch, else_branch], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-          {:ok, {{:., [], [module_ast, func_atom]}, [], args_ex}}
+    # Check if this was originally an unless
+    case Keyword.get(meta, :original_form) do
+      :unless ->
+        # Reconstruct unless (need to undo the negation)
+        actual_cond =
+          case condition do
+            {:not, [], [inner_cond]} -> inner_cond
+            {:unary_op, _, [inner_cond]} -> inner_cond
+            _ -> {:not, [], [condition]}
+          end
+
+        clauses = build_if_clauses(then_branch, else_branch)
+        {{:unless, elixir_meta, [actual_cond, clauses]}, acc}
+
+      :cond ->
+        # This was a cond - but we've nested it, just emit as if
+        clauses = build_if_clauses(then_branch, else_branch)
+        {{:if, elixir_meta, [condition, clauses]}, acc}
+
+      _ ->
+        # Regular if
+        clauses = build_if_clauses(then_branch, else_branch)
+        {{:if, elixir_meta, [condition, clauses]}, acc}
+    end
+  end
+
+  # ----- Pattern Matching (case) -----
+
+  defp transform_node(:pattern_match, meta, [scrutinee | arms], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    arms_ex = Enum.map(arms, &match_arm_to_elixir/1)
+    {{:case, elixir_meta, [scrutinee, [do: arms_ex]]}, acc}
+  end
+
+  # ----- Match Arms -----
+
+  defp transform_node(:match_arm, meta, body, acc) do
+    pattern = Keyword.get(meta, :pattern)
+    _guard = Keyword.get(meta, :guard)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    body_ex =
+      case body do
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
       end
-    end
+
+    # Return the clause format {:->, meta, [[pattern], body]}
+    {{:->, elixir_meta, [[pattern], body_ex]}, acc}
   end
 
-  # Conditionals - M2.1 Core Layer
+  # ----- Lambda (anonymous functions) -----
 
-  def transform({:conditional, condition, then_branch, else_branch, _loc}, metadata) do
-    transform({:conditional, condition, then_branch, else_branch}, metadata)
-  end
+  defp transform_node(:lambda, meta, body, acc) when is_list(body) do
+    params = Keyword.get(meta, :params, [])
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-  def transform({:conditional, condition, then_branch, else_branch}, metadata) do
-    with {:ok, cond_ex} <- transform(condition, metadata),
-         {:ok, then_ex} <- transform(then_branch, metadata),
-         {:ok, else_ex} <- transform_or_keep_nil(else_branch, metadata) do
-      # Check if this was originally an unless
-      case Map.get(metadata, :original_form) do
-        :unless ->
-          # Reconstruct unless (need to undo the negation)
-          actual_cond =
-            case cond_ex do
-              {:not, [], [inner_cond]} -> inner_cond
-              _ -> {:not, [], [cond_ex]}
-            end
+    params_ex =
+      Enum.map(params, fn
+        {:param, name, _type, _default} ->
+          {String.to_atom(name), [], nil}
 
-          clauses = if else_ex, do: [do: then_ex, else: else_ex], else: [do: then_ex]
-          {:ok, {:unless, [], [actual_cond, clauses]}}
+        name when is_binary(name) ->
+          {String.to_atom(name), [], nil}
 
-        _ ->
-          # Regular if
-          clauses = if else_ex, do: [do: then_ex, else: else_ex], else: [do: then_ex]
-          {:ok, {:if, [], [cond_ex, clauses]}}
+        other ->
+          other
+      end)
+
+    body_ex =
+      case body do
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
       end
+
+    clause = {:->, [], [params_ex, body_ex]}
+    {{:fn, elixir_meta, [clause]}, acc}
+  end
+
+  # ----- Collection Operations -----
+
+  defp transform_node(:collection_op, meta, children, acc) do
+    op_type = Keyword.get(meta, :op_type)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    enum_module = {:__aliases__, [], [:Enum]}
+
+    case {op_type, children} do
+      {:map, [func, collection]} ->
+        {{{:., [], [enum_module, :map]}, elixir_meta, [collection, func]}, acc}
+
+      {:filter, [func, collection]} ->
+        {{{:., [], [enum_module, :filter]}, elixir_meta, [collection, func]}, acc}
+
+      {:reduce, [func, collection, initial]} ->
+        {{{:., [], [enum_module, :reduce]}, elixir_meta, [collection, initial, func]}, acc}
+
+      _ ->
+        throw({:unsupported, "Unknown collection_op type: #{inspect(op_type)}"})
     end
   end
 
-  # Blocks - M2.1 Core Layer
+  # ----- Early Return -----
 
-  def transform({:block, expressions, _loc}, metadata) do
-    transform({:block, expressions}, metadata)
+  defp transform_node(:early_return, _meta, value, acc) do
+    # Elixir doesn't have direct return - use throw
+    {{:throw, [], [{:return, value}]}, acc}
   end
 
-  def transform({:block, expressions}, metadata) do
-    with {:ok, exprs_ex} <- transform_list(expressions, metadata) do
-      case exprs_ex do
-        [] -> {:ok, nil}
-        [single] -> {:ok, single}
-        multiple -> {:ok, {:__block__, [], multiple}}
+  # ----- Containers (modules, classes) -----
+
+  defp transform_node(:container, meta, body, acc) when is_list(body) do
+    container_type = Keyword.get(meta, :container_type)
+    name = Keyword.get(meta, :name, "Unknown")
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    case container_type do
+      :module ->
+        module_alias = name_to_alias(name)
+
+        body_ex =
+          case body do
+            [] -> nil
+            [single] -> single
+            multiple -> {:__block__, [], multiple}
+          end
+
+        {{:defmodule, elixir_meta, [module_alias, [do: body_ex]]}, acc}
+
+      _ ->
+        throw({:unsupported, "Unsupported container type: #{inspect(container_type)}"})
+    end
+  end
+
+  # ----- Function Definitions -----
+
+  defp transform_node(:function_def, meta, body, acc) when is_list(body) do
+    name = Keyword.get(meta, :name, "unknown")
+    params = Keyword.get(meta, :params, [])
+    visibility = Keyword.get(meta, :visibility, :public)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    func_atom = String.to_atom(name)
+    def_type = if visibility == :private, do: :defp, else: :def
+
+    params_ex =
+      Enum.map(params, fn
+        {:param, param_name, _type, _default} ->
+          {String.to_atom(param_name), [], nil}
+
+        param_name when is_binary(param_name) ->
+          {String.to_atom(param_name), [], nil}
+
+        other ->
+          other
+      end)
+
+    body_ex =
+      case body do
+        [] -> nil
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
       end
+
+    signature = {func_atom, elixir_meta, params_ex}
+    {{def_type, elixir_meta, [signature, [do: body_ex]]}, acc}
+  end
+
+  # ----- Pin Operator -----
+
+  defp transform_node(:pin, meta, var, acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    {{:^, elixir_meta, [var]}, acc}
+  end
+
+  # ----- Cons Pattern [head | tail] -----
+
+  defp transform_node(:cons_pattern, _meta, [head, tail], acc) do
+    {[head | tail], acc}
+  end
+
+  # ----- Language Specific -----
+
+  defp transform_node(:language_specific, meta, native_ast, acc) do
+    language = Keyword.get(meta, :language)
+
+    if language == :elixir do
+      {native_ast, acc}
+    else
+      throw({:unsupported, "Cannot reify #{language} language-specific construct to Elixir"})
     end
   end
 
-  # Inline Match (=) - M2.1 Core Layer
-  # Reconstruct Elixir pattern matching syntax
+  # ----- Loops -----
 
-  def transform({:inline_match, pattern, value, _loc}, metadata) do
-    transform({:inline_match, pattern, value}, metadata)
-  end
+  defp transform_node(:loop, meta, children, acc) do
+    loop_type = Keyword.get(meta, :loop_type)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-  def transform({:inline_match, pattern, value}, metadata) do
-    pattern_metadata = Map.get(metadata, :pattern_metadata, %{})
-    value_metadata = Map.get(metadata, :value_metadata, %{})
-    elixir_meta = Map.get(metadata, :elixir_meta, [])
+    case {loop_type, children} do
+      {:for, [iterator, collection, body]} ->
+        # for var <- collection, do: body
+        generator = {:<-, [], [iterator, collection]}
 
-    with {:ok, pattern_ex} <- transform_pattern_to_elixir(pattern, pattern_metadata),
-         {:ok, value_ex} <- transform(value, value_metadata) do
-      {:ok, {:=, elixir_meta, [pattern_ex, value_ex]}}
+        body_ex =
+          case body do
+            {:block, _, stmts} when is_list(stmts) -> {:__block__, [], stmts}
+            _ -> body
+          end
+
+        {{:for, elixir_meta, [generator, [do: body_ex]]}, acc}
+
+      {:for_each, [iterator, collection, body]} ->
+        # Enum.each
+        enum_module = {:__aliases__, [], [:Enum]}
+        lambda = {:fn, [], [{:->, [], [[iterator], body]}]}
+        {{{:., [], [enum_module, :each]}, elixir_meta, [collection, lambda]}, acc}
+
+      {:while, [_condition, _body]} ->
+        # Elixir doesn't have while - would need recursion or Stream
+        throw({:unsupported, "while loops not supported in Elixir"})
+
+      _ ->
+        throw({:unsupported, "Unknown loop type: #{inspect(loop_type)}"})
     end
   end
 
-  # Early Returns - M2.1 Core Layer
+  # ----- Exception Handling -----
 
-  def transform({:early_return, kind, value}, metadata) do
-    with {:ok, value_ex} <- transform_or_keep_nil(value, metadata) do
-      # Elixir doesn't have direct return/break/continue
-      # These would be represented as throws or special constructs
-      case kind do
-        :return ->
-          {:ok, {:throw, [], [{:return, value_ex}]}}
+  defp transform_node(:exception_handling, meta, children, acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-        :break ->
-          {:ok, {:throw, [], [:break]}}
+    case children do
+      [try_block | rest] ->
+        # Build try expression
+        clauses = [do: try_block]
 
-        :continue ->
-          {:ok, {:throw, [], [:continue]}}
-      end
+        clauses =
+          Enum.reduce(rest, clauses, fn
+            {:catch_clause, _, [pattern, body]} ->
+              catch_clause = {:->, [], [[pattern], body]}
+              Keyword.update(clauses, :catch, [catch_clause], &[catch_clause | &1])
+
+            {:rescue_clause, _, [pattern, body]} ->
+              rescue_clause = {:->, [], [[pattern], body]}
+              Keyword.update(clauses, :rescue, [rescue_clause], &[rescue_clause | &1])
+
+            {:finally_clause, _, [body]} ->
+              Keyword.put(clauses, :after, body)
+
+            _ ->
+              clauses
+          end)
+
+        {{:try, elixir_meta, [clauses]}, acc}
+
+      _ ->
+        throw({:unsupported, "Invalid exception_handling structure"})
     end
   end
 
-  # Pattern Matching - M2.2 Extended Layer
+  # ----- Attribute Access -----
 
-  def transform({:pattern_match, scrutinee, arms}, metadata) do
-    with {:ok, scrutinee_ex} <- transform(scrutinee, metadata),
-         {:ok, arms_ex} <- transform_match_arms(arms, metadata) do
-      {:ok, {:case, [], [scrutinee_ex, [do: arms_ex]]}}
-    end
+  defp transform_node(:attribute_access, meta, [receiver], acc) do
+    attribute = Keyword.get(meta, :attribute)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    attr_atom = String.to_atom(attribute)
+    {{{:., [], [receiver, attr_atom]}, elixir_meta, []}, acc}
   end
 
-  # Anonymous Functions - M2.2 Extended Layer
+  # ----- Catch-all -----
 
-  def transform({:lambda, params, body}, metadata) do
-    with {:ok, params_ex} <- transform_params(params, metadata),
-         {:ok, body_ex} <- transform(body, metadata) do
-      clause = {:->, [], [params_ex, body_ex]}
-      {:ok, {:fn, [], [clause]}}
-    end
+  defp transform_node(type, meta, children, _acc) do
+    throw({:unsupported, "Unsupported MetaAST construct: #{inspect({type, meta, children})}"})
   end
 
-  # Collection Operations - M2.2 Extended Layer
+  # ----- Helper Functions -----
 
-  def transform({:collection_op, :map, fun, collection}, metadata) do
-    with {:ok, collection_ex} <- transform(collection, metadata),
-         {:ok, fun_ex} <- transform(fun, metadata) do
-      # Check if this was originally a comprehension
-      case Map.get(metadata, :original_form) do
-        :comprehension ->
-          # Transform back to for comprehension
-          transform_to_comprehension(:map, fun_ex, collection_ex)
-
-        _ ->
-          # Regular Enum.map
-          enum_module = {:__aliases__, [], [:Enum]}
-          {:ok, {{:., [], [enum_module, :map]}, [], [collection_ex, fun_ex]}}
-      end
-    end
+  # Extract basic Elixir metadata from keyword meta
+  defp extract_elixir_meta(meta) do
+    meta
+    |> Keyword.take([:line, :column, :end_line, :end_column])
+    |> Keyword.reject(fn {_k, v} -> is_nil(v) end)
   end
 
-  def transform({:collection_op, :filter, fun, collection}, metadata) do
-    with {:ok, collection_ex} <- transform(collection, metadata),
-         {:ok, fun_ex} <- transform(fun, metadata) do
-      enum_module = {:__aliases__, [], [:Enum]}
-      {:ok, {{:., [], [enum_module, :filter]}, [], [collection_ex, fun_ex]}}
-    end
-  end
+  # Convert {:pair, [], [key, value]} to {key, value}
+  defp pair_to_elixir({:pair, _, [key, value]}), do: {key, value}
+  defp pair_to_elixir({key, value}), do: {key, value}
+  defp pair_to_elixir(other), do: other
 
-  def transform({:collection_op, :reduce, fun, collection, initial}, metadata) do
-    with {:ok, collection_ex} <- transform(collection, metadata),
-         {:ok, initial_ex} <- transform(initial, metadata),
-         {:ok, fun_ex} <- transform(fun, metadata) do
-      enum_module = {:__aliases__, [], [:Enum]}
-      {:ok, {{:., [], [enum_module, :reduce]}, [], [collection_ex, initial_ex, fun_ex]}}
-    end
-  end
-
-  # Language-Specific - M2.3 Native Layer
-
-  def transform({:language_specific, :elixir, native_ast, _hint}, _metadata) do
-    # Return the native Elixir AST as-is
-    {:ok, native_ast}
-  end
-
-  def transform({:language_specific, other_lang, _ast, _hint}, _metadata) do
-    {:error, "Cannot reify #{other_lang} language-specific construct to Elixir"}
-  end
-
-  # Tuples - Used in patterns and values
-
-  def transform({:tuple, elements}, metadata) when is_list(elements) do
-    with {:ok, elements_ex} <- transform_list(elements, metadata) do
-      case elements_ex do
-        [] ->
-          {:ok, {:{}, [], []}}
-
-        [e1, e2] ->
-          # Two-element tuple uses shorthand notation
-          {:ok, {e1, e2}}
-
-        _ ->
-          # Three or more elements use explicit tuple syntax
-          {:ok, {:{}, [], elements_ex}}
-      end
-    end
-  end
-
-  # Pin operator - Used in patterns
-
-  def transform({:pin, var}, metadata) do
-    with {:ok, var_ex} <- transform(var, metadata) do
-      elixir_meta = Map.get(metadata, :elixir_meta, [])
-      {:ok, {:^, elixir_meta, [var_ex]}}
-    end
-  end
-
-  # Cons pattern - Used in list patterns [head | tail]
-
-  def transform({:cons_pattern, head, tail}, metadata) do
-    with {:ok, head_ex} <- transform(head, metadata),
-         {:ok, tail_ex} <- transform(tail, metadata) do
-      {:ok, [head_ex | tail_ex]}
-    end
-  end
-
-  # Catch-all for unsupported constructs
-
-  def transform(unknown, _metadata) do
-    {:error, "Unsupported MetaAST construct: #{inspect(unknown)}"}
-  end
-
-  # Helper Functions
-
-  defp transform_list(items, metadata) when is_list(items) do
-    items
-    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
-      case transform(item, metadata) do
-        {:ok, ex} -> {:cont, {:ok, [ex | acc]}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-    |> case do
-      {:ok, items} -> {:ok, Enum.reverse(items)}
-      error -> error
-    end
-  end
-
-  defp transform_map_pairs(pairs, metadata) when is_list(pairs) do
-    pairs
-    |> Enum.reduce_while({:ok, []}, fn {key, value}, {:ok, acc} ->
-      with {:ok, key_ex} <- transform(key, metadata),
-           {:ok, value_ex} <- transform(value, metadata) do
-        {:cont, {:ok, [{key_ex, value_ex} | acc]}}
-      else
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-    |> case do
-      {:ok, pairs} -> {:ok, Enum.reverse(pairs)}
-      error -> error
-    end
-  end
-
-  defp transform_or_keep_nil(nil, _metadata), do: {:ok, nil}
-  defp transform_or_keep_nil(value, metadata), do: transform(value, metadata)
-
+  # Build module alias AST
   defp build_module_alias(parts) do
     atoms = Enum.map(parts, &String.to_atom/1)
     {:__aliases__, [], atoms}
   end
 
-  defp transform_match_arms(arms, metadata) do
-    arms
-    |> Enum.reduce_while({:ok, []}, fn arm, {:ok, acc} ->
-      case transform_match_arm(arm, metadata) do
-        {:ok, arm_ex} -> {:cont, {:ok, [arm_ex | acc]}}
-        {:error, _} = err -> {:halt, err}
+  # Convert string name to module alias AST
+  defp name_to_alias(name) do
+    parts = String.split(name, ".")
+    atoms = Enum.map(parts, &String.to_atom/1)
+    {:__aliases__, [], atoms}
+  end
+
+  # Build if/unless clauses
+  defp build_if_clauses(then_branch, nil), do: [do: then_branch]
+  defp build_if_clauses(then_branch, else_branch), do: [do: then_branch, else: else_branch]
+
+  # Convert match arm to Elixir clause
+  defp match_arm_to_elixir({:match_arm, meta, body}) do
+    pattern = Keyword.get(meta, :pattern)
+    elixir_meta = Keyword.get(meta, :original_meta, [])
+
+    body_ex =
+      case body do
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
       end
-    end)
-    |> case do
-      {:ok, arms} -> {:ok, Enum.reverse(arms)}
-      error -> error
-    end
+
+    {:->, elixir_meta, [[pattern], body_ex]}
   end
 
-  defp transform_match_arm({:match_arm, pattern, guard, body}, metadata) do
-    with {:ok, pattern_ex} <- transform_pattern(pattern, metadata),
-         {:ok, body_ex} <- transform(body, metadata) do
-      # Ignore guard for now (would need special handling)
-      _ = guard
-      {:ok, {:->, [], [[pattern_ex], body_ex]}}
-    end
-  end
-
-  defp transform_pattern(:_, _metadata) do
-    # Wildcard pattern
-    {:ok, {:_, [], nil}}
-  end
-
-  defp transform_pattern(pattern, metadata) do
-    # Regular pattern is just a transformation
-    transform(pattern, metadata)
-  end
-
-  defp transform_pattern_to_elixir(:_, _metadata) do
-    # Wildcard pattern
-    {:ok, {:_, [], nil}}
-  end
-
-  defp transform_pattern_to_elixir(pattern, metadata) do
-    # Pattern transformation is the same as regular transformation
-    # since we handle tuples, pins, and cons patterns in the main transform/2
-    transform(pattern, metadata)
-  end
-
-  defp transform_params(params, _metadata) do
-    params_ex =
-      Enum.map(params, fn
-        {:param, name, _type_hint, _default} ->
-          {String.to_atom(name), [], nil}
-
-        other ->
-          # Fallback - shouldn't happen
-          other
-      end)
-
-    {:ok, params_ex}
-  end
-
-  defp transform_to_comprehension(:map, lambda_ex, collection_ex) do
-    # Extract variable and body from lambda
-    case lambda_ex do
-      {:fn, [], [{:->, [], [[{var, [], nil}], body]}]} ->
-        # Simple comprehension: for var <- collection, do: body
-        generator = {:<-, [], [{var, [], nil}, collection_ex]}
-        {:ok, {:for, [], [generator, [do: body]]}}
-
-      _ ->
-        # Can't convert to comprehension, use Enum.map
-        enum_module = {:__aliases__, [], [:Enum]}
-        {:ok, {{:., [], [enum_module, :map]}, [], [collection_ex, lambda_ex]}}
-    end
-  end
+  defp match_arm_to_elixir({:->, meta, args}), do: {:->, meta, args}
+  defp match_arm_to_elixir(other), do: other
 end

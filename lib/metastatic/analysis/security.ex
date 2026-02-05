@@ -20,7 +20,7 @@ defmodule Metastatic.Analysis.Security do
       alias Metastatic.{Document, Analysis.Security}
 
       # Analyze for security vulnerabilities
-      ast = {:function_call, "eval", [{:variable, "user_input"}]}
+      ast = {:function_call, [name: "eval"], [{:variable, [], "user_input"}]}
       doc = Document.new(ast, :python)
       {:ok, result} = Security.analyze(doc)
 
@@ -30,14 +30,14 @@ defmodule Metastatic.Analysis.Security do
   ## Examples
 
       # No vulnerabilities
-      iex> ast = {:binary_op, :arithmetic, :+, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Security.analyze(doc)
       iex> result.has_vulnerabilities?
       false
 
       # Unsafe eval detected
-      iex> ast = {:function_call, "eval", [{:literal, :string, "1+1"}]}
+      iex> ast = {:function_call, [name: "eval"], [{:literal, [subtype: :string], "1+1"}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Security.analyze(doc)
       iex> result.has_vulnerabilities?
@@ -107,7 +107,7 @@ defmodule Metastatic.Analysis.Security do
 
     ## Examples
 
-        iex> ast = {:literal, :integer, 42}
+        iex> ast = {:literal, [subtype: :integer], 42}
         iex> doc = Metastatic.Document.new(ast, :elixir)
         iex> {:ok, result} = Metastatic.Analysis.Security.analyze(doc)
         iex> result.has_vulnerabilities?
@@ -155,12 +155,15 @@ defmodule Metastatic.Analysis.Security do
     vulns_from_calls ++ vulns
   end
 
+  # 3-tuple format
   defp find_dangerous_calls(ast, language) do
     patterns = Map.get(@dangerous_functions, language, %{})
 
     walk_ast(ast, [], fn node, acc ->
       case node do
-        {:function_call, name, _args} ->
+        {:function_call, meta, _args} when is_list(meta) ->
+          name = Keyword.get(meta, :name, "")
+
           case Map.get(patterns, name) do
             nil -> acc
             pattern -> [{name, pattern} | acc]
@@ -188,17 +191,24 @@ defmodule Metastatic.Analysis.Security do
     end) ++ vulns
   end
 
+  # 3-tuple format
   defp find_hardcoded_secrets(ast) do
     walk_ast(ast, [], fn node, acc ->
       case node do
-        {:literal, :string, value} when is_binary(value) ->
-          Enum.reduce(secret_patterns(), acc, fn {type, pattern}, a ->
-            if Regex.match?(pattern, value) do
-              [{type, value} | a]
-            else
-              a
-            end
-          end)
+        {:literal, meta, value} when is_list(meta) and is_binary(value) ->
+          subtype = Keyword.get(meta, :subtype)
+
+          if subtype == :string do
+            Enum.reduce(secret_patterns(), acc, fn {type, pattern}, a ->
+              if Regex.match?(pattern, value) do
+                [{type, value} | a]
+              else
+                a
+              end
+            end)
+          else
+            acc
+          end
 
         _ ->
           acc
@@ -222,18 +232,23 @@ defmodule Metastatic.Analysis.Security do
     end) ++ vulns
   end
 
+  # 3-tuple format
   defp find_weak_crypto(ast) do
     walk_ast(ast, [], fn node, acc ->
       case node do
-        {:function_call, name, _args} ->
+        {:function_call, meta, _args} when is_list(meta) ->
+          name = Keyword.get(meta, :name, "")
+
           if Enum.any?(@weak_crypto, &String.contains?(name, &1)) do
             [name | acc]
           else
             acc
           end
 
-        {:literal, :string, value} when is_binary(value) ->
-          if Enum.any?(@weak_crypto, &String.contains?(value, &1)) do
+        {:literal, meta, value} when is_list(meta) and is_binary(value) ->
+          subtype = Keyword.get(meta, :subtype)
+
+          if subtype == :string and Enum.any?(@weak_crypto, &String.contains?(value, &1)) do
             [value | acc]
           else
             acc
@@ -261,11 +276,14 @@ defmodule Metastatic.Analysis.Security do
     end) ++ vulns
   end
 
+  # 3-tuple format
   defp find_insecure_urls(ast) do
     walk_ast(ast, [], fn node, acc ->
       case node do
-        {:literal, :string, value} when is_binary(value) ->
-          if String.starts_with?(value, "http://") do
+        {:literal, meta, value} when is_list(meta) and is_binary(value) ->
+          subtype = Keyword.get(meta, :subtype)
+
+          if subtype == :string and String.starts_with?(value, "http://") do
             [value | acc]
           else
             acc
@@ -277,48 +295,41 @@ defmodule Metastatic.Analysis.Security do
     end)
   end
 
-  # Generic AST walker
+  # Generic AST walker (3-tuple format)
   defp walk_ast(ast, acc, func) do
     acc = func.(ast, acc)
 
     case ast do
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         Enum.reduce(statements, acc, fn stmt, a -> walk_ast(stmt, a, func) end)
 
-      {:conditional, cond, then_br, else_br} ->
-        acc = walk_ast(cond, acc, func)
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
+        acc = walk_ast(cond_expr, acc, func)
         acc = walk_ast(then_br, acc, func)
         walk_ast(else_br, acc, func)
 
-      {:binary_op, _, _, left, right} ->
+      {:binary_op, _meta, [left, right]} ->
         acc = walk_ast(left, acc, func)
         walk_ast(right, acc, func)
 
-      {:unary_op, _, _, operand} ->
+      {:unary_op, _meta, [operand]} ->
         walk_ast(operand, acc, func)
 
-      {:function_call, _name, args} when is_list(args) ->
+      {:function_call, _meta, args} when is_list(args) ->
         Enum.reduce(args, acc, fn arg, a -> walk_ast(arg, a, func) end)
 
-      {:assignment, target, value} ->
+      {:assignment, _meta, [target, value]} ->
         acc = walk_ast(target, acc, func)
         walk_ast(value, acc, func)
 
-      {:loop, :while, cond, body} ->
-        acc = walk_ast(cond, acc, func)
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        Enum.reduce(children, acc, fn child, a -> walk_ast(child, a, func) end)
+
+      {:lambda, _meta, [body]} ->
         walk_ast(body, acc, func)
 
-      {:loop, _, _iter, coll, body} ->
-        acc = walk_ast(coll, acc, func)
-        walk_ast(body, acc, func)
-
-      {:lambda, _params, body} ->
-        walk_ast(body, acc, func)
-
-      # M2.2s Structural layer
-      # Container with metadata (7 elements)
-      {:container, _type, _name, _parent, _type_params, _implements, body, metadata}
-      when is_map(metadata) ->
+      # M2.2s Structural layer (3-tuple format)
+      {:container, meta, [body]} when is_list(meta) ->
         # Walk container body (modules, classes, etc.)
         if is_list(body) do
           Enum.reduce(body, acc, fn child, a -> walk_ast(child, a, func) end)
@@ -326,30 +337,14 @@ defmodule Metastatic.Analysis.Security do
           walk_ast(body, acc, func)
         end
 
-      # Container without metadata (6 elements) - legacy
-      {:container, _type, _name, _parent, _type_params, _implements, body} ->
-        # Walk container body (modules, classes, etc.)
-        if is_list(body) do
-          Enum.reduce(body, acc, fn child, a -> walk_ast(child, a, func) end)
-        else
-          walk_ast(body, acc, func)
-        end
-
-      # Function definition with metadata (7 elements)
-      {:function_def, _name, _params, _ret_type, _opts, body, metadata}
-      when is_map(metadata) ->
+      {:function_def, meta, [body]} when is_list(meta) ->
         # Walk function body
         walk_ast(body, acc, func)
 
-      # Function definition without metadata (6 elements) - legacy
-      {:function_def, _name, _params, _ret_type, _opts, body} ->
-        # Walk function body
-        walk_ast(body, acc, func)
-
-      {:language_specific, _lang, _native_ast, _node_type, metadata} when is_map(metadata) ->
+      {:language_specific, meta, native_ast} when is_list(meta) and is_map(native_ast) ->
         # Walk through metadata values (which contain MetaAST)
         # Only walk values that are tuples (AST nodes) or lists
-        Enum.reduce(Map.values(metadata), acc, fn
+        Enum.reduce(Map.values(native_ast), acc, fn
           value, a when is_tuple(value) or is_list(value) -> walk_ast(value, a, func)
           _other, a -> a
         end)

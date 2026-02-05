@@ -3,7 +3,7 @@ defmodule Metastatic.BuilderTest do
 
   alias Metastatic.{Adapter, Builder, Document}
 
-  # Mock adapter for testing Builder functionality
+  # Mock adapter for testing Builder functionality (updated to 3-tuple format)
   defmodule MockPythonAdapter do
     @behaviour Metastatic.Adapter
 
@@ -17,28 +17,35 @@ defmodule Metastatic.BuilderTest do
 
     @impl true
     def to_meta(%{type: "Module", body: [%{type: "Expr", value: "x + 5"}]}) do
-      {:ok, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}},
-       %{python_version: "3.11"}}
+      # New 3-tuple format
+      {:ok,
+       {:binary_op, [category: :arithmetic, operator: :+],
+        [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}, %{python_version: "3.11"}}
     end
 
     def to_meta(%{type: "Module", body: [%{type: "Expr", value: "42"}]}) do
-      {:ok, {:literal, :integer, 42}, %{}}
+      {:ok, {:literal, [subtype: :integer], 42}, %{}}
     end
 
     def to_meta(%{type: "Module", body: [%{type: "Expr", value: source}]}) do
-      {:ok, {:literal, :string, source}, %{}}
+      {:ok, {:literal, [subtype: :string], source}, %{}}
     end
 
     @impl true
-    def from_meta({:literal, :integer, value}, _metadata) do
+    # New 3-tuple format patterns
+    def from_meta({:literal, [subtype: :integer], value}, _metadata) do
       {:ok, %{type: "Module", body: [%{type: "Expr", value: to_string(value)}]}}
     end
 
-    def from_meta({:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}, _) do
+    def from_meta(
+          {:binary_op, [category: :arithmetic, operator: :+],
+           [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
+          _
+        ) do
       {:ok, %{type: "Module", body: [%{type: "Expr", value: "x + 5"}]}}
     end
 
-    def from_meta({:literal, :string, value}, _) do
+    def from_meta({:literal, [subtype: :string], value}, _) do
       {:ok, %{type: "Module", body: [%{type: "Expr", value: value}]}}
     end
 
@@ -67,7 +74,12 @@ defmodule Metastatic.BuilderTest do
       assert {:ok, doc} = Builder.from_source("x + 5", :python)
       assert %Document{} = doc
       assert doc.language == :python
-      assert doc.ast == {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+      # New 3-tuple format
+      assert doc.ast ==
+               {:binary_op, [category: :arithmetic, operator: :+],
+                [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+
       assert doc.original_source == "x + 5"
     end
 
@@ -87,7 +99,7 @@ defmodule Metastatic.BuilderTest do
 
     test "handles simple literals" do
       assert {:ok, doc} = Builder.from_source("42", :python)
-      assert doc.ast == {:literal, :integer, 42}
+      assert doc.ast == {:literal, [subtype: :integer], 42}
     end
   end
 
@@ -99,7 +111,10 @@ defmodule Metastatic.BuilderTest do
 
       assert {:ok, doc} = Builder.from_file(path)
       assert doc.language == :python
-      assert doc.ast == {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+      assert doc.ast ==
+               {:binary_op, [category: :arithmetic, operator: :+],
+                [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
       File.rm!(path)
     end
@@ -111,7 +126,7 @@ defmodule Metastatic.BuilderTest do
 
       assert {:ok, doc} = Builder.from_file(path, :python)
       assert doc.language == :python
-      assert doc.ast == {:literal, :integer, 42}
+      assert doc.ast == {:literal, [subtype: :integer], 42}
 
       File.rm!(path)
     end
@@ -133,7 +148,7 @@ defmodule Metastatic.BuilderTest do
   describe "to_source/2" do
     test "converts document back to source" do
       doc = %Document{
-        ast: {:literal, :integer, 42},
+        ast: {:literal, [subtype: :integer], 42},
         language: :python,
         metadata: %{},
         original_source: "42"
@@ -144,7 +159,9 @@ defmodule Metastatic.BuilderTest do
 
     test "converts binary operation" do
       doc = %Document{
-        ast: {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}},
+        ast:
+          {:binary_op, [category: :arithmetic, operator: :+],
+           [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
         language: :python,
         metadata: %{},
         original_source: "x + 5"
@@ -155,7 +172,7 @@ defmodule Metastatic.BuilderTest do
 
     test "returns error for unknown language" do
       doc = %Document{
-        ast: {:literal, :integer, 42},
+        ast: {:literal, [subtype: :integer], 42},
         language: :unknown,
         metadata: %{},
         original_source: "42"
@@ -166,7 +183,7 @@ defmodule Metastatic.BuilderTest do
 
     test "supports explicit target language" do
       doc = %Document{
-        ast: {:literal, :integer, 42},
+        ast: {:literal, [subtype: :integer], 42},
         language: :elixir,
         metadata: %{},
         original_source: "42"
@@ -180,7 +197,7 @@ defmodule Metastatic.BuilderTest do
   describe "to_file/3" do
     test "writes document to file" do
       doc = %Document{
-        ast: {:literal, :integer, 42},
+        ast: {:literal, [subtype: :integer], 42},
         language: :python,
         metadata: %{},
         original_source: "42"
@@ -195,7 +212,7 @@ defmodule Metastatic.BuilderTest do
 
     test "creates parent directories if needed" do
       doc = %Document{
-        ast: {:literal, :integer, 42},
+        ast: {:literal, [subtype: :integer], 42},
         language: :python,
         metadata: %{},
         original_source: "42"
@@ -215,7 +232,7 @@ defmodule Metastatic.BuilderTest do
 
     test "returns error for invalid path" do
       doc = %Document{
-        ast: {:literal, :integer, 42},
+        ast: {:literal, [subtype: :integer], 42},
         language: :python,
         metadata: %{},
         original_source: "42"
@@ -227,7 +244,7 @@ defmodule Metastatic.BuilderTest do
 
     test "supports target language override" do
       doc = %Document{
-        ast: {:literal, :integer, 42},
+        ast: {:literal, [subtype: :integer], 42},
         language: :elixir,
         metadata: %{},
         original_source: "42"
@@ -304,7 +321,10 @@ defmodule Metastatic.BuilderTest do
 
       # Parse
       assert {:ok, doc} = Builder.from_source(source, :python)
-      assert doc.ast == {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+
+      assert doc.ast ==
+               {:binary_op, [category: :arithmetic, operator: :+],
+                [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
       # Unparse
       assert {:ok, result} = Builder.to_source(doc)

@@ -18,9 +18,9 @@ defmodule Metastatic.Analysis.ControlFlow do
       alias Metastatic.{Document, Analysis.ControlFlow}
 
       # Build CFG
-      ast = {:conditional, {:variable, "x"},
-        {:literal, :integer, 1},
-        {:literal, :integer, 2}}
+      ast = {:conditional, [], [{:variable, [], "x"},
+        {:literal, [subtype: :integer], 1},
+        {:literal, [subtype: :integer], 2}]}
       doc = Document.new(ast, :python)
       {:ok, result} = ControlFlow.analyze(doc)
 
@@ -31,7 +31,7 @@ defmodule Metastatic.Analysis.ControlFlow do
   ## Examples
 
       # Simple literal creates minimal CFG
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.ControlFlow.analyze(doc)
       iex> result.node_count >= 1
@@ -51,7 +51,7 @@ defmodule Metastatic.Analysis.ControlFlow do
 
     ## Examples
 
-        iex> ast = {:literal, :integer, 42}
+        iex> ast = {:literal, [subtype: :integer], 42}
         iex> doc = Metastatic.Document.new(ast, :elixir)
         iex> {:ok, result} = Metastatic.Analysis.ControlFlow.analyze(doc)
         iex> is_integer(result.node_count)
@@ -109,21 +109,33 @@ defmodule Metastatic.Analysis.ControlFlow do
     }
   end
 
+  # 3-tuple format
   defp build_cfg_node(ast, ctx, pred_id) do
     case ast do
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         build_sequential_nodes(statements, ctx, pred_id)
 
-      {:conditional, cond, then_br, else_br} ->
-        build_conditional_node(cond, then_br, else_br, ctx, pred_id)
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
+        build_conditional_node(cond_expr, then_br, else_br, ctx, pred_id)
 
-      {:loop, :while, cond, body} ->
-        build_while_loop_node(cond, body, ctx, pred_id)
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        loop_type = Keyword.get(meta, :loop_type, :for)
 
-      {:loop, _, _iter, _coll, body} ->
-        build_for_loop_node(body, ctx, pred_id)
+        case {loop_type, children} do
+          {:while, [cond_expr, body]} ->
+            build_while_loop_node(cond_expr, body, ctx, pred_id)
 
-      {:early_return, value} ->
+          {_, [_iter, _coll, body]} ->
+            build_for_loop_node(body, ctx, pred_id)
+
+          {_, [body]} ->
+            build_for_loop_node(body, ctx, pred_id)
+
+          _ ->
+            build_simple_node(ast, ctx, pred_id)
+        end
+
+      {:early_return, _meta, [value]} ->
         build_return_node(value, ctx, pred_id)
 
       _ ->

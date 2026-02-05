@@ -5,15 +5,24 @@ defmodule Metastatic.Analysis.RunnerIntegrationTest do
   alias Metastatic.Analysis.Runner
   alias Metastatic.Document
 
+  # Helper functions for building MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+  defp block(stmts), do: {:block, [], stmts}
+  defp conditional(cond, then_b, else_b), do: {:conditional, [], [cond, then_b, else_b]}
+
   describe "run/2 with business logic analyzers" do
     test "runs multiple analyzers in single pass" do
       # AST with both callback hell and hardcoded value
-      deepest = {:conditional, {:variable, "z"}, {:literal, :integer, 3}, nil}
-      middle = {:conditional, {:variable, "y"}, {:block, [deepest]}, nil}
+      deepest = conditional(variable("z"), literal(:integer, 3), nil)
+      middle = conditional(variable("y"), block([deepest]), nil)
 
       outer =
-        {:conditional, {:variable, "x"}, {:block, [middle]},
-         {:block, [{:literal, :string, "https://api.example.com"}]}}
+        conditional(
+          variable("x"),
+          block([middle]),
+          block([literal(:string, "https://api.example.com")])
+        )
 
       doc = Document.new(outer, :python)
 
@@ -44,9 +53,9 @@ defmodule Metastatic.Analysis.RunnerIntegrationTest do
 
     test "respects analyzer-specific configuration" do
       # 3-level nesting
-      deepest = {:conditional, {:variable, "z"}, {:literal, :integer, 3}, {:block, []}}
-      middle = {:conditional, {:variable, "y"}, {:block, [deepest]}, {:block, []}}
-      outer = {:conditional, {:variable, "x"}, {:block, [middle]}, {:block, []}}
+      deepest = conditional(variable("z"), literal(:integer, 3), block([]))
+      middle = conditional(variable("y"), block([deepest]), block([]))
+      outer = conditional(variable("x"), block([middle]), block([]))
 
       doc = Document.new(outer, :python)
 
@@ -71,20 +80,23 @@ defmodule Metastatic.Analysis.RunnerIntegrationTest do
 
     test "provides meaningful summary" do
       # Multiple issues of different types
-      ast = {
-        :block,
-        [
+      ast =
+        block([
           # Callback hell (readability, warning)
-          {:conditional, {:variable, "a"},
-           {:block,
-            [
-              {:conditional, {:variable, "b"},
-               {:block, [{:conditional, {:variable, "c"}, {:literal, :integer, 1}, nil}]}, nil}
-            ]}, nil},
+          conditional(
+            variable("a"),
+            block([
+              conditional(
+                variable("b"),
+                block([conditional(variable("c"), literal(:integer, 1), nil)]),
+                nil
+              )
+            ]),
+            nil
+          ),
           # Hardcoded URL (security, warning)
-          {:literal, :string, "https://prod.example.com"}
-        ]
-      }
+          literal(:string, "https://prod.example.com")
+        ])
 
       doc = Document.new(ast, :javascript)
 
@@ -104,16 +116,14 @@ defmodule Metastatic.Analysis.RunnerIntegrationTest do
 
     test "supports max_issues limit" do
       # Many issues
-      ast = {
-        :block,
-        [
-          {:literal, :string, "https://example1.com"},
-          {:literal, :string, "https://example2.com"},
-          {:literal, :string, "https://example3.com"},
-          {:literal, :string, "https://example4.com"},
-          {:literal, :string, "https://example5.com"}
-        ]
-      }
+      ast =
+        block([
+          literal(:string, "https://example1.com"),
+          literal(:string, "https://example2.com"),
+          literal(:string, "https://example3.com"),
+          literal(:string, "https://example4.com"),
+          literal(:string, "https://example5.com")
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -130,7 +140,7 @@ defmodule Metastatic.Analysis.RunnerIntegrationTest do
     end
 
     test "tracks timing when requested" do
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, nil}
+      ast = conditional(variable("x"), literal(:integer, 1), nil)
       doc = Document.new(ast, :elixir)
 
       {:ok, report} =
@@ -145,7 +155,7 @@ defmodule Metastatic.Analysis.RunnerIntegrationTest do
     end
 
     test "handles empty AST" do
-      doc = Document.new({:block, []}, :python)
+      doc = Document.new(block([]), :python)
 
       {:ok, report} =
         Runner.run(doc,

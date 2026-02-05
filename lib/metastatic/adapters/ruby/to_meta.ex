@@ -44,13 +44,19 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   Returns `{:ok, meta_ast, metadata}` on success or `{:error, reason}` on failure.
 
+  ## New 3-Tuple Format
+
+  All MetaAST nodes are uniform 3-element tuples:
+
+      {type_atom, keyword_meta, children_or_value}
+
   ## Examples
 
       iex> transform(%{"type" => "int", "children" => [42]})
-      {:ok, {:literal, :integer, 42}, %{}}
+      {:ok, {:literal, [subtype: :integer], 42}, %{}}
 
       iex> transform(%{"type" => "lvar", "children" => ["x"]})
-      {:ok, {:variable, "x"}, %{}}
+      {:ok, {:variable, [], "x"}, %{}}
   """
   @spec transform(term()) :: {:ok, term(), map()} | {:error, String.t()}
 
@@ -58,43 +64,43 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # Integer literal
   def transform(%{"type" => "int", "children" => [value]} = ast) when is_integer(value) do
-    {:ok, add_location({:literal, :integer, value}, ast), %{}}
+    {:ok, add_location({:literal, [subtype: :integer], value}, ast), %{}}
   end
 
   # Float literal
   def transform(%{"type" => "float", "children" => [value]} = ast) when is_float(value) do
-    {:ok, add_location({:literal, :float, value}, ast), %{}}
+    {:ok, add_location({:literal, [subtype: :float], value}, ast), %{}}
   end
 
   # String literal
   def transform(%{"type" => "str", "children" => [value]} = ast) when is_binary(value) do
-    {:ok, add_location({:literal, :string, value}, ast), %{}}
+    {:ok, add_location({:literal, [subtype: :string], value}, ast), %{}}
   end
 
   # Symbol literal
   def transform(%{"type" => "sym", "children" => [value]})
       when is_atom(value) or is_binary(value) do
     symbol = if is_binary(value), do: String.to_atom(value), else: value
-    {:ok, {:literal, :symbol, symbol}, %{}}
+    {:ok, {:literal, [subtype: :symbol], symbol}, %{}}
   end
 
   # Boolean literals
   def transform(%{"type" => "true", "children" => []}) do
-    {:ok, {:literal, :boolean, true}, %{}}
+    {:ok, {:literal, [subtype: :boolean], true}, %{}}
   end
 
   def transform(%{"type" => "false", "children" => []}) do
-    {:ok, {:literal, :boolean, false}, %{}}
+    {:ok, {:literal, [subtype: :boolean], false}, %{}}
   end
 
   # Nil literal
   def transform(%{"type" => "nil", "children" => []}) do
-    {:ok, {:literal, :null, nil}, %{}}
+    {:ok, {:literal, [subtype: :null], nil}, %{}}
   end
 
   # Self keyword
   def transform(%{"type" => "self", "children" => []}) do
-    {:ok, {:variable, "self"}, %{scope: :special}}
+    {:ok, {:variable, [scope: :special], "self"}, %{scope: :special}}
   end
 
   # Handle bare nil (used in unary operators)
@@ -105,7 +111,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   # Array literal
   def transform(%{"type" => "array", "children" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:literal, :collection, elements_meta}, %{collection_type: :array}}
+      {:ok, {:list, [], elements_meta}, %{collection_type: :array}}
     end
   end
 
@@ -124,14 +130,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
     case qualified_name do
       {:ok, _, _} = result -> result
-      name when is_binary(name) -> {:ok, {:literal, :constant, name}, %{}}
+      name when is_binary(name) -> {:ok, {:literal, [subtype: :constant], name}, %{}}
     end
   end
 
   # Hash literal
   def transform(%{"type" => "hash", "children" => pairs}) do
     with {:ok, pairs_meta} <- transform_hash_pairs(pairs) do
-      {:ok, {:literal, :collection, pairs_meta}, %{collection_type: :hash}}
+      {:ok, {:map, [], pairs_meta}, %{collection_type: :hash}}
     end
   end
 
@@ -141,28 +147,28 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "lvar", "children" => [name]} = ast)
       when is_binary(name) or is_atom(name) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
-    {:ok, add_location({:variable, var_name}, ast), %{scope: :local}}
+    {:ok, add_location({:variable, [scope: :local], var_name}, ast), %{scope: :local}}
   end
 
   # Instance variable (@var)
   def transform(%{"type" => "ivar", "children" => [name]})
       when is_binary(name) or is_atom(name) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
-    {:ok, {:variable, var_name}, %{scope: :instance}}
+    {:ok, {:variable, [scope: :instance], var_name}, %{scope: :instance}}
   end
 
   # Class variable (@@var)
   def transform(%{"type" => "cvar", "children" => [name]})
       when is_binary(name) or is_atom(name) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
-    {:ok, {:variable, var_name}, %{scope: :class}}
+    {:ok, {:variable, [scope: :class], var_name}, %{scope: :class}}
   end
 
   # Global variable ($var)
   def transform(%{"type" => "gvar", "children" => [name]})
       when is_binary(name) or is_atom(name) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
-    {:ok, {:variable, var_name}, %{scope: :global}}
+    {:ok, {:variable, [scope: :global], var_name}, %{scope: :global}}
   end
 
   # Binary Operations - M2.1 Core Layer
@@ -178,7 +184,11 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
         with {:ok, left_meta, _} <- transform(left),
              {:ok, right_meta, _} <- transform(right) do
-          {:ok, add_location({:binary_op, :arithmetic, op_atom, left_meta, right_meta}, ast), %{}}
+          {:ok,
+           add_location(
+             {:binary_op, [category: :arithmetic, operator: op_atom], [left_meta, right_meta]},
+             ast
+           ), %{}}
         end
 
       is_comparison_op?(op) ->
@@ -186,7 +196,11 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
         with {:ok, left_meta, _} <- transform(left),
              {:ok, right_meta, _} <- transform(right) do
-          {:ok, add_location({:binary_op, :comparison, op_atom, left_meta, right_meta}, ast), %{}}
+          {:ok,
+           add_location(
+             {:binary_op, [category: :comparison, operator: op_atom], [left_meta, right_meta]},
+             ast
+           ), %{}}
         end
 
       true ->
@@ -199,14 +213,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "and", "children" => [left, right]}) do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :boolean, :and, left_meta, right_meta}, %{}}
+      {:ok, {:binary_op, [category: :boolean, operator: :and], [left_meta, right_meta]}, %{}}
     end
   end
 
   def transform(%{"type" => "or", "children" => [left, right]}) do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:binary_op, :boolean, :or, left_meta, right_meta}, %{}}
+      {:ok, {:binary_op, [category: :boolean, operator: :or], [left_meta, right_meta]}, %{}}
     end
   end
 
@@ -219,12 +233,12 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     cond do
       op_atom in [:-, :+] ->
         with {:ok, operand_meta, _} <- transform(operand) do
-          {:ok, {:unary_op, :arithmetic, op_atom, operand_meta}, %{}}
+          {:ok, {:unary_op, [category: :arithmetic, operator: op_atom], [operand_meta]}, %{}}
         end
 
       op_atom == :! ->
         with {:ok, operand_meta, _} <- transform(operand) do
-          {:ok, {:unary_op, :boolean, :not, operand_meta}, %{}}
+          {:ok, {:unary_op, [category: :boolean, operator: :not], [operand_meta]}, %{}}
         end
 
       true ->
@@ -239,21 +253,22 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
     if is_nil(receiver) do
       # Local method call without args: hello
-      {:ok, {:function_call, method_str, []}, %{call_type: :local}}
+      {:ok, {:function_call, [name: method_str], []}, %{call_type: :local}}
     else
       # Check if this looks like attribute access (not a method call)
       # In Ruby, obj.attr without parentheses could be either
       # For simplicity, treat as attribute_access if receiver is a variable
       with {:ok, receiver_meta, _} <- transform(receiver) do
         case receiver_meta do
-          {:variable, _} ->
+          {:variable, _, _} ->
             # Likely attribute access: obj.field
-            {:ok, {:attribute_access, receiver_meta, method_str}, %{kind: :instance_var}}
+            {:ok, {:attribute_access, [attribute: method_str], [receiver_meta]},
+             %{kind: :instance_var}}
 
           _ ->
             # Method call with receiver but no arguments: obj.method
             qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
-            {:ok, {:function_call, qualified_name, []}, %{call_type: :instance}}
+            {:ok, {:function_call, [name: qualified_name], []}, %{call_type: :instance}}
         end
       end
     end
@@ -266,7 +281,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     method_str = if is_atom(method_name), do: Atom.to_string(method_name), else: method_name
 
     with {:ok, args_meta} <- transform_list(args) do
-      {:ok, {:function_call, method_str, args_meta}, %{call_type: :local}}
+      {:ok, {:function_call, [name: method_str], args_meta}, %{call_type: :local}}
     end
   end
 
@@ -278,7 +293,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       # For now, represent as "receiver.method" format
       # In future, might want to preserve receiver as separate field
       method_str = "#{format_receiver(receiver_meta)}.#{method_name}"
-      {:ok, {:function_call, method_str, args_meta}, %{call_type: :instance}}
+      {:ok, {:function_call, [name: method_str], args_meta}, %{call_type: :instance}}
     end
   end
 
@@ -289,7 +304,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, cond_meta, _} <- transform(condition),
          {:ok, then_meta, _} <- transform_or_nil(then_branch),
          {:ok, else_meta, _} <- transform_or_nil(else_branch) do
-      {:ok, {:conditional, cond_meta, then_meta, else_meta}, %{}}
+      {:ok, {:conditional, [], [cond_meta, then_meta, else_meta]}, %{}}
     end
   end
 
@@ -303,14 +318,15 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
 
     with {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:assignment, {:variable, var_name}, value_meta}, %{scope: :local}}
+      {:ok, {:assignment, [scope: :local], [{:variable, [], var_name}, value_meta]},
+       %{scope: :local}}
     end
   end
 
   # Local variable binding (without value, e.g., in rescue clauses)
   def transform(%{"type" => "lvasgn", "children" => [name]}) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
-    {:ok, {:variable, var_name}, %{scope: :local, binding: true}}
+    {:ok, {:variable, [scope: :local], var_name}, %{scope: :local, binding: true}}
   end
 
   # Instance variable assignment
@@ -318,7 +334,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
 
     with {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:assignment, {:variable, var_name}, value_meta}, %{scope: :instance}}
+      {:ok, {:assignment, [scope: :instance], [{:variable, [], var_name}, value_meta]},
+       %{scope: :instance}}
     end
   end
 
@@ -327,7 +344,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
 
     with {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:assignment, {:variable, var_name}, value_meta}, %{scope: :class}}
+      {:ok, {:assignment, [scope: :class], [{:variable, [], var_name}, value_meta]},
+       %{scope: :class}}
     end
   end
 
@@ -336,7 +354,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
 
     with {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:assignment, {:variable, var_name}, value_meta}, %{scope: :global}}
+      {:ok, {:assignment, [scope: :global], [{:variable, [], var_name}, value_meta]},
+       %{scope: :global}}
     end
   end
 
@@ -355,7 +374,9 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
           true -> :other
         end
 
-      {:ok, {:augmented_assignment, category, op_atom, target_meta, value_meta}, %{}}
+      {:ok,
+       {:augmented_assignment, [category: category, operator: op_atom],
+        [target_meta, value_meta]}, %{}}
     end
   end
 
@@ -364,7 +385,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   # Begin block (sequential statements)
   def transform(%{"type" => "begin", "children" => statements}) when is_list(statements) do
     with {:ok, statements_meta} <- transform_list(statements) do
-      {:ok, {:block, statements_meta}, %{}}
+      {:ok, {:block, [], statements_meta}, %{}}
     end
   end
 
@@ -374,7 +395,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "while", "children" => [condition, body]}) do
     with {:ok, cond_meta, _} <- transform(condition),
          {:ok, body_meta, _} <- transform_or_nil(body) do
-      {:ok, {:loop, :while, cond_meta, body_meta}, %{}}
+      {:ok, {:loop, [loop_type: :while], [cond_meta, body_meta]}, %{}}
     end
   end
 
@@ -383,8 +404,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, cond_meta, _} <- transform(condition),
          {:ok, body_meta, _} <- transform_or_nil(body) do
       # Until is equivalent to "while not condition"
-      negated_cond = {:unary_op, :boolean, :not, cond_meta}
-      {:ok, {:loop, :while, negated_cond, body_meta}, %{original_type: :until}}
+      negated_cond = {:unary_op, [category: :boolean, operator: :not], [cond_meta]}
+      {:ok, {:loop, [loop_type: :while], [negated_cond, body_meta]}, %{original_type: :until}}
     end
   end
 
@@ -393,7 +414,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, var_meta, _} <- transform_iterator_variable(var_asgn),
          {:ok, collection_meta, _} <- transform(collection),
          {:ok, body_meta, _} <- transform_or_nil(body) do
-      {:ok, {:loop, :for_each, var_meta, collection_meta, body_meta}, %{}}
+      {:ok, {:loop, [loop_type: :for_each], [var_meta, collection_meta, body_meta]}, %{}}
     end
   end
 
@@ -426,7 +447,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, scrutinee_meta, _} <- transform(scrutinee),
          {:ok, branches_meta} <- transform_when_branches(when_branches),
          {:ok, else_meta, _} <- transform_or_nil(else_branch) do
-      {:ok, {:pattern_match, scrutinee_meta, branches_meta, else_meta}, %{}}
+      {:ok, {:pattern_match, [], [scrutinee_meta, branches_meta, else_meta]}, %{}}
     end
   end
 
@@ -453,7 +474,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
         # Only ensure, no rescue
         with {:ok, try_meta, _} <- transform(try_body),
              {:ok, ensure_meta, _} <- transform(ensure_body) do
-          {:ok, {:exception_handling, try_meta, [], nil}, %{ensure: ensure_meta}}
+          {:ok, {:exception_handling, [], [try_meta, [], nil]}, %{ensure: ensure_meta}}
         end
     end
   end
@@ -467,7 +488,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, try_meta, _} <- transform(try_body),
          {:ok, handlers_meta} <- transform_rescue_handlers(rescue_handlers),
          {:ok, else_meta, _} <- transform_or_nil(else_body) do
-      {:ok, {:exception_handling, try_meta, handlers_meta, else_meta}, %{}}
+      {:ok, {:exception_handling, [], [try_meta, handlers_meta, else_meta]}, %{}}
     end
   end
 
@@ -487,8 +508,9 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
         module: class_name
       }
 
-      # Create container: {:container, type, name, parent, type_params, implements, body}
-      container = {:container, :class, class_name, parent_name, [], [], body_meta}
+      # Create container: {:container, [container_type: :class, name: name, ...], [body]}
+      container =
+        {:container, [container_type: :class, name: class_name, parent: parent_name], [body_meta]}
 
       {:ok, add_location_with_context(container, ast, class_context),
        %{ruby_ast: ast, superclass: superclass_meta}}
@@ -507,8 +529,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
         module: module_name
       }
 
-      # Create container: {:container, type, name, parent, type_params, implements, body}
-      container = {:container, :module, module_name, nil, [], [], body_meta}
+      # Create container: {:container, [container_type: :module, name: name], [body]}
+      container = {:container, [container_type: :module, name: module_name], [body_meta]}
 
       {:ok, add_location_with_context(container, ast, module_context), %{ruby_ast: ast}}
     end
@@ -532,9 +554,10 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
         visibility: :public
       }
 
-      # Create function_def: {:function_def, name, params, ret_type, opts, body}
+      # Create function_def: {:function_def, [name: name, params: params, ...], [body]}
       function_def =
-        {:function_def, method_name, params, nil, %{visibility: :public, arity: arity}, body_meta}
+        {:function_def, [name: method_name, params: params, visibility: :public, arity: arity],
+         [body_meta]}
 
       {:ok, add_location_with_context(function_def, ast, func_context), %{ruby_ast: ast}}
     end
@@ -551,7 +574,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       # For class methods (def self.method), qualify the name
       qualified_name =
         case receiver_meta do
-          {:variable, "self"} -> "self.#{method_name}"
+          {:variable, _, "self"} -> "self.#{method_name}"
           _ -> "#{format_receiver(receiver_meta)}.#{method_name}"
         end
 
@@ -567,8 +590,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
       # Create function_def with qualified name
       function_def =
-        {:function_def, qualified_name, params, nil, %{visibility: :public, arity: arity},
-         body_meta}
+        {:function_def, [name: qualified_name, params: params, visibility: :public, arity: arity],
+         [body_meta]}
 
       {:ok, add_location_with_context(function_def, ast, func_context),
        %{ruby_ast: ast, is_class_method: true}}
@@ -590,7 +613,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
         value: value_meta
       }
 
-      {:ok, {:language_specific, :ruby, ast, :constant_assignment}, metadata}
+      {:ok, {:language_specific, [language: :ruby, hint: :constant_assignment], ast}, metadata}
     end
   end
 
@@ -598,7 +621,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "yield", "children" => args} = ast) do
     with {:ok, args_meta} <- transform_list(args) do
       metadata = %{args: args_meta}
-      {:ok, {:language_specific, :ruby, ast, :yield}, metadata}
+      {:ok, {:language_specific, [language: :ruby, hint: :yield], ast}, metadata}
     end
   end
 
@@ -608,14 +631,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     old_sym = extract_symbol_name(old_name)
 
     metadata = %{new_name: new_sym, old_name: old_sym}
-    {:ok, {:language_specific, :ruby, ast, :alias}, metadata}
+    {:ok, {:language_specific, [language: :ruby, hint: :alias], ast}, metadata}
   end
 
   # String interpolation (dstr)
   def transform(%{"type" => "dstr", "children" => parts} = ast) do
     with {:ok, parts_meta} <- transform_string_parts(parts) do
       metadata = %{parts: parts_meta}
-      {:ok, {:language_specific, :ruby, ast, :string_interpolation}, metadata}
+      {:ok, {:language_specific, [language: :ruby, hint: :string_interpolation], ast}, metadata}
     end
   end
 
@@ -623,7 +646,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "regexp", "children" => [pattern | options]} = ast) do
     with {:ok, pattern_meta, _} <- transform(pattern) do
       metadata = %{pattern: pattern_meta, options: options}
-      {:ok, {:language_specific, :ruby, ast, :regexp}, metadata}
+      {:ok, {:language_specific, [language: :ruby, hint: :regexp], ast}, metadata}
     end
   end
 
@@ -632,7 +655,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, object_meta, _} <- transform(object),
          {:ok, body_meta, _} <- transform_or_nil(body) do
       metadata = %{object: object_meta, body: body_meta}
-      {:ok, {:language_specific, :ruby, ast, :singleton_class}, metadata}
+      {:ok, {:language_specific, [language: :ruby, hint: :singleton_class], ast}, metadata}
     end
   end
 
@@ -640,13 +663,13 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "super", "children" => args} = ast) do
     with {:ok, args_meta} <- transform_list(args) do
       metadata = %{args: args_meta}
-      {:ok, {:language_specific, :ruby, ast, :super}, metadata}
+      {:ok, {:language_specific, [language: :ruby, hint: :super], ast}, metadata}
     end
   end
 
   # Zsuper (super with no arguments, passes all parent arguments)
   def transform(%{"type" => "zsuper", "children" => []} = ast) do
-    {:ok, {:language_specific, :ruby, ast, :zsuper}, %{}}
+    {:ok, {:language_specific, [language: :ruby, hint: :zsuper], ast}, %{}}
   end
 
   # Catch-all for unsupported constructs
@@ -691,7 +714,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp transform_hash_pair(%{"type" => "pair", "children" => [key, value]}) do
     with {:ok, key_meta, _} <- transform(key),
          {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:tuple, [key_meta, value_meta]}}
+      {:ok, {:pair, [], [key_meta, value_meta]}}
     end
   end
 
@@ -699,10 +722,11 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     {:error, "Invalid hash pair: #{inspect(other)}"}
   end
 
-  defp format_receiver({:variable, name}), do: name
+  defp format_receiver({:variable, _, name}), do: name
   defp format_receiver(_), do: "obj"
 
-  defp format_const({:literal, :constant, name}), do: name
+  defp format_const({:literal, [subtype: :constant], name}), do: name
+  defp format_const({:literal, _, name}) when is_binary(name), do: name
   defp format_const(_), do: "Unknown"
 
   # Operator normalization helpers
@@ -751,7 +775,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp transform_lambda(args_node, body) do
     with {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
-      {:ok, {:lambda, params, body_meta}, %{}}
+      {:ok, {:lambda, [params: params, captures: []], [body_meta]}, %{}}
     end
   end
 
@@ -792,8 +816,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, collection_meta, _} <- transform(collection),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
-      lambda = {:lambda, params, body_meta}
-      {:ok, {:collection_op, method, lambda, collection_meta}, %{}}
+      lambda = {:lambda, [params: params, captures: []], [body_meta]}
+      {:ok, {:collection_op, [op_type: method], [lambda, collection_meta]}, %{}}
     end
   end
 
@@ -803,8 +827,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
          {:ok, initial_meta} <- extract_reduce_initial(method_args),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
-      lambda = {:lambda, params, body_meta}
-      {:ok, {:collection_op, :reduce, lambda, collection_meta, initial_meta}, %{}}
+      lambda = {:lambda, [params: params, captures: []], [body_meta]}
+      {:ok, {:collection_op, [op_type: :reduce], [lambda, collection_meta, initial_meta]}, %{}}
     end
   end
 
@@ -883,10 +907,12 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # M2.2s Structural Layer Helpers
 
-  defp extract_constant_name({:literal, :constant, name}), do: name
+  defp extract_constant_name({:literal, [subtype: :constant], name}), do: name
+  defp extract_constant_name({:literal, _, name}) when is_binary(name), do: name
   defp extract_constant_name(_), do: "Unknown"
 
-  defp extract_parent_name({:literal, :constant, name}), do: name
+  defp extract_parent_name({:literal, [subtype: :constant], name}), do: name
+  defp extract_parent_name({:literal, _, name}) when is_binary(name), do: name
   defp extract_parent_name(nil), do: nil
   defp extract_parent_name(_), do: nil
 
@@ -944,43 +970,46 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   end
 
   # Location extraction helpers
+  # For 3-tuple format: {type, keyword_meta, value_or_children}
+  # Location info is merged into the keyword_meta (2nd element)
   @doc false
-  @spec add_location(term(), map()) :: map() | nil
-  defp add_location(meta_ast, %{"location" => loc}) when is_map(loc) do
-    location =
-      %{}
-      |> maybe_put(:line, loc["begin_line"])
-      |> maybe_put(:col, loc["begin_column"])
-      |> maybe_put(:end_line, loc["begin_line"])
-      |> maybe_put(:end_col, nil)
+  @spec add_location(tuple(), map()) :: tuple()
+  defp add_location({type, meta, value_or_children}, %{"location" => loc}) when is_map(loc) do
+    location_fields =
+      []
+      |> maybe_prepend(:line, loc["begin_line"])
+      |> maybe_prepend(:col, loc["begin_column"])
+      |> maybe_prepend(:end_line, loc["end_line"] || loc["begin_line"])
+      |> maybe_prepend(:end_col, loc["end_column"])
 
-    if map_size(location) > 0 do
-      Tuple.insert_at(meta_ast, tuple_size(meta_ast), location)
-    else
-      meta_ast
-    end
+    {type, meta ++ location_fields, value_or_children}
   end
 
   defp add_location(meta_ast, _ast_node), do: meta_ast
 
   # Add location and context metadata (for M1 metadata preservation)
+  # Merges both location and context into keyword_meta
   @doc false
-  defp add_location_with_context(meta_ast, %{"location" => loc}, context)
+  defp add_location_with_context({type, meta, value_or_children}, %{"location" => loc}, context)
        when is_map(loc) and is_map(context) do
-    location =
-      context
-      |> maybe_put(:line, loc["begin_line"])
-      |> maybe_put(:col, loc["begin_column"])
-      |> maybe_put(:end_line, loc["end_line"])
-      |> maybe_put(:end_col, loc["end_column"])
+    location_fields =
+      []
+      |> maybe_prepend(:line, loc["begin_line"])
+      |> maybe_prepend(:col, loc["begin_column"])
+      |> maybe_prepend(:end_line, loc["end_line"])
+      |> maybe_prepend(:end_col, loc["end_column"])
 
-    Tuple.insert_at(meta_ast, tuple_size(meta_ast), location)
+    context_fields = Enum.map(context, fn {k, v} -> {k, v} end)
+
+    {type, meta ++ location_fields ++ context_fields, value_or_children}
   end
 
-  defp add_location_with_context(meta_ast, _ast, context) when is_map(context) do
-    Tuple.insert_at(meta_ast, tuple_size(meta_ast), context)
+  defp add_location_with_context({type, meta, value_or_children}, _ast, context)
+       when is_map(context) do
+    context_fields = Enum.map(context, fn {k, v} -> {k, v} end)
+    {type, meta ++ context_fields, value_or_children}
   end
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+  defp maybe_prepend(list, _key, nil), do: list
+  defp maybe_prepend(list, key, value), do: [{key, value} | list]
 end

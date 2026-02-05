@@ -148,6 +148,31 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   end
 
   @impl true
+  # New 3-tuple format: {:collection_op, [op_type: operation], [lambda, collection]}
+  def analyze({:collection_op, meta, [lambda | _rest]} = node, _context) when is_list(meta) do
+    operation = Keyword.get(meta, :op_type)
+
+    if operation in [:map, :each, :flat_map, :reduce] and contains_database_operation?(lambda) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :performance,
+          severity: :warning,
+          message:
+            "Potential N+1 query: database operation inside #{operation} - consider eager loading",
+          node: node,
+          metadata: %{
+            collection_operation: operation,
+            suggestion: "Use eager loading (preload/include/select_related) to fetch data upfront"
+          }
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  # Legacy 4-tuple format
   def analyze({:collection_op, operation, lambda, _collection} = node, _context)
       when operation in [:map, :each, :flat_map, :reduce] do
     if contains_database_operation?(lambda) do
@@ -175,13 +200,27 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   # ----- Private Helpers -----
 
   # Check if AST contains database operations
+  # New 3-tuple format: {:lambda, [params: [...], ...], [body]} - meta is keyword list with :params
+  defp contains_database_operation?({:lambda, meta, children})
+       when is_list(meta) and is_list(children) do
+    # In new format, children is a list containing the body
+    # Check if meta looks like keyword metadata (has atom keys, not tuple elements)
+    if Keyword.keyword?(meta) do
+      Enum.any?(children, &contains_database_call?/1)
+    else
+      # Old format where meta is actually params list like [{:variable, "x"}]
+      # children is actually the body
+      contains_database_call?(children)
+    end
+  end
+
   defp contains_database_operation?({:lambda, _params, _captures, body}) do
     # Lambda is {:lambda, params, captures, body}
     contains_database_call?(body)
   end
 
   defp contains_database_operation?({:lambda, _params, body}) do
-    # Old 3-tuple format for backwards compat
+    # Old 3-tuple format for backwards compat - body is not a list
     contains_database_call?(body)
   end
 
@@ -193,8 +232,19 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   defp contains_database_operation?(_), do: false
 
   # Recursively search for database-like function calls
+  # New 3-tuple format: {:block, meta, statements}
+  defp contains_database_call?({:block, _meta, statements}) when is_list(statements) do
+    Enum.any?(statements, &contains_database_call?/1)
+  end
+
   defp contains_database_call?({:block, statements}) when is_list(statements) do
     Enum.any?(statements, &contains_database_call?/1)
+  end
+
+  # New 3-tuple function_call: {:function_call, [name: name], args}
+  defp contains_database_call?({:function_call, meta, _args}) when is_list(meta) do
+    func_name = Keyword.get(meta, :name, "")
+    database_function?(func_name)
   end
 
   defp contains_database_call?({:function_call, func_name, _args}) when is_atom(func_name) do
@@ -206,11 +256,26 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
   end
 
   # Check attribute access patterns like: obj.method()
+  # New 3-tuple: {:attribute_access, meta, [obj, attr]}
+  defp contains_database_call?({:attribute_access, _meta, [_obj, attr]}) when is_atom(attr) do
+    database_function?(attr)
+  end
+
+  defp contains_database_call?({:attribute_access, _meta, [_obj, {:literal, _, attr}]})
+       when is_binary(attr) or is_atom(attr) do
+    database_function?(attr)
+  end
+
   defp contains_database_call?({:attribute_access, _obj, attr}) when is_atom(attr) do
     database_function?(attr)
   end
 
   # Recurse into nested structures
+  # New 3-tuple: {:conditional, meta, [cond, then, else]}
+  defp contains_database_call?({:conditional, _meta, [_cond, then_branch, else_branch]}) do
+    contains_database_call?(then_branch) or contains_database_call?(else_branch)
+  end
+
   defp contains_database_call?({:conditional, _cond, then_branch, else_branch}) do
     contains_database_call?(then_branch) or contains_database_call?(else_branch)
   end

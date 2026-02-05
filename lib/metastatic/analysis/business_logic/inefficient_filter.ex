@@ -141,8 +141,20 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
   end
 
   @impl true
-  def analyze({:block, statements}, context) when is_list(statements) do
+  # New 3-tuple format: {:block, meta, statements}
+  def analyze({:block, _meta, statements}, context) when is_list(statements) do
     # Look for assignment followed by filter pattern
+    find_fetch_filter_pattern(statements, context)
+  end
+
+  # Function definition body: {:function_def, [name: ...], body_list}
+  # The body is a list of statements that needs to be analyzed for patterns
+  def analyze({:function_def, _meta, body}, context) when is_list(body) do
+    find_fetch_filter_pattern(body, context)
+  end
+
+  # Legacy format
+  def analyze({:block, statements}, context) when is_list(statements) do
     find_fetch_filter_pattern(statements, context)
   end
 
@@ -153,74 +165,120 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
   defp find_fetch_filter_pattern(statements, _context) do
     statements
     |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.flat_map(fn
-      # Assignment of fetch-all followed by filter on same variable
-      [
-        {:assignment, var, fetch_expr},
-        {:collection_op, :filter, _lambda, filter_var}
-      ] ->
-        if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
-          loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
-
-          [
-            Analyzer.issue(
-              analyzer: __MODULE__,
-              category: :performance,
-              severity: :warning,
-              message:
-                "Inefficient filter: fetching all data then filtering in memory - push filter to data source",
-              node: {:block, [fetch_expr, filter_var]},
-              location: make_location(loc),
-              metadata: %{
-                suggestion:
-                  "Use database query filters (WHERE clause) instead of fetching all then filtering"
-              }
-            )
-          ]
-        else
-          []
-        end
-
-      # Inline match (Elixir pattern matching) followed by filter
-      [
-        {:inline_match, var, fetch_expr},
-        {:collection_op, :filter, _lambda, filter_var}
-      ] ->
-        if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
-          loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
-
-          [
-            Analyzer.issue(
-              analyzer: __MODULE__,
-              category: :performance,
-              severity: :warning,
-              message:
-                "Inefficient filter: fetching all data then filtering in memory - push filter to data source",
-              node: {:block, [fetch_expr, filter_var]},
-              location: make_location(loc),
-              metadata: %{
-                suggestion:
-                  "Use database query filters (WHERE clause) instead of fetching all then filtering"
-              }
-            )
-          ]
-        else
-          []
-        end
-
-      _ ->
-        []
-    end)
+    |> Enum.flat_map(fn pair -> check_fetch_filter_pair(pair) end)
   end
 
-  # Check if two variable references match (handle location-aware nodes)
+  # New 3-tuple format: {:assignment, meta, [var, expr]} + {:collection_op, [op_type: :filter], [lambda, coll]}
+  defp check_fetch_filter_pair([
+         {:assignment, _meta, [var, fetch_expr]},
+         {:collection_op, coll_meta, [_lambda, filter_var]}
+       ])
+       when is_list(coll_meta) do
+    op_type = Keyword.get(coll_meta, :op_type)
+
+    if op_type == :filter and variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+      loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
+      [make_issue(fetch_expr, filter_var, loc)]
+    else
+      []
+    end
+  end
+
+  # Legacy 3-tuple assignment + new collection_op
+  defp check_fetch_filter_pair([
+         {:assignment, var, fetch_expr},
+         {:collection_op, coll_meta, [_lambda, filter_var]}
+       ])
+       when is_list(coll_meta) do
+    op_type = Keyword.get(coll_meta, :op_type)
+
+    if op_type == :filter and variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+      loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
+      [make_issue(fetch_expr, filter_var, loc)]
+    else
+      []
+    end
+  end
+
+  # Legacy 4-tuple collection_op
+  defp check_fetch_filter_pair([
+         {:assignment, var, fetch_expr},
+         {:collection_op, :filter, _lambda, filter_var}
+       ]) do
+    if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+      loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
+      [make_issue(fetch_expr, filter_var, loc)]
+    else
+      []
+    end
+  end
+
+  # Inline match patterns
+  defp check_fetch_filter_pair([
+         {:inline_match, _meta, [var, fetch_expr]},
+         {:collection_op, coll_meta, [_lambda, filter_var]}
+       ])
+       when is_list(coll_meta) do
+    op_type = Keyword.get(coll_meta, :op_type)
+
+    if op_type == :filter and variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+      loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
+      [make_issue(fetch_expr, filter_var, loc)]
+    else
+      []
+    end
+  end
+
+  defp check_fetch_filter_pair([
+         {:inline_match, var, fetch_expr},
+         {:collection_op, :filter, _lambda, filter_var}
+       ]) do
+    if variables_match?(var, filter_var) and fetch_all?(fetch_expr) do
+      loc = Metastatic.AST.location(filter_var) || Metastatic.AST.location(fetch_expr)
+      [make_issue(fetch_expr, filter_var, loc)]
+    else
+      []
+    end
+  end
+
+  defp check_fetch_filter_pair(_), do: []
+
+  defp make_issue(fetch_expr, filter_var, loc) do
+    Analyzer.issue(
+      analyzer: __MODULE__,
+      category: :performance,
+      severity: :warning,
+      message:
+        "Inefficient filter: fetching all data then filtering in memory - push filter to data source",
+      node: {:block, [], [fetch_expr, filter_var]},
+      location: make_location(loc),
+      metadata: %{
+        suggestion:
+          "Use database query filters (WHERE clause) instead of fetching all then filtering"
+      }
+    )
+  end
+
+  # Check if two variable references match (handle both formats)
+  # New 3-tuple: {:variable, meta, name} or {:variable, [], name}
+  defp variables_match?({:variable, _meta1, name1}, {:variable, _meta2, name2}),
+    do: name1 == name2
+
+  defp variables_match?({:variable, _meta1, name1}, {:variable, name2}), do: name1 == name2
+  defp variables_match?({:variable, _meta1, name1}, {:variable, name2, _loc}), do: name1 == name2
   defp variables_match?({:variable, name1}, {:variable, name2}), do: name1 == name2
   defp variables_match?({:variable, name1, _loc}, {:variable, name2}), do: name1 == name2
   defp variables_match?({:variable, name1}, {:variable, name2, _loc}), do: name1 == name2
   defp variables_match?({:variable, name1, _loc1}, {:variable, name2, _loc2}), do: name1 == name2
   defp variables_match?(_, _), do: false
 
-  # Check if expression is a "fetch all" operation (handle location-aware nodes)
+  # Check if expression is a "fetch all" operation (handle all formats)
+  # New 3-tuple: {:function_call, [name: name], args}
+  defp fetch_all?({:function_call, meta, _args}) when is_list(meta) do
+    func_name = Keyword.get(meta, :name, "")
+    fetch_all_function?(func_name)
+  end
+
   defp fetch_all?({:function_call, func_name, _args, _loc}) when is_atom(func_name) do
     fetch_all_function?(func_name)
   end
@@ -235,6 +293,11 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
 
   defp fetch_all?({:function_call, func_name, _args}) when is_binary(func_name) do
     fetch_all_function?(func_name)
+  end
+
+  # New 3-tuple: {:attribute_access, meta, [obj, method]}
+  defp fetch_all?({:attribute_access, _meta, [_obj, method]}) when is_atom(method) do
+    fetch_all_function?(method)
   end
 
   defp fetch_all?({:attribute_access, _obj, method, _loc}) when is_atom(method) do

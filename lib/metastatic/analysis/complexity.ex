@@ -20,9 +20,10 @@ defmodule Metastatic.Analysis.Complexity do
       alias Metastatic.{Document, Analysis.Complexity}
 
       # Analyze a document
-      ast = {:conditional, {:variable, "x"},
-        {:literal, :integer, 1},
-        {:literal, :integer, 2}}
+      ast = {:conditional, [], [
+        {:variable, [], "x"},
+        {:literal, [subtype: :integer], 1},
+        {:literal, [subtype: :integer], 2}]}
       doc = Document.new(ast, :python)
       {:ok, result} = Complexity.analyze(doc)
 
@@ -40,16 +41,17 @@ defmodule Metastatic.Analysis.Complexity do
   ## Examples
 
       # Simple arithmetic: complexity = 1
-      iex> ast = {:binary_op, :arithmetic, :+, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Complexity.analyze(doc)
       iex> result.cyclomatic
       1
 
       # Conditional: complexity = 2
-      iex> ast = {:conditional, {:variable, "x"},
-      ...>   {:literal, :integer, 1},
-      ...>   {:literal, :integer, 2}}
+      iex> ast = {:conditional, [], [
+      ...>   {:variable, [], "x"},
+      ...>   {:literal, [subtype: :integer], 1},
+      ...>   {:literal, [subtype: :integer], 2}]}
       iex> doc = Metastatic.Document.new(ast, :elixir)
       iex> {:ok, result} = Metastatic.Analysis.Complexity.analyze(doc)
       iex> result.cyclomatic
@@ -86,7 +88,7 @@ defmodule Metastatic.Analysis.Complexity do
     ## Examples
 
         # Using Document
-        iex> ast = {:literal, :integer, 42}
+        iex> ast = {:literal, [subtype: :integer], 42}
         iex> doc = Metastatic.Document.new(ast, :python)
         iex> {:ok, result} = Metastatic.Analysis.Complexity.analyze(doc)
         iex> result.cyclomatic
@@ -189,114 +191,57 @@ defmodule Metastatic.Analysis.Complexity do
   #
   # For accurate per-function complexity analysis, analyze individual functions
   # directly rather than entire modules.
-  defp extract_analyzable_ast({:language_specific, _lang, _native, hint}, metadata)
-       when hint in [:module_definition, :function_definition] do
-    Map.get(metadata, :body, {:block, []})
+
+  # 3-tuple format: {:language_specific, meta, native_ast}
+  defp extract_analyzable_ast({:language_specific, meta, _native}, metadata)
+       when is_list(meta) do
+    hint = Keyword.get(meta, :hint)
+
+    if hint in [:module_definition, :function_definition] do
+      Map.get(metadata, :body, {:block, [], []})
+    else
+      Map.get(metadata, :body, {:block, [], []})
+    end
   end
 
-  # M2.2s: Structural types - extract members/body for analysis
-  # NEW format with metadata: {:container, type, name, parent, type_params, implements, body, metadata}
-  defp extract_analyzable_ast(
-         {:container, _type, _name, _parent, _type_params, _implements, body, metadata},
-         _doc_metadata
-       )
-       when is_map(metadata) do
-    # For containers, analyze the aggregate complexity of all members
+  # 3-tuple format: {:container, meta, [body]}
+  defp extract_analyzable_ast({:container, meta, [body]}, _doc_metadata)
+       when is_list(meta) do
     if is_list(body) do
-      {:block, body}
+      {:block, [], body}
     else
       body
     end
   end
 
-  # Legacy format: {:container, type, name, parent, type_params, implements, body}
-  defp extract_analyzable_ast(
-         {:container, _type, _name, _parent, _type_params, _implements, body},
-         _doc_metadata
-       ) do
-    # For containers, analyze the aggregate complexity of all members
-    if is_list(body) do
-      {:block, body}
-    else
-      body
-    end
-  end
-
-  # NEW format with metadata: {:function_def, name, params, ret_type, opts, body, metadata}
-  defp extract_analyzable_ast(
-         {:function_def, _name, _params, _ret_type, _opts, body, metadata},
-         _doc_metadata
-       )
-       when is_map(metadata) do
-    # For function definitions, analyze the body
-    body
-  end
-
-  # Legacy format: {:function_def, name, params, ret_type, opts, body}
-  defp extract_analyzable_ast(
-         {:function_def, _name, _params, _ret_type, _opts, body},
-         _doc_metadata
-       ) do
-    # For function definitions, analyze the body
+  # 3-tuple format: {:function_def, meta, [body]}
+  defp extract_analyzable_ast({:function_def, meta, [body]}, _doc_metadata)
+       when is_list(meta) do
     body
   end
 
   defp extract_analyzable_ast(ast, _metadata), do: ast
 
   # Extract per-function complexity metrics from a module
-  defp extract_per_function_metrics({:language_specific, _, _, hint, metadata}, doc_metadata)
-       when hint == :module_definition and is_map(metadata) do
-    body = Map.get(metadata, :body) || Map.get(doc_metadata, :body)
-    extract_functions_from_body(body)
+  # 3-tuple format: {:language_specific, meta, native_ast}
+  defp extract_per_function_metrics({:language_specific, meta, _native}, doc_metadata)
+       when is_list(meta) do
+    hint = Keyword.get(meta, :hint)
+
+    if hint == :module_definition do
+      body = Map.get(doc_metadata, :body)
+      extract_functions_from_body(body)
+    else
+      []
+    end
   end
 
-  defp extract_per_function_metrics({:language_specific, _, _, hint}, metadata)
-       when hint == :module_definition do
-    metadata
-    |> Map.get(:body)
-    |> extract_functions_from_body()
-  end
-
-  # M2.2s: Extract functions from container members
-  # NEW format with metadata: {:container, type, name, parent, type_params, implements, body, metadata}
-  defp extract_per_function_metrics(
-         {:container, _type, _name, _parent, _type_params, _implements, body, metadata},
-         _doc_metadata
-       )
-       when is_map(metadata) do
-    # Handle different body formats:
-    # - {:block, [function_def, ...]} for multiple functions
-    # - function_def for single function
-    # - [function_def, ...] for list of functions (edge case)
+  # 3-tuple format: {:container, meta, [body]}
+  defp extract_per_function_metrics({:container, meta, [body]}, _doc_metadata)
+       when is_list(meta) do
     members =
       case body do
-        {:block, statements} when is_list(statements) ->
-          statements
-
-        list when is_list(list) ->
-          list
-
-        single_item ->
-          [single_item]
-      end
-
-    members
-    |> Enum.filter(&match?(ast when is_tuple(ast) and elem(ast, 0) == :function_def, &1))
-    |> Enum.map(&analyze_function_def/1)
-  end
-
-  # Legacy format: {:container, type, name, parent, type_params, implements, body}
-  defp extract_per_function_metrics(
-         {:container, _type, _name, _parent, _type_params, _implements, body},
-         _doc_metadata
-       ) do
-    # Handle different body formats:
-    # - {:block, [function_def, ...]} for multiple functions
-    # - function_def for single function
-    # - [function_def, ...] for list of functions (edge case)
-    members =
-      case body do
-        {:block, statements} when is_list(statements) ->
+        {:block, _, statements} when is_list(statements) ->
           statements
 
         list when is_list(list) ->
@@ -315,42 +260,56 @@ defmodule Metastatic.Analysis.Complexity do
     []
   end
 
-  defp extract_functions_from_body({:block, statements}) when is_list(statements) do
+  # 3-tuple format: {:block, meta, statements}
+  defp extract_functions_from_body({:block, _meta, statements}) when is_list(statements) do
     statements
     |> Enum.filter(
       &match?(
-        ast
-        when (is_tuple(ast) and elem(ast, 0) == :function_def) or
-               (elem(ast, 0) == :language_specific and elem(ast, 3) == :function_definition),
+        ast when is_tuple(ast) and elem(ast, 0) in [:function_def, :language_specific],
         &1
       )
     )
     |> Enum.map(fn
-      {:function_def, _, _, _, _, _, _} = node -> analyze_function_def(node)
-      {:function_def, _, _, _, _, _} = node -> analyze_function_def(node)
-      node -> analyze_function(node)
+      {:function_def, _, _} = node -> analyze_function_def(node)
+      {:language_specific, _, _} = node -> analyze_function(node)
+      _ -> nil
     end)
     |> Enum.reject(&is_nil/1)
   end
 
   defp extract_functions_from_body(_), do: []
 
-  defp analyze_function({:language_specific, _, _, :function_definition, metadata})
-       when is_map(metadata) do
-    function_name = Map.get(metadata, :function_name, "unknown")
-    body = Map.get(metadata, :body)
+  # 3-tuple format: {:language_specific, meta, native_ast}
+  defp analyze_function({:language_specific, meta, native_ast}) when is_list(meta) do
+    hint = Keyword.get(meta, :hint)
 
-    if body do
-      variables = Metastatic.AST.variables(body)
+    if hint == :function_definition do
+      function_name =
+        case native_ast do
+          %{"function_name" => name} -> name
+          _ -> "unknown"
+        end
 
-      %{
-        name: function_name,
-        cyclomatic: Cyclomatic.calculate(body),
-        cognitive: Cognitive.calculate(body),
-        max_nesting: Nesting.calculate(body),
-        statements: FunctionMetrics.calculate(body).statement_count,
-        variables: MapSet.size(variables)
-      }
+      body =
+        case native_ast do
+          %{"body" => b} -> b
+          _ -> nil
+        end
+
+      if body do
+        variables = Metastatic.AST.variables(body)
+
+        %{
+          name: function_name,
+          cyclomatic: Cyclomatic.calculate(body),
+          cognitive: Cognitive.calculate(body),
+          max_nesting: Nesting.calculate(body),
+          statements: FunctionMetrics.calculate(body).statement_count,
+          variables: MapSet.size(variables)
+        }
+      else
+        nil
+      end
     else
       nil
     end
@@ -358,10 +317,9 @@ defmodule Metastatic.Analysis.Complexity do
 
   defp analyze_function(_), do: nil
 
-  # M2.2s: Analyze function_def structural type
-  # NEW format with metadata: {:function_def, name, params, ret_type, opts, body, metadata}
-  defp analyze_function_def({:function_def, name, _params, _ret_type, _opts, body, metadata})
-       when is_map(metadata) do
+  # 3-tuple format: {:function_def, meta, [body]}
+  defp analyze_function_def({:function_def, meta, [body]}) when is_list(meta) do
+    name = Keyword.get(meta, :name, "unknown")
     variables = Metastatic.AST.variables(body)
 
     %{
@@ -374,17 +332,5 @@ defmodule Metastatic.Analysis.Complexity do
     }
   end
 
-  # Legacy format: {:function_def, name, params, ret_type, opts, body}
-  defp analyze_function_def({:function_def, name, _params, _ret_type, _opts, body}) do
-    variables = Metastatic.AST.variables(body)
-
-    %{
-      name: name,
-      cyclomatic: Cyclomatic.calculate(body),
-      cognitive: Cognitive.calculate(body),
-      max_nesting: Nesting.calculate(body),
-      statements: FunctionMetrics.calculate(body).statement_count,
-      variables: MapSet.size(variables)
-    }
-  end
+  defp analyze_function_def(_), do: nil
 end

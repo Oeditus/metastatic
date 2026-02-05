@@ -7,17 +7,35 @@ defmodule Metastatic.Analysis.SmellsTest do
 
   doctest Metastatic.Analysis.Smells
 
+  # Helper functions for building 3-tuple MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+  defp block(stmts), do: {:block, [], stmts}
+  defp conditional(cond_expr, then_b, else_b), do: {:conditional, [], [cond_expr, then_b, else_b]}
+  defp assignment(target, value), do: {:assignment, [], [target, value]}
+
+  defp binary_op(cat, op, left, right),
+    do: {:binary_op, [category: cat, operator: op], [left, right]}
+
+  defp unary_op(cat, op, operand), do: {:unary_op, [category: cat, operator: op], [operand]}
+  defp loop(loop_type, cond_expr, body), do: {:loop, [loop_type: loop_type], [cond_expr, body]}
+
+  defp language_specific(lang, hint, native),
+    do: {:language_specific, [language: lang, hint: hint], native}
+
   describe "analyze/1 - long function detection" do
     test "detects long function with correct smell type and location" do
       # Create AST with 51 statements (exceeds default threshold of 50)
       # Use actual statements (assignments) not just expressions
       statements =
         for i <- 1..51 do
-          {:assignment, {:variable, "x#{i}"},
-           {:binary_op, :arithmetic, :+, {:variable, "y#{i}"}, {:literal, :integer, i}}}
+          assignment(
+            variable("x#{i}"),
+            binary_op(:arithmetic, :+, variable("y#{i}"), literal(:integer, i))
+          )
         end
 
-      ast = {:block, statements}
+      ast = block(statements)
       doc = Document.new(ast, :python, %{function_name: "calculate", line: 42})
 
       assert {:ok, result} = Smells.analyze(doc)
@@ -44,17 +62,18 @@ defmodule Metastatic.Analysis.SmellsTest do
       # Use actual statements
       statements =
         for i <- 1..60 do
-          {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+          assignment(variable("x#{i}"), literal(:integer, i))
         end
 
       # Include language_specific node with line info
       ast_with_location =
-        {:block,
-         [
-           {:language_specific, :python, {:some_native, :node}, :statement,
-            %{line: 100, body: {:assignment, {:variable, "z"}, {:literal, :integer, 1}}}}
-           | statements
-         ]}
+        block([
+          language_specific(:python, :statement, %{
+            line: 100,
+            body: assignment(variable("z"), literal(:integer, 1))
+          })
+          | statements
+        ])
 
       doc = Document.new(ast_with_location, :python)
 
@@ -70,10 +89,10 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "no long function smell when below threshold" do
       statements =
         for i <- 1..30 do
-          {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+          assignment(variable("x#{i}"), literal(:integer, i))
         end
 
-      ast = {:block, statements}
+      ast = block(statements)
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Smells.analyze(doc)
@@ -86,10 +105,10 @@ defmodule Metastatic.Analysis.SmellsTest do
       # 150 statements = 3x threshold
       statements =
         for i <- 1..150 do
-          {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+          assignment(variable("x#{i}"), literal(:integer, i))
         end
 
-      ast = {:block, statements}
+      ast = block(statements)
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Smells.analyze(doc)
@@ -102,10 +121,10 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "respects custom thresholds" do
       statements =
         for i <- 1..25 do
-          {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+          assignment(variable("x#{i}"), literal(:integer, i))
         end
 
-      ast = {:block, statements}
+      ast = block(statements)
       doc = Document.new(ast, :python)
 
       # Custom threshold of 20
@@ -121,13 +140,23 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "detects deep nesting with correct smell type and location" do
       # Create AST with nesting depth of 5 (exceeds default threshold of 4)
       ast =
-        {:conditional, {:variable, "a"},
-         {:conditional, {:variable, "b"},
-          {:conditional, {:variable, "c"},
-           {:conditional, {:variable, "d"},
-            {:conditional, {:variable, "e"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-            {:literal, :integer, 3}}, {:literal, :integer, 4}}, {:literal, :integer, 5}},
-         {:literal, :integer, 6}}
+        conditional(
+          variable("a"),
+          conditional(
+            variable("b"),
+            conditional(
+              variable("c"),
+              conditional(
+                variable("d"),
+                conditional(variable("e"), literal(:integer, 1), literal(:integer, 2)),
+                literal(:integer, 3)
+              ),
+              literal(:integer, 4)
+            ),
+            literal(:integer, 5)
+          ),
+          literal(:integer, 6)
+        )
 
       doc = Document.new(ast, :python, %{function_name: "nested_logic", line: 15})
 
@@ -151,13 +180,23 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "detects deep nesting with location from elixir_meta" do
       ast =
-        {:conditional, {:variable, "a"},
-         {:conditional, {:variable, "b"},
-          {:conditional, {:variable, "c"},
-           {:conditional, {:variable, "d"},
-            {:conditional, {:variable, "e"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-            {:literal, :integer, 3}}, {:literal, :integer, 4}}, {:literal, :integer, 5}},
-         {:literal, :integer, 6}}
+        conditional(
+          variable("a"),
+          conditional(
+            variable("b"),
+            conditional(
+              variable("c"),
+              conditional(
+                variable("d"),
+                conditional(variable("e"), literal(:integer, 1), literal(:integer, 2)),
+                literal(:integer, 3)
+              ),
+              literal(:integer, 4)
+            ),
+            literal(:integer, 5)
+          ),
+          literal(:integer, 6)
+        )
 
       doc = Document.new(ast, :elixir, %{elixir_meta: [line: 77]})
 
@@ -171,9 +210,11 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "no deep nesting smell when below threshold" do
       ast =
-        {:conditional, {:variable, "a"},
-         {:conditional, {:variable, "b"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-         {:literal, :integer, 3}}
+        conditional(
+          variable("a"),
+          conditional(variable("b"), literal(:integer, 1), literal(:integer, 2)),
+          literal(:integer, 3)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -185,10 +226,15 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "respects custom nesting thresholds" do
       ast =
-        {:conditional, {:variable, "a"},
-         {:conditional, {:variable, "b"},
-          {:conditional, {:variable, "c"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-          {:literal, :integer, 3}}, {:literal, :integer, 4}}
+        conditional(
+          variable("a"),
+          conditional(
+            variable("b"),
+            conditional(variable("c"), literal(:integer, 1), literal(:integer, 2)),
+            literal(:integer, 3)
+          ),
+          literal(:integer, 4)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -205,11 +251,10 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "detects magic numbers with location metadata from AST" do
       # language_specific node wrapping entire expression with body containing the binary_op
       ast =
-        {:language_specific, :python, {:BinaryOp, :+}, :expression,
-         %{
-           line: 33,
-           body: {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 42}}
-         }}
+        language_specific(:python, :expression, %{
+          line: 33,
+          body: binary_op(:arithmetic, :+, variable("x"), literal(:integer, 42))
+        })
 
       doc = Document.new(ast, :python)
 
@@ -229,7 +274,7 @@ defmodule Metastatic.Analysis.SmellsTest do
     end
 
     test "detects magic numbers in binary operations" do
-      ast = {:binary_op, :arithmetic, :*, {:variable, "radius"}, {:literal, :float, 3.14159}}
+      ast = binary_op(:arithmetic, :*, variable("radius"), literal(:float, 3.14159))
 
       doc = Document.new(ast, :python)
 
@@ -245,19 +290,16 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "detects multiple magic numbers with different locations" do
       ast =
-        {:block,
-         [
-           {:language_specific, :python, {:BinaryOp, :+}, :expression,
-            %{
-              line: 10,
-              body: {:binary_op, :arithmetic, :+, {:literal, :integer, 42}, {:variable, "x"}}
-            }},
-           {:language_specific, :python, {:BinaryOp, :*}, :expression,
-            %{
-              line: 20,
-              body: {:binary_op, :arithmetic, :*, {:literal, :integer, 100}, {:variable, "y"}}
-            }}
-         ]}
+        block([
+          language_specific(:python, :expression, %{
+            line: 10,
+            body: binary_op(:arithmetic, :+, literal(:integer, 42), variable("x"))
+          }),
+          language_specific(:python, :expression, %{
+            line: 20,
+            body: binary_op(:arithmetic, :*, literal(:integer, 100), variable("y"))
+          })
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -272,12 +314,11 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "ignores common constants 0, 1, -1" do
       ast =
-        {:block,
-         [
-           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 0}},
-           {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 1}},
-           {:binary_op, :arithmetic, :+, {:variable, "z"}, {:literal, :integer, -1}}
-         ]}
+        block([
+          binary_op(:arithmetic, :+, variable("x"), literal(:integer, 0)),
+          binary_op(:arithmetic, :+, variable("y"), literal(:integer, 1)),
+          binary_op(:arithmetic, :+, variable("z"), literal(:integer, -1))
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -288,7 +329,7 @@ defmodule Metastatic.Analysis.SmellsTest do
     end
 
     test "detects magic numbers in unary operations" do
-      ast = {:unary_op, :arithmetic, :-, {:literal, :integer, 273}}
+      ast = unary_op(:arithmetic, :-, literal(:integer, 273))
 
       doc = Document.new(ast, :python)
 
@@ -301,11 +342,10 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "handles language_specific nodes in magic number detection" do
       # Test that language_specific wrapper is properly traversed
       ast =
-        {:language_specific, :ruby, {:BinaryOp, :+, :x, 99}, :expression,
-         %{
-           line: 55,
-           body: {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 99}}
-         }}
+        language_specific(:ruby, :expression, %{
+          line: 55,
+          body: binary_op(:arithmetic, :+, variable("x"), literal(:integer, 99))
+        })
 
       doc = Document.new(ast, :ruby)
 
@@ -322,9 +362,12 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "handles nested language_specific nodes without body" do
       # language_specific node without body should not crash
       ast =
-        {:binary_op, :arithmetic, :+,
-         {:language_specific, :go, {:Ident, "x"}, :variable, %{line: 12}},
-         {:literal, :integer, 7}}
+        binary_op(
+          :arithmetic,
+          :+,
+          language_specific(:go, :variable, %{line: 12}),
+          literal(:integer, 7)
+        )
 
       doc = Document.new(ast, :go)
 
@@ -340,11 +383,21 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "detects complex conditionals with location metadata" do
       # Create deeply nested boolean: ((a and b) and c) or d - depth = 3
       ast =
-        {:conditional,
-         {:binary_op, :boolean, :or,
-          {:binary_op, :boolean, :and,
-           {:binary_op, :boolean, :and, {:variable, "a"}, {:variable, "b"}}, {:variable, "c"}},
-          {:variable, "d"}}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+        conditional(
+          binary_op(
+            :boolean,
+            :or,
+            binary_op(
+              :boolean,
+              :and,
+              binary_op(:boolean, :and, variable("a"), variable("b")),
+              variable("c")
+            ),
+            variable("d")
+          ),
+          literal(:integer, 1),
+          literal(:integer, 2)
+        )
 
       doc = Document.new(ast, :python, %{line: 88})
 
@@ -367,11 +420,21 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "determines severity based on boolean nesting depth" do
       # Depth 3: medium severity - ((a or b) and c) or d
       ast_medium =
-        {:conditional,
-         {:binary_op, :boolean, :or,
-          {:binary_op, :boolean, :and,
-           {:binary_op, :boolean, :or, {:variable, "a"}, {:variable, "b"}}, {:variable, "c"}},
-          {:variable, "d"}}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+        conditional(
+          binary_op(
+            :boolean,
+            :or,
+            binary_op(
+              :boolean,
+              :and,
+              binary_op(:boolean, :or, variable("a"), variable("b")),
+              variable("c")
+            ),
+            variable("d")
+          ),
+          literal(:integer, 1),
+          literal(:integer, 2)
+        )
 
       doc_medium = Document.new(ast_medium, :python)
       assert {:ok, result_medium} = Smells.analyze(doc_medium)
@@ -384,12 +447,26 @@ defmodule Metastatic.Analysis.SmellsTest do
 
       # Depth 4: high severity - (((a or b) and c) and d) or e
       ast_high =
-        {:conditional,
-         {:binary_op, :boolean, :or,
-          {:binary_op, :boolean, :and,
-           {:binary_op, :boolean, :and,
-            {:binary_op, :boolean, :or, {:variable, "a"}, {:variable, "b"}}, {:variable, "c"}},
-           {:variable, "d"}}, {:variable, "e"}}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+        conditional(
+          binary_op(
+            :boolean,
+            :or,
+            binary_op(
+              :boolean,
+              :and,
+              binary_op(
+                :boolean,
+                :and,
+                binary_op(:boolean, :or, variable("a"), variable("b")),
+                variable("c")
+              ),
+              variable("d")
+            ),
+            variable("e")
+          ),
+          literal(:integer, 1),
+          literal(:integer, 2)
+        )
 
       doc_high = Document.new(ast_high, :python)
       assert {:ok, result_high} = Smells.analyze(doc_high)
@@ -403,11 +480,21 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "detects complex conditionals in while loops" do
       # while ((a and b) and c) or d: ... - depth = 3
       ast =
-        {:loop, :while,
-         {:binary_op, :boolean, :or,
-          {:binary_op, :boolean, :and,
-           {:binary_op, :boolean, :and, {:variable, "a"}, {:variable, "b"}}, {:variable, "c"}},
-          {:variable, "d"}}, {:literal, :integer, 1}}
+        loop(
+          :while,
+          binary_op(
+            :boolean,
+            :or,
+            binary_op(
+              :boolean,
+              :and,
+              binary_op(:boolean, :and, variable("a"), variable("b")),
+              variable("c")
+            ),
+            variable("d")
+          ),
+          literal(:integer, 1)
+        )
 
       doc = Document.new(ast, :python, %{line: 45})
 
@@ -426,11 +513,20 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "handles unary boolean operations in depth calculation" do
       # not ((a and b) or c) - depth = 3
       ast =
-        {:conditional,
-         {:unary_op, :boolean, :not,
-          {:binary_op, :boolean, :or,
-           {:binary_op, :boolean, :and, {:variable, "a"}, {:variable, "b"}}, {:variable, "c"}}},
-         {:literal, :integer, 1}, {:literal, :integer, 2}}
+        conditional(
+          unary_op(
+            :boolean,
+            :not,
+            binary_op(
+              :boolean,
+              :or,
+              binary_op(:boolean, :and, variable("a"), variable("b")),
+              variable("c")
+            )
+          ),
+          literal(:integer, 1),
+          literal(:integer, 2)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -447,17 +543,25 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "handles language_specific nodes in complex conditional detection" do
       # Complex condition wrapped in language_specific: ((a or b) and c) or d - depth = 3
       ast =
-        {:language_specific, :javascript, {:IfStatement, :complex}, :conditional,
-         %{
-           line: 66,
-           body:
-             {:conditional,
-              {:binary_op, :boolean, :or,
-               {:binary_op, :boolean, :and,
-                {:binary_op, :boolean, :or, {:variable, "a"}, {:variable, "b"}},
-                {:variable, "c"}}, {:variable, "d"}}, {:literal, :integer, 1},
-              {:literal, :integer, 2}}
-         }}
+        language_specific(:javascript, :conditional, %{
+          line: 66,
+          body:
+            conditional(
+              binary_op(
+                :boolean,
+                :or,
+                binary_op(
+                  :boolean,
+                  :and,
+                  binary_op(:boolean, :or, variable("a"), variable("b")),
+                  variable("c")
+                ),
+                variable("d")
+              ),
+              literal(:integer, 1),
+              literal(:integer, 2)
+            )
+        })
 
       doc = Document.new(ast, :javascript)
 
@@ -474,8 +578,11 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "no complex conditional smell for simple conditions" do
       # Simple condition: just 'a or b'
       ast =
-        {:conditional, {:binary_op, :boolean, :or, {:variable, "a"}, {:variable, "b"}},
-         {:literal, :integer, 1}, {:literal, :integer, 2}}
+        conditional(
+          binary_op(:boolean, :or, variable("a"), variable("b")),
+          literal(:integer, 1),
+          literal(:integer, 2)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -491,10 +598,10 @@ defmodule Metastatic.Analysis.SmellsTest do
     test "extracts location from document metadata with function name and line" do
       # Force a smell by using many statements
       statements =
-        for i <- 1..60, do: {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+        for i <- 1..60, do: assignment(variable("x#{i}"), literal(:integer, i))
 
       doc_with_smell =
-        Document.new({:block, statements}, :python, %{function_name: "bar", line: 50})
+        Document.new(block(statements), :python, %{function_name: "bar", line: 50})
 
       assert {:ok, result} = Smells.analyze(doc_with_smell)
       assert result.has_smells?
@@ -506,9 +613,9 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "extracts location from document metadata with only line" do
       statements =
-        for i <- 1..60, do: {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+        for i <- 1..60, do: assignment(variable("x#{i}"), literal(:integer, i))
 
-      doc = Document.new({:block, statements}, :elixir, %{line: 99})
+      doc = Document.new(block(statements), :elixir, %{line: 99})
 
       assert {:ok, result} = Smells.analyze(doc)
 
@@ -519,9 +626,9 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "extracts location from elixir_meta in metadata" do
       statements =
-        for i <- 1..60, do: {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+        for i <- 1..60, do: assignment(variable("x#{i}"), literal(:integer, i))
 
-      doc = Document.new({:block, statements}, :elixir, %{elixir_meta: [line: 222]})
+      doc = Document.new(block(statements), :elixir, %{elixir_meta: [line: 222]})
 
       assert {:ok, result} = Smells.analyze(doc)
 
@@ -532,14 +639,13 @@ defmodule Metastatic.Analysis.SmellsTest do
     @tag skip: true, reason: :no_metadata
     test "extracts location from AST language_specific node when metadata absent" do
       statements =
-        for i <- 1..60, do: {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+        for i <- 1..60, do: assignment(variable("x#{i}"), literal(:integer, i))
 
       ast =
-        {:block,
-         [
-           {:language_specific, :python, {:FunctionDef, "test"}, :function, %{line: 333}}
-           | statements
-         ]}
+        block([
+          language_specific(:python, :function, %{line: 333})
+          | statements
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -552,9 +658,9 @@ defmodule Metastatic.Analysis.SmellsTest do
 
     test "returns nil location when no metadata or language_specific nodes present" do
       statements =
-        for i <- 1..60, do: {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+        for i <- 1..60, do: assignment(variable("x#{i}"), literal(:integer, i))
 
-      doc = Document.new({:block, statements}, :python)
+      doc = Document.new(block(statements), :python)
 
       assert {:ok, result} = Smells.analyze(doc)
 
@@ -567,16 +673,17 @@ defmodule Metastatic.Analysis.SmellsTest do
     @tag skip: true, reason: :no_metadata
     test "extracts location from nested language_specific nodes in AST" do
       statements =
-        for i <- 1..60, do: {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i}}
+        for i <- 1..60, do: assignment(variable("x#{i}"), literal(:integer, i))
 
       ast =
-        {:block,
-         [
-           {:conditional, {:variable, "x"},
-            {:language_specific, :ruby, {:statement}, :block, %{line: 444}},
-            {:literal, :integer, 1}}
-           | statements
-         ]}
+        block([
+          conditional(
+            variable("x"),
+            language_specific(:ruby, :block, %{line: 444}),
+            literal(:integer, 1)
+          )
+          | statements
+        ])
 
       doc = Document.new(ast, :ruby)
 
@@ -590,7 +697,7 @@ defmodule Metastatic.Analysis.SmellsTest do
 
   describe "analyze/1 - no smells" do
     test "returns no smells for simple clean code" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
+      ast = binary_op(:arithmetic, :+, variable("x"), variable("y"))
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Smells.analyze(doc)
@@ -601,7 +708,7 @@ defmodule Metastatic.Analysis.SmellsTest do
     end
 
     test "returns no smells for literal values" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Smells.analyze(doc)
@@ -614,17 +721,27 @@ defmodule Metastatic.Analysis.SmellsTest do
       # AST that triggers multiple smell types
       statements =
         for i <- 1..60 do
-          {:assignment, {:variable, "x#{i}"}, {:literal, :integer, i + 10}}
+          assignment(variable("x#{i}"), literal(:integer, i + 10))
         end
 
       ast =
-        {:conditional, {:variable, "a"},
-         {:conditional, {:variable, "b"},
-          {:conditional, {:variable, "c"},
-           {:conditional, {:variable, "d"},
-            {:conditional, {:variable, "e"}, {:block, statements}, {:literal, :integer, 2}},
-            {:literal, :integer, 3}}, {:literal, :integer, 4}}, {:literal, :integer, 5}},
-         {:literal, :integer, 6}}
+        conditional(
+          variable("a"),
+          conditional(
+            variable("b"),
+            conditional(
+              variable("c"),
+              conditional(
+                variable("d"),
+                conditional(variable("e"), block(statements), literal(:integer, 2)),
+                literal(:integer, 3)
+              ),
+              literal(:integer, 4)
+            ),
+            literal(:integer, 5)
+          ),
+          literal(:integer, 6)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -644,7 +761,7 @@ defmodule Metastatic.Analysis.SmellsTest do
     end
 
     test "all smells have required fields" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 42}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 42))
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Smells.analyze(doc)

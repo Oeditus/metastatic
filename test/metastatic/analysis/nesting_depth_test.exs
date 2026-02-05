@@ -6,6 +6,11 @@ defmodule Metastatic.Analysis.NestingDepthTest do
 
   doctest NestingDepth
 
+  # Helper functions for building 3-tuple MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+  defp conditional(cond, then_b, else_b), do: {:conditional, [], [cond, then_b, else_b]}
+
   describe "info/0" do
     test "returns correct analyzer metadata" do
       info = NestingDepth.info()
@@ -20,7 +25,7 @@ defmodule Metastatic.Analysis.NestingDepthTest do
   describe "analyze/2" do
     test "no issue for shallow nesting (below threshold)" do
       # Single conditional: depth = 1, below default threshold of 4
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       context = %{
@@ -39,22 +44,20 @@ defmodule Metastatic.Analysis.NestingDepthTest do
 
     test "no issue for exactly at threshold" do
       # Depth 4, exactly at warn_threshold (default 4)
-      ast = {
-        :conditional,
-        {:variable, "a"},
-        {
-          :conditional,
-          {:variable, "b"},
-          {
-            :conditional,
-            {:variable, "c"},
-            {:conditional, {:variable, "d"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-            {:literal, :integer, 3}
-          },
-          {:literal, :integer, 4}
-        },
-        {:literal, :integer, 5}
-      }
+      ast =
+        conditional(
+          variable("a"),
+          conditional(
+            variable("b"),
+            conditional(
+              variable("c"),
+              conditional(variable("d"), literal(:integer, 1), literal(:integer, 2)),
+              literal(:integer, 3)
+            ),
+            literal(:integer, 4)
+          ),
+          literal(:integer, 5)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -75,27 +78,24 @@ defmodule Metastatic.Analysis.NestingDepthTest do
 
     test "issues for nesting above threshold" do
       # Depth 5, above warn_threshold (default 4)
-      ast = {
-        :conditional,
-        {:variable, "a"},
-        {
-          :conditional,
-          {:variable, "b"},
-          {
-            :conditional,
-            {:variable, "c"},
-            {
-              :conditional,
-              {:variable, "d"},
-              {:conditional, {:variable, "e"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-              {:literal, :integer, 3}
-            },
-            {:literal, :integer, 4}
-          },
-          {:literal, :integer, 5}
-        },
-        {:literal, :integer, 6}
-      }
+      ast =
+        conditional(
+          variable("a"),
+          conditional(
+            variable("b"),
+            conditional(
+              variable("c"),
+              conditional(
+                variable("d"),
+                conditional(variable("e"), literal(:integer, 1), literal(:integer, 2)),
+                literal(:integer, 3)
+              ),
+              literal(:integer, 4)
+            ),
+            literal(:integer, 5)
+          ),
+          literal(:integer, 6)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -117,9 +117,11 @@ defmodule Metastatic.Analysis.NestingDepthTest do
     test "respects custom threshold configuration" do
       # Depth 2, default threshold is 4 but we set warn_threshold to 1
       ast =
-        {:conditional, {:variable, "x"},
-         {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-         {:literal, :integer, 3}}
+        conditional(
+          variable("x"),
+          conditional(variable("y"), literal(:integer, 1), literal(:integer, 2)),
+          literal(:integer, 3)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -137,27 +139,24 @@ defmodule Metastatic.Analysis.NestingDepthTest do
 
     test "severity increases at max_depth threshold" do
       # Depth 5, at max_depth (default 5)
-      ast = {
-        :conditional,
-        {:variable, "a"},
-        {
-          :conditional,
-          {:variable, "b"},
-          {
-            :conditional,
-            {:variable, "c"},
-            {
-              :conditional,
-              {:variable, "d"},
-              {:conditional, {:variable, "e"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-              {:literal, :integer, 3}
-            },
-            {:literal, :integer, 4}
-          },
-          {:literal, :integer, 5}
-        },
-        {:literal, :integer, 6}
-      }
+      ast =
+        conditional(
+          variable("a"),
+          conditional(
+            variable("b"),
+            conditional(
+              variable("c"),
+              conditional(
+                variable("d"),
+                conditional(variable("e"), literal(:integer, 1), literal(:integer, 2)),
+                literal(:integer, 3)
+              ),
+              literal(:integer, 4)
+            ),
+            literal(:integer, 5)
+          ),
+          literal(:integer, 6)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -184,7 +183,7 @@ defmodule Metastatic.Analysis.NestingDepthTest do
   describe "integration with Runner" do
     test "works as registered analyzer plugin" do
       # Simple shallow nesting (shouldn't trigger)
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       {:ok, report} = Runner.run(doc, analyzers: [NestingDepth])
@@ -196,8 +195,8 @@ defmodule Metastatic.Analysis.NestingDepthTest do
     test "detects deep nesting" do
       # Create a deeply nested structure
       deep_ast =
-        Enum.reduce(1..6, {:literal, :integer, 99}, fn i, inner ->
-          {:conditional, {:variable, "v#{i}"}, inner, {:literal, :integer, i}}
+        Enum.reduce(1..6, literal(:integer, 99), fn i, inner ->
+          conditional(variable("v#{i}"), inner, literal(:integer, i))
         end)
 
       doc = Document.new(deep_ast, :python)
@@ -215,9 +214,11 @@ defmodule Metastatic.Analysis.NestingDepthTest do
 
     test "respects custom configuration via Runner" do
       ast =
-        {:conditional, {:variable, "x"},
-         {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-         {:literal, :integer, 3}}
+        conditional(
+          variable("x"),
+          conditional(variable("y"), literal(:integer, 1), literal(:integer, 2)),
+          literal(:integer, 3)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -235,7 +236,7 @@ defmodule Metastatic.Analysis.NestingDepthTest do
 
   describe "run_before/1" do
     test "initializes context state" do
-      context = %{document: Document.new({:literal, :integer, 42}, :python), config: []}
+      context = %{document: Document.new(literal(:integer, 42), :python), config: []}
 
       {:ok, new_context} = NestingDepth.run_before(context)
 
@@ -248,7 +249,7 @@ defmodule Metastatic.Analysis.NestingDepthTest do
 
   describe "run_after/2" do
     test "passes through issues unchanged" do
-      context = %{document: Document.new({:literal, :integer, 42}, :python), config: []}
+      context = %{document: Document.new(literal(:integer, 42), :python), config: []}
       issues = [%{analyzer: NestingDepth, severity: :warning}]
 
       result = NestingDepth.run_after(context, issues)

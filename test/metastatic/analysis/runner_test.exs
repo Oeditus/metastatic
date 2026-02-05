@@ -4,7 +4,22 @@ defmodule Metastatic.Analysis.RunnerTest do
   alias Metastatic.Analysis.{Analyzer, Registry, Runner}
   alias Metastatic.Document
 
-  # Test-local analyzer implementations
+  # Helper functions to build 3-tuple MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+
+  defp binary_op(category, operator, left, right),
+    do: {:binary_op, [category: category, operator: operator], [left, right]}
+
+  defp unary_op(category, operator, operand),
+    do: {:unary_op, [category: category, operator: operator], [operand]}
+
+  defp block(children), do: {:block, [], children}
+  defp assignment(target, value), do: {:assignment, [], [target, value]}
+  defp early_return(value), do: {:early_return, [], value}
+  defp conditional(cond, then_br, else_br), do: {:conditional, [], [cond, then_br, else_br]}
+
+  # Test-local analyzer implementations (updated for 3-tuple format)
   defmodule UnusedVariables do
     @behaviour Metastatic.Analysis.Analyzer
 
@@ -42,7 +57,7 @@ defmodule Metastatic.Analysis.RunnerTest do
             category: :correctness,
             severity: :warning,
             message: "Variable '#{var}' is assigned but never used",
-            node: {:variable, var},
+            node: {:variable, [], var},
             location: %{line: nil, column: nil, path: nil},
             suggestion:
               Analyzer.suggestion(
@@ -60,51 +75,65 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     defp collect_variables(ast), do: walk_collect(ast, {MapSet.new(), MapSet.new()})
 
-    defp walk_collect({:assignment, {:variable, name}, value}, {assigned, used}) do
+    # New 3-tuple format: {:assignment, meta, [target, value]}
+    defp walk_collect({:assignment, _meta, [{:variable, _, name}, value]}, {assigned, used}) do
       assigned = MapSet.put(assigned, name)
-      {assigned, used} = walk_collect(value, {assigned, used})
-      {assigned, used}
+      walk_collect(value, {assigned, used})
     end
 
-    defp walk_collect({:variable, name}, {assigned, used}) do
-      used = MapSet.put(used, name)
-      {assigned, used}
+    # New 3-tuple format: {:variable, meta, name}
+    defp walk_collect({:variable, _meta, name}, {assigned, used}) do
+      {assigned, MapSet.put(used, name)}
     end
 
-    defp walk_collect({:binary_op, _, _, left, right}, acc) do
+    # New 3-tuple format: {:binary_op, meta, [left, right]}
+    defp walk_collect({:binary_op, _meta, [left, right]}, acc) do
       acc = walk_collect(left, acc)
       walk_collect(right, acc)
     end
 
-    defp walk_collect({:unary_op, _, _, operand}, acc), do: walk_collect(operand, acc)
+    # New 3-tuple format: {:unary_op, meta, [operand]}
+    defp walk_collect({:unary_op, _meta, [operand]}, acc), do: walk_collect(operand, acc)
 
-    defp walk_collect({:conditional, cond, then_br, else_br}, acc) do
-      acc = walk_collect(cond, acc)
-      acc = walk_collect(then_br, acc)
-      walk_collect(else_br, acc)
+    # New 3-tuple format: {:conditional, meta, [cond, then_br, else_br]}
+    defp walk_collect({:conditional, _meta, children}, acc) when is_list(children) do
+      Enum.reduce(children, acc, fn child, a ->
+        if child, do: walk_collect(child, a), else: a
+      end)
     end
 
-    defp walk_collect({:block, stmts}, acc) when is_list(stmts) do
+    # New 3-tuple format: {:block, meta, stmts}
+    defp walk_collect({:block, _meta, stmts}, acc) when is_list(stmts) do
       Enum.reduce(stmts, acc, fn stmt, a -> walk_collect(stmt, a) end)
     end
 
-    defp walk_collect({:function_call, _name, args}, acc) do
+    # New 3-tuple format: {:function_call, meta, args}
+    defp walk_collect({:function_call, _meta, args}, acc) when is_list(args) do
       Enum.reduce(args, acc, fn arg, a -> walk_collect(arg, a) end)
     end
 
-    defp walk_collect({:early_return, value}, acc), do: walk_collect(value, acc)
+    # New 3-tuple format: {:early_return, meta, value}
+    defp walk_collect({:early_return, _meta, value}, acc) do
+      if value, do: walk_collect(value, acc), else: acc
+    end
 
-    defp walk_collect({:inline_match, pattern, value}, acc) do
+    # New 3-tuple format: {:inline_match, meta, [pattern, value]}
+    defp walk_collect({:inline_match, _meta, [pattern, value]}, acc) do
       acc = walk_collect(pattern, acc)
       walk_collect(value, acc)
     end
 
-    defp walk_collect({:attribute_access, obj, _attr}, acc), do: walk_collect(obj, acc)
+    # New 3-tuple format: {:attribute_access, meta, [receiver]}
+    defp walk_collect({:attribute_access, _meta, [obj]}, acc), do: walk_collect(obj, acc)
 
-    defp walk_collect({:augmented_assignment, target, _op, value}, acc) do
+    # New 3-tuple format: {:augmented_assignment, meta, [target, value]}
+    defp walk_collect({:augmented_assignment, _meta, [target, value]}, acc) do
       acc = walk_collect(target, acc)
       walk_collect(value, acc)
     end
+
+    # Literals have no variables
+    defp walk_collect({:literal, _meta, _value}, acc), do: acc
 
     defp walk_collect(list, acc) when is_list(list) do
       Enum.reduce(list, acc, fn item, a -> walk_collect(item, a) end)
@@ -133,8 +162,15 @@ defmodule Metastatic.Analysis.RunnerTest do
     end
 
     @impl true
+    # New 3-tuple format: {:conditional, meta, [cond, {:literal, [subtype: :boolean], true}, {:literal, [subtype: :boolean], false}]}
     def analyze(
-          {:conditional, condition, {:literal, :boolean, true}, {:literal, :boolean, false}},
+          {:conditional, _meta,
+           [
+             condition,
+             {:literal, [subtype: :boolean], true},
+             {:literal, [subtype: :boolean], false}
+           ]} =
+            node,
           _context
         ) do
       [
@@ -143,8 +179,7 @@ defmodule Metastatic.Analysis.RunnerTest do
           category: :refactoring,
           severity: :refactoring_opportunity,
           message: "This conditional can be simplified to just the condition",
-          node:
-            {:conditional, condition, {:literal, :boolean, true}, {:literal, :boolean, false}},
+          node: node,
           location: %{line: nil, column: nil, path: nil},
           suggestion:
             Analyzer.suggestion(
@@ -158,10 +193,16 @@ defmodule Metastatic.Analysis.RunnerTest do
     end
 
     def analyze(
-          {:conditional, condition, {:literal, :boolean, false}, {:literal, :boolean, true}},
+          {:conditional, _meta,
+           [
+             condition,
+             {:literal, [subtype: :boolean], false},
+             {:literal, [subtype: :boolean], true}
+           ]} =
+            node,
           _context
         ) do
-      negated = {:unary_op, :boolean, :not, condition}
+      negated = {:unary_op, [category: :boolean, operator: :not], [condition]}
 
       [
         Analyzer.issue(
@@ -169,8 +210,7 @@ defmodule Metastatic.Analysis.RunnerTest do
           category: :refactoring,
           severity: :refactoring_opportunity,
           message: "This conditional can be simplified to the negation of the condition",
-          node:
-            {:conditional, condition, {:literal, :boolean, false}, {:literal, :boolean, true}},
+          node: node,
           location: %{line: nil, column: nil, path: nil},
           suggestion:
             Analyzer.suggestion(
@@ -194,7 +234,7 @@ defmodule Metastatic.Analysis.RunnerTest do
 
   describe "run/2" do
     test "runs with no analyzers" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       {:ok, report} = Runner.run(doc)
@@ -207,12 +247,11 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     test "runs single analyzer" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
-           {:early_return, {:variable, "y"}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 5)),
+          assignment(variable("y"), literal(:integer, 10)),
+          early_return(variable("y"))
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -228,13 +267,11 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     test "runs multiple analyzers" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
-           {:conditional, {:variable, "x"}, {:literal, :boolean, true},
-            {:literal, :boolean, false}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 5)),
+          assignment(variable("y"), literal(:integer, 10)),
+          conditional(variable("x"), literal(:boolean, true), literal(:boolean, false))
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -249,8 +286,7 @@ defmodule Metastatic.Analysis.RunnerTest do
     end
 
     test "runs specific analyzers via options" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :boolean, true}, {:literal, :boolean, false}}
+      ast = conditional(variable("x"), literal(:boolean, true), literal(:boolean, false))
 
       doc = Document.new(ast, :python)
 
@@ -265,7 +301,7 @@ defmodule Metastatic.Analysis.RunnerTest do
     end
 
     test "includes timing when requested" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       {:ok, report} = Runner.run(doc, track_timing: true)
@@ -291,14 +327,14 @@ defmodule Metastatic.Analysis.RunnerTest do
         end
 
         @impl true
-        def analyze({:literal, _, _}, _context) do
+        def analyze({:literal, _meta, _value}, _context) do
           [
             %{
               analyzer: __MODULE__,
               category: :correctness,
               severity: :error,
               message: "Error found",
-              node: {:literal, :integer, 1},
+              node: {:literal, [subtype: :integer], 1},
               location: %{line: nil, column: nil, path: nil},
               suggestion: nil,
               metadata: %{}
@@ -312,12 +348,11 @@ defmodule Metastatic.Analysis.RunnerTest do
       Registry.register(ErrorAnalyzer)
 
       ast =
-        {:block,
-         [
-           {:literal, :integer, 1},
-           {:literal, :integer, 2},
-           {:literal, :integer, 3}
-         ]}
+        block([
+          literal(:integer, 1),
+          literal(:integer, 2),
+          literal(:integer, 3)
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -332,7 +367,7 @@ defmodule Metastatic.Analysis.RunnerTest do
 
   describe "run!/2" do
     test "returns report on success" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       report = Runner.run!(doc)
@@ -345,12 +380,11 @@ defmodule Metastatic.Analysis.RunnerTest do
   describe "UnusedVariables analyzer" do
     test "detects unused variable" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
-           {:early_return, {:variable, "y"}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 5)),
+          assignment(variable("y"), literal(:integer, 10)),
+          early_return(variable("y"))
+        ])
 
       doc = Document.new(ast, :python)
       Registry.register(UnusedVariables)
@@ -367,12 +401,11 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     test "detects multiple unused variables" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
-           {:assignment, {:variable, "z"}, {:literal, :integer, 15}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 5)),
+          assignment(variable("y"), literal(:integer, 10)),
+          assignment(variable("z"), literal(:integer, 15))
+        ])
 
       doc = Document.new(ast, :python)
       Registry.register(UnusedVariables)
@@ -388,12 +421,11 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     test "ignores underscore-prefixed variables by default" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "_temp"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "result"}, {:literal, :integer, 10}},
-           {:early_return, {:variable, "result"}}
-         ]}
+        block([
+          assignment(variable("_temp"), literal(:integer, 5)),
+          assignment(variable("result"), literal(:integer, 10)),
+          early_return(variable("result"))
+        ])
 
       doc = Document.new(ast, :python)
       Registry.register(UnusedVariables)
@@ -405,12 +437,11 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     test "respects ignore_prefix configuration" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "tmp_value"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "result"}, {:literal, :integer, 10}},
-           {:early_return, {:variable, "result"}}
-         ]}
+        block([
+          assignment(variable("tmp_value"), literal(:integer, 5)),
+          assignment(variable("result"), literal(:integer, 10)),
+          early_return(variable("result"))
+        ])
 
       doc = Document.new(ast, :python)
       Registry.register(UnusedVariables)
@@ -422,13 +453,14 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     test "does not flag used variables" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "y"},
-            {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 10}}},
-           {:early_return, {:variable, "y"}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 5)),
+          assignment(
+            variable("y"),
+            binary_op(:arithmetic, :+, variable("x"), literal(:integer, 10))
+          ),
+          early_return(variable("y"))
+        ])
 
       doc = Document.new(ast, :python)
       Registry.register(UnusedVariables)
@@ -441,8 +473,7 @@ defmodule Metastatic.Analysis.RunnerTest do
 
   describe "SimplifyConditional analyzer" do
     test "detects if-true-else-false pattern" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :boolean, true}, {:literal, :boolean, false}}
+      ast = conditional(variable("x"), literal(:boolean, true), literal(:boolean, false))
 
       doc = Document.new(ast, :python)
 
@@ -454,12 +485,12 @@ defmodule Metastatic.Analysis.RunnerTest do
       assert issue.category == :refactoring
       assert issue.severity == :refactoring_opportunity
       assert issue.suggestion.type == :replace
-      assert issue.suggestion.replacement == {:variable, "x"}
+      # Replacement is the condition - a variable in new 3-tuple format
+      assert {:variable, [], "x"} = issue.suggestion.replacement
     end
 
     test "detects if-false-else-true pattern" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :boolean, false}, {:literal, :boolean, true}}
+      ast = conditional(variable("x"), literal(:boolean, false), literal(:boolean, true))
 
       doc = Document.new(ast, :python)
 
@@ -468,12 +499,13 @@ defmodule Metastatic.Analysis.RunnerTest do
 
       assert [issue] = report.issues
       assert issue.message =~ "negation"
-      assert issue.suggestion.replacement == {:unary_op, :boolean, :not, {:variable, "x"}}
+      # Replacement is unary_op in new 3-tuple format
+      assert {:unary_op, [category: :boolean, operator: :not], [{:variable, [], "x"}]} =
+               issue.suggestion.replacement
     end
 
     test "does not flag non-redundant conditionals" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
 
       doc = Document.new(ast, :python)
 
@@ -485,13 +517,10 @@ defmodule Metastatic.Analysis.RunnerTest do
 
     test "handles nested conditionals" do
       ast =
-        {:block,
-         [
-           {:conditional, {:variable, "a"}, {:literal, :boolean, true},
-            {:literal, :boolean, false}},
-           {:conditional, {:variable, "b"}, {:literal, :boolean, false},
-            {:literal, :boolean, true}}
-         ]}
+        block([
+          conditional(variable("a"), literal(:boolean, true), literal(:boolean, false)),
+          conditional(variable("b"), literal(:boolean, false), literal(:boolean, true))
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -505,13 +534,11 @@ defmodule Metastatic.Analysis.RunnerTest do
   describe "report summary" do
     test "includes correct statistics" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-           {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
-           {:conditional, {:variable, "y"}, {:literal, :boolean, true},
-            {:literal, :boolean, false}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 5)),
+          assignment(variable("y"), literal(:integer, 10)),
+          conditional(variable("y"), literal(:boolean, true), literal(:boolean, false))
+        ])
 
       doc = Document.new(ast, :python)
 

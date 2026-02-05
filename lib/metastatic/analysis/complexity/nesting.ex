@@ -6,6 +6,11 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
   affects readability and maintainability. Deeply nested code is harder
   to understand and reason about.
 
+  ## 3-Tuple Format
+
+  All MetaAST nodes use the uniform 3-tuple structure:
+  `{type_atom, keyword_meta, children_or_value}`
+
   ## What Increases Nesting
 
   - `conditional` branches
@@ -23,19 +28,20 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
   ## Examples
 
       # No nesting: depth = 0
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> Metastatic.Analysis.Complexity.Nesting.calculate(ast)
       0
 
       # Single conditional: depth = 1
-      iex> ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      iex> ast = {:conditional, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
       iex> Metastatic.Analysis.Complexity.Nesting.calculate(ast)
       1
 
       # Nested conditional: depth = 2
-      iex> ast = {:conditional, {:variable, "x"},
-      ...>   {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-      ...>   {:literal, :integer, 3}}
+      iex> ast = {:conditional, [], [
+      ...>   {:variable, [], "x"},
+      ...>   {:conditional, [], [{:variable, [], "y"}, {:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]},
+      ...>   {:literal, [subtype: :integer], 3}]}
       iex> Metastatic.Analysis.Complexity.Nesting.calculate(ast)
       2
   """
@@ -49,11 +55,11 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
 
   ## Examples
 
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> Metastatic.Analysis.Complexity.Nesting.calculate(ast)
       0
 
-      iex> ast = {:loop, :while, {:variable, "condition"}, {:literal, :integer, 1}}
+      iex> ast = {:loop, [loop_type: :while], [{:variable, [], "condition"}, {:literal, [subtype: :integer], 1}]}
       iex> Metastatic.Analysis.Complexity.Nesting.calculate(ast)
       1
   """
@@ -67,77 +73,105 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
 
   # walk(ast, current_depth, max_depth) -> {current_depth, max_depth}
 
-  # Conditional: increment depth for branches
-  defp walk({:conditional, cond, then_br, else_br}, current, max) do
-    {_, max} = walk(cond, current, max)
+  # Conditional (3-tuple): increment depth for branches
+  defp walk({:conditional, _meta, [cond_expr, then_br, else_br]}, current, max) do
+    {_, max} = walk(cond_expr, current, max)
     {_, max} = walk(then_br, current + 1, max)
     {_, max} = walk(else_br, current + 1, max)
     {current, max}
   end
 
-  # Loop: increment depth for body
-  defp walk({:loop, :while, cond, body}, current, max) do
-    {_, max} = walk(cond, current, max)
-    {_, max} = walk(body, current + 1, max)
-    {current, max}
+  # Loop (3-tuple): increment depth for body
+  defp walk({:loop, meta, children}, current, max) when is_list(meta) do
+    loop_type = Keyword.get(meta, :loop_type)
+
+    case {loop_type, children} do
+      {:while, [cond_expr, body]} ->
+        {_, max} = walk(cond_expr, current, max)
+        {_, max} = walk(body, current + 1, max)
+        {current, max}
+
+      {_, [iter, coll, body]} ->
+        {_, max} = walk(iter, current, max)
+        {_, max} = walk(coll, current, max)
+        {_, max} = walk(body, current + 1, max)
+        {current, max}
+
+      _ ->
+        {_, max} =
+          Enum.reduce(children, {current, max}, fn child, {c, m} ->
+            walk(child, c + 1, m)
+          end)
+
+        {current, max}
+    end
   end
 
-  defp walk({:loop, _, iter, coll, body}, current, max) do
-    {_, max} = walk(iter, current, max)
-    {_, max} = walk(coll, current, max)
-    {_, max} = walk(body, current + 1, max)
-    {current, max}
-  end
-
-  # Binary operators: no depth change
-  defp walk({:binary_op, _, _, left, right}, current, max) do
+  # Binary operators (3-tuple): no depth change
+  defp walk({:binary_op, _meta, [left, right]}, current, max) do
     {_, max} = walk(left, current, max)
     {_, max} = walk(right, current, max)
     {current, max}
   end
 
-  # Unary operator
-  defp walk({:unary_op, _, operand}, current, max) do
+  # Unary operator (3-tuple)
+  defp walk({:unary_op, _meta, [operand]}, current, max) do
     walk(operand, current, max)
   end
 
-  # Exception handling: increment depth for blocks
-  defp walk({:exception_handling, try_block, catches, else_block}, current, max) do
+  # Exception handling (3-tuple): increment depth for blocks
+  defp walk({:exception_handling, _meta, [try_block, catches, else_block]}, current, max) do
     {_, max} = walk(try_block, current + 1, max)
 
+    catches_list = if is_list(catches), do: catches, else: []
+
     {_, max} =
-      Enum.reduce(catches, {current, max}, fn {_type, _var, catch_body}, {_c, m} ->
-        walk(catch_body, current + 1, m)
+      Enum.reduce(catches_list, {current, max}, fn
+        {:catch_clause, _, [_type, _var, catch_body]}, {_c, m} ->
+          walk(catch_body, current + 1, m)
+
+        {_type, _var, catch_body}, {_c, m} ->
+          walk(catch_body, current + 1, m)
+
+        other, {_c, m} ->
+          walk(other, current + 1, m)
       end)
 
     {_, max} = walk(else_block, current + 1, max)
     {current, max}
   end
 
-  # Pattern match: increment depth for branches
-  defp walk({:pattern_match, value, branches}, current, max) do
+  # Pattern match (3-tuple): increment depth for branches
+  defp walk({:pattern_match, _meta, [value, branches | _]}, current, max) do
     {_, max} = walk(value, current, max)
+    branches_list = if is_list(branches), do: branches, else: []
 
     {_, max} =
-      Enum.reduce(branches, {current, max}, fn
-        {:match_arm, _pattern, _guard, body}, {_c, m} ->
+      Enum.reduce(branches_list, {current, max}, fn
+        {:match_arm, _, [_pattern, _guard, body]}, {_c, m} ->
           walk(body, current + 1, m)
+
+        {:pair, _, [_pattern, branch]}, {_c, m} ->
+          walk(branch, current + 1, m)
 
         {_pattern, branch}, {_c, m} ->
           walk(branch, current + 1, m)
+
+        other, {_c, m} ->
+          walk(other, current, m)
       end)
 
     {current, max}
   end
 
-  # Match arm: increment depth for body
-  defp walk({:match_arm, _pattern, guard, body}, current, max) do
+  # Match arm (3-tuple): increment depth for body
+  defp walk({:match_arm, _meta, [_pattern, guard, body]}, current, max) do
     {_, max} = if guard, do: walk(guard, current, max), else: {current, max}
     walk(body, current + 1, max)
   end
 
-  # Block: walk statements at same depth
-  defp walk({:block, stmts}, current, max) when is_list(stmts) do
+  # Block (3-tuple): walk statements at same depth
+  defp walk({:block, _meta, stmts}, current, max) when is_list(stmts) do
     max = Enum.max([current, max])
 
     {_, max} =
@@ -148,8 +182,8 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {current, max}
   end
 
-  # Function call: walk arguments
-  defp walk({:function_call, _name, args}, current, max) do
+  # Function call (3-tuple): walk arguments
+  defp walk({:function_call, _meta, args}, current, max) when is_list(args) do
     {_, max} =
       Enum.reduce(args, {current, max}, fn arg, {c, m} ->
         walk(arg, c, m)
@@ -158,16 +192,16 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {current, max}
   end
 
-  # Lambda: increment depth for body
-  defp walk({:lambda, _params, body}, current, max) do
+  # Lambda (3-tuple): increment depth for body
+  defp walk({:lambda, _meta, [body]}, current, max) do
     {_, max} = walk(body, current + 1, max)
     {current, max}
   end
 
-  # M2.2s: Structural/Organizational Types
+  # M2.2s: Structural/Organizational Types (3-tuple format)
 
-  # Container: walk body at same depth (7-tuple format)
-  defp walk({:container, _type, _name, _parent, _type_params, _implements, body}, current, max) do
+  # Container: walk body at same depth
+  defp walk({:container, _meta, [body]}, current, max) do
     max = Enum.max([current, max])
 
     {_, max} =
@@ -182,12 +216,14 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {current, max}
   end
 
-  # Function definition: walk parameters, guards, and body (6-tuple format)
-  defp walk({:function_def, _name, params, _ret_type, opts, body}, current, max) do
+  # Function definition (3-tuple): walk body
+  defp walk({:function_def, meta, [body]}, current, max) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
+
     # Walk parameters
     {_, max} =
       Enum.reduce(params, {current, max}, fn
-        {:param, _name, pattern, default}, {c, m} ->
+        {:param, _, [_name, pattern, default]}, {c, m} ->
           {_, m} = if pattern, do: walk(pattern, c, m), else: {c, m}
           if default, do: walk(default, c, m), else: {c, m}
 
@@ -197,71 +233,63 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
 
     # Walk guards if present
     {_, max} =
-      if is_map(opts) do
-        case Map.get(opts, :guards) do
-          nil -> {current, max}
-          guard -> walk(guard, current, max)
-        end
-      else
-        {current, max}
+      case Keyword.get(meta, :guards) do
+        nil -> {current, max}
+        guard -> walk(guard, current, max)
       end
 
     # Walk body with incremented depth (function introduces scope)
     walk(body, current + 1, max)
   end
 
-  # Attribute access: walk object
-  defp walk({:attribute_access, obj, _attr}, current, max) do
+  # Attribute access (3-tuple): walk object
+  defp walk({:attribute_access, _meta, [obj, _attr]}, current, max) do
     walk(obj, current, max)
   end
 
-  # Augmented assignment: walk value
-  defp walk({:augmented_assignment, _op, _target, value}, current, max) do
+  # Augmented assignment (3-tuple): walk value
+  defp walk({:augmented_assignment, _meta, [_target, value]}, current, max) do
     walk(value, current, max)
   end
 
-  # Property: walk getter and setter bodies
-  defp walk({:property, _name, getter, setter, _metadata}, current, max) do
+  # Property (3-tuple): walk getter and setter bodies
+  defp walk({:property, _meta, [getter, setter]}, current, max) do
     {_, max} = if getter, do: walk(getter, current + 1, max), else: {current, max}
     {_, max} = if setter, do: walk(setter, current + 1, max), else: {current, max}
     {current, max}
   end
 
-  # Collection operations
-  defp walk({:collection_op, _, func, coll}, current, max) do
-    {_, max} = walk(func, current, max)
-    {_, max} = walk(coll, current, max)
+  # Collection operations (3-tuple)
+  defp walk({:collection_op, _meta, children}, current, max) when is_list(children) do
+    {_, max} =
+      Enum.reduce(children, {current, max}, fn child, {c, m} ->
+        walk(child, c, m)
+      end)
+
     {current, max}
   end
 
-  defp walk({:collection_op, _, func, coll, init}, current, max) do
-    {_, max} = walk(func, current, max)
-    {_, max} = walk(coll, current, max)
-    {_, max} = walk(init, current, max)
-    {current, max}
-  end
-
-  # Assignment
-  defp walk({:assignment, target, value}, current, max) do
+  # Assignment (3-tuple)
+  defp walk({:assignment, _meta, [target, value]}, current, max) do
     {_, max} = walk(target, current, max)
     {_, max} = walk(value, current, max)
     {current, max}
   end
 
-  # Inline match
-  defp walk({:inline_match, pattern, value}, current, max) do
+  # Inline match (3-tuple)
+  defp walk({:inline_match, _meta, [pattern, value]}, current, max) do
     {_, max} = walk(pattern, current, max)
     {_, max} = walk(value, current, max)
     {current, max}
   end
 
-  # Early return
-  defp walk({:early_return, value}, current, max) do
+  # Early return (3-tuple)
+  defp walk({:early_return, _meta, [value]}, current, max) do
     walk(value, current, max)
   end
 
-  # Tuple
-  defp walk({:tuple, elems}, current, max) when is_list(elems) do
+  # List (3-tuple)
+  defp walk({:list, _meta, elems}, current, max) when is_list(elems) do
     {_, max} =
       Enum.reduce(elems, {current, max}, fn elem, {c, m} ->
         walk(elem, c, m)
@@ -270,46 +298,47 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {current, max}
   end
 
-  # List
-  defp walk({:list, elems}, current, max) when is_list(elems) do
+  # Map (3-tuple)
+  defp walk({:map, _meta, pairs}, current, max) when is_list(pairs) do
     {_, max} =
-      Enum.reduce(elems, {current, max}, fn elem, {c, m} ->
-        walk(elem, c, m)
+      Enum.reduce(pairs, {current, max}, fn
+        {:pair, _, [key, value]}, {c, m} ->
+          {_, m} = walk(key, c, m)
+          walk(value, c, m)
+
+        {key, value}, {c, m} ->
+          {_, m} = walk(key, c, m)
+          walk(value, c, m)
+
+        other, {c, m} ->
+          walk(other, c, m)
       end)
 
     {current, max}
   end
 
-  # Map
-  defp walk({:map, pairs}, current, max) when is_list(pairs) do
-    {_, max} =
-      Enum.reduce(pairs, {current, max}, fn {key, value}, {c, m} ->
-        {_, m} = walk(key, c, m)
-        walk(value, c, m)
-      end)
-
-    {current, max}
-  end
-
-  # Async operation
-  defp walk({:async_operation, _type, body}, current, max) do
+  # Async operation (3-tuple)
+  defp walk({:async_operation, _meta, [body]}, current, max) do
     walk(body, current, max)
   end
 
-  # Language-specific: traverse embedded body if present
-  defp walk({:language_specific, _, _, _, metadata}, current, max) when is_map(metadata) do
-    case Map.get(metadata, :body) do
-      nil -> {current, max}
-      body -> walk(body, current, max)
+  # Language-specific (3-tuple)
+  defp walk({:language_specific, meta, native_ast}, current, max) when is_list(meta) do
+    case native_ast do
+      %{body: body} when not is_nil(body) -> walk(body, current, max)
+      _ -> {current, max}
     end
   end
 
-  defp walk({:language_specific, _, _, _}, current, max), do: {current, max}
-  defp walk({:language_specific, _, _}, current, max), do: {current, max}
+  # Literals and variables (3-tuple): update max if current is higher
+  defp walk({:literal, _meta, _value}, current, max), do: {current, Enum.max([current, max])}
+  defp walk({:variable, _meta, _name}, current, max), do: {current, Enum.max([current, max])}
 
-  # Literals and variables: update max if current is higher
-  defp walk({:literal, _, _}, current, max), do: {current, Enum.max([current, max])}
-  defp walk({:variable, _}, current, max), do: {current, Enum.max([current, max])}
+  # Pair (3-tuple)
+  defp walk({:pair, _meta, [key, value]}, current, max) do
+    {_, max} = walk(key, current, max)
+    walk(value, current, max)
+  end
 
   # Nil
   defp walk(nil, current, max), do: {current, max}

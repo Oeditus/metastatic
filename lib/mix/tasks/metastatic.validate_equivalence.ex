@@ -156,6 +156,10 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
   end
 
   # AST equivalence (ignoring location metadata)
+  # For 3-tuple format: {type, meta_keyword_list, children_or_value}
+  # We strip location-related keys from the metadata keyword list
+
+  @location_keys ~w[line end_line col end_col column end_column original_meta]a
 
   @spec ast_equivalent?(term(), term()) :: boolean()
   defp ast_equivalent?(ast1, ast2) do
@@ -163,27 +167,15 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
   end
 
   # Strip location metadata from AST nodes for comparison
+  # Handle 3-tuple format: {type, meta, children}
+  defp strip_locations({type, meta, children}) when is_atom(type) and is_list(meta) do
+    stripped_meta = strip_location_keys(meta)
+    stripped_children = strip_locations(children)
+    {type, stripped_meta, stripped_children}
+  end
+
   defp strip_locations(ast) when is_tuple(ast) do
-    case ast do
-      # Handle tuples with location as last element (map type)
-      tuple when tuple_size(tuple) > 0 and is_map(elem(tuple, tuple_size(tuple) - 1)) ->
-        last_elem = elem(tuple, tuple_size(tuple) - 1)
-
-        if Map.has_key?(last_elem, :line) or Map.has_key?(last_elem, :col) do
-          # This is a location map - remove it
-          tuple
-          |> Tuple.to_list()
-          |> Enum.take(tuple_size(tuple) - 1)
-          |> List.to_tuple()
-          |> tuple_map_elements(&strip_locations/1)
-        else
-          # Not a location, keep tuple and recurse
-          tuple_map_elements(tuple, &strip_locations/1)
-        end
-
-      _ ->
-        tuple_map_elements(ast, &strip_locations/1)
-    end
+    tuple_map_elements(ast, &strip_locations/1)
   end
 
   defp strip_locations(list) when is_list(list) do
@@ -195,6 +187,13 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
   end
 
   defp strip_locations(other), do: other
+
+  # Strip location keys from metadata keyword list
+  defp strip_location_keys(meta) when is_list(meta) do
+    meta
+    |> Keyword.drop(@location_keys)
+    |> Enum.map(fn {k, v} -> {k, strip_locations(v)} end)
+  end
 
   # Helper to map over tuple elements
   defp tuple_map_elements(tuple, fun) do

@@ -13,84 +13,65 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
   """
   @spec transform(term(), map()) :: {:ok, term()} | {:error, String.t()}
 
-  # Literals - M2.1 Core Layer
+  # Literals - M2.1 Core Layer (New 3-tuple format)
 
-  def transform({:literal, :integer, value}, metadata) do
+  def transform({:literal, meta, value}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
-    {:ok, {:integer, line, value}}
-  end
+    subtype = Keyword.get(meta, :subtype)
 
-  def transform({:literal, :float, value}, metadata) do
-    line = Map.get(metadata, :line, 0)
-    {:ok, {:float, line, value}}
-  end
+    case subtype do
+      :integer ->
+        {:ok, {:integer, line, value}}
 
-  def transform({:literal, :string, value}, metadata) do
-    line = Map.get(metadata, :line, 0)
-    # Convert string back to charlist for Erlang
-    charlist = String.to_charlist(value)
-    {:ok, {:string, line, charlist}}
-  end
+      :float ->
+        {:ok, {:float, line, value}}
 
-  def transform({:literal, :boolean, value}, metadata) do
-    line = Map.get(metadata, :line, 0)
-    {:ok, {:atom, line, value}}
-  end
+      :string ->
+        # Convert string back to charlist for Erlang
+        charlist = String.to_charlist(value)
+        {:ok, {:string, line, charlist}}
 
-  def transform({:literal, :null, nil}, metadata) do
-    line = Map.get(metadata, :line, 0)
-    # Check if original was 'undefined'
-    atom =
-      case Map.get(metadata, :erlang_atom) do
-        :undefined -> :undefined
-        _ -> nil
-      end
+      :boolean ->
+        {:ok, {:atom, line, value}}
 
-    {:ok, {:atom, line, atom}}
-  end
+      :null ->
+        # Check if original was 'undefined'
+        atom =
+          case Map.get(metadata, :erlang_atom) do
+            :undefined -> :undefined
+            _ -> nil
+          end
 
-  def transform({:literal, :symbol, atom}, metadata) do
-    line = Map.get(metadata, :line, 0)
-    {:ok, {:atom, line, atom}}
-  end
+        {:ok, {:atom, line, atom}}
 
-  def transform({:literal, :collection, items}, metadata) do
-    line = Map.get(metadata, :line, 0)
-
-    case Map.get(metadata, :collection_type) do
-      :tuple ->
-        with {:ok, elements} <- transform_list(items, metadata) do
-          {:ok, {:tuple, line, elements}}
-        end
-
-      :list ->
-        # Build list from items
-        with {:ok, elements} <- transform_list(items, metadata) do
-          list_ast = build_list(elements, line)
-          {:ok, list_ast}
-        end
-
-      _ ->
-        # Default to list
-        with {:ok, elements} <- transform_list(items, metadata) do
-          list_ast = build_list(elements, line)
-          {:ok, list_ast}
-        end
+      :symbol ->
+        {:ok, {:atom, line, value}}
     end
   end
 
-  # Variables - M2.1 Core Layer
+  # Lists - M2.1 Core Layer (New 3-tuple format)
+  def transform({:list, meta, items}, metadata) when is_list(meta) do
+    line = Map.get(metadata, :line, 0)
 
-  def transform({:variable, name}, metadata) when is_binary(name) do
+    with {:ok, elements} <- transform_list(items, metadata) do
+      list_ast = build_list(elements, line)
+      {:ok, list_ast}
+    end
+  end
+
+  # Variables - M2.1 Core Layer (New 3-tuple format)
+
+  def transform({:variable, meta, name}, metadata) when is_list(meta) and is_binary(name) do
     line = Map.get(metadata, :line, 0)
     var_atom = String.to_atom(name)
     {:ok, {:var, line, var_atom}}
   end
 
-  # Binary Operators - M2.1 Core Layer
+  # Binary Operators - M2.1 Core Layer (New 3-tuple format)
 
-  def transform({:binary_op, _category, op, left, right}, metadata) do
+  def transform({:binary_op, meta, [left, right]}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
+    op = Keyword.get(meta, :operator)
 
     # Denormalize operators back to Erlang syntax
     erlang_op =
@@ -110,20 +91,22 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
-  # Unary Operators - M2.1 Core Layer
+  # Unary Operators - M2.1 Core Layer (New 3-tuple format)
 
-  def transform({:unary_op, _category, op, operand}, metadata) do
+  def transform({:unary_op, meta, [operand]}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
+    op = Keyword.get(meta, :operator)
 
     with {:ok, operand_erl} <- transform(operand, metadata) do
       {:ok, {:op, line, op, operand_erl}}
     end
   end
 
-  # Function Calls - M2.1 Core Layer
+  # Function Calls - M2.1 Core Layer (New 3-tuple format)
 
-  def transform({:function_call, name, args}, metadata) do
+  def transform({:function_call, meta, args}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
+    name = Keyword.get(meta, :name)
 
     with {:ok, args_erl} <- transform_list(args, metadata) do
       # Check if this is a remote call
@@ -146,9 +129,10 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
-  # Conditionals - M2.1 Core Layer
+  # Conditionals - M2.1 Core Layer (New 3-tuple format)
 
-  def transform({:conditional, condition, then_branch, else_branch}, metadata) do
+  def transform({:conditional, meta, [condition, then_branch, else_branch]}, metadata)
+      when is_list(meta) do
     line = Map.get(metadata, :line, 0)
 
     with {:ok, cond_erl} <- transform(condition, metadata),
@@ -170,20 +154,27 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
-  # Blocks - M2.1 Core Layer
+  # Blocks - M2.1 Core Layer (New 3-tuple format)
 
-  def transform({:block, expressions}, metadata) do
+  def transform({:block, meta, expressions}, metadata) when is_list(meta) do
     case expressions do
-      [] -> {:ok, {:atom, 0, nil}}
-      [single] -> transform(single, metadata)
-      multiple -> {:ok, {:block, multiple}}
+      [] ->
+        {:ok, {:atom, 0, nil}}
+
+      [single] ->
+        transform(single, metadata)
+
+      multiple ->
+        with {:ok, erl_list} <- transform_list(multiple, metadata) do
+          {:ok, {:block, erl_list}}
+        end
     end
   end
 
-  # Inline Match (=) - M2.1 Core Layer
+  # Inline Match (=) - M2.1 Core Layer (New 3-tuple format)
   # Reconstruct Erlang pattern matching syntax
 
-  def transform({:inline_match, pattern, value}, metadata) do
+  def transform({:inline_match, meta, [pattern, value]}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
     pattern_metadata = Map.get(metadata, :pattern_metadata, %{})
     expr_metadata = Map.get(metadata, :expr_metadata, %{})
@@ -194,9 +185,9 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
-  # Tuples - Used in patterns and values
+  # Tuples - Used in patterns and values (New 3-tuple format)
 
-  def transform({:tuple, elements}, metadata) when is_list(elements) do
+  def transform({:tuple, meta, elements}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
 
     with {:ok, elements_erl} <- transform_list(elements, metadata) do
@@ -204,9 +195,9 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
-  # Cons pattern - Used in list patterns [H | T]
+  # Cons pattern - Used in list patterns [H | T] (New 3-tuple format)
 
-  def transform({:cons_pattern, head, tail}, metadata) do
+  def transform({:cons_pattern, meta, [head, tail]}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
 
     with {:ok, head_erl} <- transform(head, metadata),
@@ -215,9 +206,9 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
-  # Pattern Matching - M2.2 Extended Layer
+  # Pattern Matching - M2.2 Extended Layer (New 3-tuple format)
 
-  def transform({:pattern_match, scrutinee, arms}, metadata) do
+  def transform({:pattern_match, meta, [scrutinee, arms]}, metadata) when is_list(meta) do
     line = Map.get(metadata, :line, 0)
 
     with {:ok, scrutinee_erl} <- transform(scrutinee, metadata),
@@ -226,15 +217,11 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
-  # Language-Specific - M2.3 Native Layer
+  # Language-Specific - M2.3 Native Layer (New 3-tuple format)
 
-  def transform({:language_specific, :erlang, native_ast, _hint}, _metadata) do
+  def transform({:language_specific, meta, native_ast}, _metadata) when is_list(meta) do
     # Return the native Erlang AST as-is
     {:ok, native_ast}
-  end
-
-  def transform({:language_specific, other_lang, _ast, _hint}, _metadata) do
-    {:error, "Cannot reify #{other_lang} language-specific construct to Erlang"}
   end
 
   # Wildcard pattern
@@ -279,7 +266,7 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     line = Map.get(metadata, :line, 0)
 
     arms
-    |> Enum.reduce_while({:ok, []}, fn {:match_arm, pattern, _guard, body}, {:ok, acc} ->
+    |> Enum.reduce_while({:ok, []}, fn {:match_arm, _meta, [pattern, _guard, body]}, {:ok, acc} ->
       with {:ok, pattern_erl} <- transform_pattern(pattern, metadata),
            {:ok, body_erl} <- transform(body, metadata) do
         clause = {:clause, line, [pattern_erl], [], [body_erl]}

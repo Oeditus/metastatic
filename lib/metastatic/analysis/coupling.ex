@@ -20,9 +20,9 @@ defmodule Metastatic.Analysis.Coupling do
   ## Examples
 
       # Low coupling - no external dependencies
-      ast = {:container, :class, "Calculator", %{}, [
-        {:function_def, :public, "add", ["x", "y"], %{},
-         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+      ast = {:container, [container_type: :class, name: "Calculator"], [
+        {:function_def, [name: "add", params: ["x", "y"], visibility: :public], [
+         {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}]}
       ]}
 
       doc = Document.new(ast, :python)
@@ -56,8 +56,12 @@ defmodule Metastatic.Analysis.Coupling do
          do: {:ok, analyze_coupling(name, members)}
   end
 
-  defp extract_container({:container, type, name, _metadata, members}) do
-    {:ok, type, name, members}
+  # 3-tuple format
+  defp extract_container({:container, meta, [members]}) when is_list(meta) do
+    type = Keyword.get(meta, :container_type, :class)
+    name = Keyword.get(meta, :name, "anonymous")
+    members_list = if is_list(members), do: members, else: [members]
+    {:ok, type, name, members_list}
   end
 
   defp extract_container(_), do: {:error, "AST does not contain a container"}
@@ -89,10 +93,11 @@ defmodule Metastatic.Analysis.Coupling do
     |> Enum.uniq()
   end
 
-  defp extract_deps_from_member({:function_def, _, _, _, _, body}),
+  # 3-tuple format
+  defp extract_deps_from_member({:function_def, meta, [body]}) when is_list(meta),
     do: extract_deps_from_ast(body)
 
-  defp extract_deps_from_member({:property, _, getter, setter, _}) do
+  defp extract_deps_from_member({:property, meta, [getter, setter]}) when is_list(meta) do
     extract_deps_from_ast(getter) ++ extract_deps_from_ast(setter)
   end
 
@@ -102,14 +107,17 @@ defmodule Metastatic.Analysis.Coupling do
 
   defp extract_deps_from_ast(ast) do
     case ast do
-      # Function calls to external modules (Module.function pattern)
-      {:attribute_access, {:variable, module}, _func} when module not in ["self", "this", "@"] ->
+      # Function calls to external modules (Module.function pattern) - 3-tuple
+      {:attribute_access, _meta, [{:variable, _, module}, _func]}
+      when module not in ["self", "this", "@"] ->
         [module]
 
-      {:function_call, name, args} ->
+      # Function call - 3-tuple
+      {:function_call, meta, args} when is_list(meta) and is_list(args) ->
+        name = Keyword.get(meta, :name, "")
         # Check if it's a qualified call (e.g., "Math.sqrt")
         deps =
-          if String.contains?(name, ".") do
+          if is_binary(name) and String.contains?(name, ".") do
             [name |> String.split(".") |> hd()]
           else
             []
@@ -117,28 +125,31 @@ defmodule Metastatic.Analysis.Coupling do
 
         deps ++ Enum.flat_map(args, &extract_deps_from_ast/1)
 
-      {:binary_op, _, _, left, right} ->
+      # Binary op - 3-tuple
+      {:binary_op, _meta, [left, right]} ->
         extract_deps_from_ast(left) ++ extract_deps_from_ast(right)
 
-      {:conditional, cond, then_br, else_br} ->
-        extract_deps_from_ast(cond) ++
+      # Conditional - 3-tuple
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
+        extract_deps_from_ast(cond_expr) ++
           extract_deps_from_ast(then_br) ++
           extract_deps_from_ast(else_br)
 
-      {:block, stmts} when is_list(stmts) ->
+      # Block - 3-tuple
+      {:block, _meta, stmts} when is_list(stmts) ->
         Enum.flat_map(stmts, &extract_deps_from_ast/1)
 
-      {:assignment, _target, value} ->
+      # Assignment - 3-tuple
+      {:assignment, _meta, [_target, value]} ->
         extract_deps_from_ast(value)
 
-      {:augmented_assignment, _op, _target, value} ->
+      # Augmented assignment - 3-tuple
+      {:augmented_assignment, _meta, [_target, value]} ->
         extract_deps_from_ast(value)
 
-      {:loop, :while, condition, body} ->
-        extract_deps_from_ast(condition) ++ extract_deps_from_ast(body)
-
-      {:loop, _, _iter, coll, body} ->
-        extract_deps_from_ast(coll) ++ extract_deps_from_ast(body)
+      # Loop - 3-tuple
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        Enum.flat_map(children, &extract_deps_from_ast/1)
 
       _ ->
         []

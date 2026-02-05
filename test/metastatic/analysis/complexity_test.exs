@@ -7,9 +7,36 @@ defmodule Metastatic.Analysis.ComplexityTest do
 
   doctest Metastatic.Analysis.Complexity
 
+  # Helpers for 3-tuple format
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+  defp block(stmts), do: {:block, [], stmts}
+
+  defp binary_op(category, operator, left, right) do
+    {:binary_op, [category: category, operator: operator], [left, right]}
+  end
+
+  defp conditional(cond, then_branch, else_branch) do
+    {:conditional, [], [cond, then_branch, else_branch]}
+  end
+
+  defp loop(loop_type, condition, body) do
+    {:loop, [loop_type: loop_type], [condition, body]}
+  end
+
+  defp lambda(params, body) do
+    {:lambda, [params: params, captures: []], [body]}
+  end
+
+  defp collection_op(op_type, func, collection) do
+    {:collection_op, [op_type: op_type], [func, collection]}
+  end
+
+  defp early_return(value), do: {:early_return, [], [value]}
+
   describe "analyze/1 - basic functionality" do
     test "analyzes simple literal" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Complexity.analyze(doc)
@@ -20,7 +47,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
     end
 
     test "analyzes arithmetic expression" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Complexity.analyze(doc)
@@ -29,9 +56,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
     end
 
     test "analyzes conditional" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Complexity.analyze(doc)
@@ -41,7 +66,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
 
   describe "analyze/1 - threshold warnings" do
     test "no warnings for low complexity" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Complexity.analyze(doc)
@@ -53,10 +78,10 @@ defmodule Metastatic.Analysis.ComplexityTest do
       # Build AST with 11 decision points (complexity = 12)
       conditionals =
         for i <- 1..11 do
-          {:conditional, {:variable, "x#{i}"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+          conditional(variable("x#{i}"), literal(:integer, 1), literal(:integer, 2))
         end
 
-      ast = {:block, conditionals}
+      ast = block(conditionals)
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Complexity.analyze(doc)
@@ -66,9 +91,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
     end
 
     test "custom thresholds" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       # Lower threshold to trigger warning
@@ -80,9 +103,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
 
   describe "analyze/1 - selective metrics" do
     test "calculates only cyclomatic when specified" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Complexity.analyze(doc, metrics: [:cyclomatic])
@@ -92,7 +113,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
     end
 
     test "calculates all metrics by default" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       assert {:ok, result} = Complexity.analyze(doc)
@@ -107,7 +128,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
 
   describe "analyze!/1" do
     test "returns result directly" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc = Document.new(ast, :python)
 
       result = Complexity.analyze!(doc)
@@ -116,9 +137,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
     end
 
     test "works with options" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc = Document.new(ast, :elixir)
 
       result = Complexity.analyze!(doc, metrics: [:cyclomatic])
@@ -129,12 +148,11 @@ defmodule Metastatic.Analysis.ComplexityTest do
   describe "analyze/1 - complex AST structures" do
     test "analyzes nested blocks" do
       ast =
-        {:block,
-         [
-           {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-           {:loop, :while, {:variable, "y"}, {:literal, :integer, 3}},
-           {:variable, "z"}
-         ]}
+        block([
+          conditional(variable("x"), literal(:integer, 1), literal(:integer, 2)),
+          loop(:while, variable("y"), literal(:integer, 3)),
+          variable("z")
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -144,10 +162,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
     end
 
     test "analyzes lambdas" do
-      ast =
-        {:lambda, [{:variable, "x"}],
-         {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}}
-
+      ast = lambda(["x"], conditional(variable("x"), literal(:integer, 1), literal(:integer, 2)))
       doc = Document.new(ast, :elixir)
 
       assert {:ok, result} = Complexity.analyze(doc)
@@ -157,10 +172,11 @@ defmodule Metastatic.Analysis.ComplexityTest do
 
     test "analyzes collection operations" do
       ast =
-        {:collection_op, :map,
-         {:lambda, [{:variable, "x"}],
-          {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}},
-         {:variable, "list"}}
+        collection_op(
+          :map,
+          lambda(["x"], conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))),
+          variable("list")
+        )
 
       doc = Document.new(ast, :python)
 
@@ -171,8 +187,7 @@ defmodule Metastatic.Analysis.ComplexityTest do
 
   describe "analyze/1 - cross-language consistency" do
     test "same AST produces same complexity regardless of language" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
 
       python_doc = Document.new(ast, :python)
       elixir_doc = Document.new(ast, :elixir)
@@ -191,8 +206,11 @@ defmodule Metastatic.Analysis.ComplexityTest do
       #   if x:
       #     return 1
       ast =
-        {:loop, :while, {:variable, "condition"},
-         {:conditional, {:variable, "x"}, {:early_return, {:literal, :integer, 1}}, nil}}
+        loop(
+          :while,
+          variable("condition"),
+          conditional(variable("x"), early_return(literal(:integer, 1)), nil)
+        )
 
       python_doc = Document.new(ast, :python)
       elixir_doc = Document.new(ast, :elixir)

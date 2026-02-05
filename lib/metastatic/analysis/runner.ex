@@ -237,171 +237,125 @@ defmodule Metastatic.Analysis.Runner do
     end)
   end
 
+  # Extract children from AST nodes using the new 3-tuple format:
+  # {type_atom, keyword_meta, children_or_value}
+  #
+  # For most composite nodes, children are in elem(ast, 2) as a list.
+  # Leaf nodes (literal, variable) have values, not children.
   defp extract_children(ast, language) do
     case ast do
-      # M2.1 Core layer
-      {:binary_op, _, _, left, right} ->
+      # === NEW 3-TUPLE FORMAT ===
+
+      # Leaf nodes - no children (value in third position)
+      {:literal, _meta, _value} ->
+        []
+
+      {:variable, _meta, _name} ->
+        []
+
+      # Composite nodes - children are a list in third position
+      {:binary_op, _meta, [left, right]} ->
         [left, right]
 
-      {:binary_op, _, _, left, right, _loc} ->
-        [left, right]
-
-      {:unary_op, _, _, operand} ->
+      {:unary_op, _meta, [operand]} ->
         [operand]
 
-      {:unary_op, _, _, operand, _loc} ->
-        [operand]
+      {:conditional, _meta, children} when is_list(children) ->
+        # [condition, then_branch, else_branch]
+        Enum.filter(children, &(&1 != nil))
 
-      {:conditional, cond, then_br, else_br} ->
-        [cond, then_br, else_br]
-
-      {:conditional, cond, then_br, else_br, _loc} ->
-        [cond, then_br, else_br]
-
-      {:block, stmts} when is_list(stmts) ->
+      {:block, _meta, stmts} when is_list(stmts) ->
         stmts
 
-      {:block, stmts, _loc} when is_list(stmts) ->
-        stmts
+      {:early_return, _meta, value} ->
+        if is_nil(value), do: [], else: [value]
 
-      {:early_return, value} ->
-        [value]
-
-      {:early_return, value, _loc} ->
-        [value]
-
-      {:assignment, target, value} ->
+      {:assignment, _meta, [target, value]} ->
         [target, value]
 
-      {:assignment, target, value, _loc} ->
-        [target, value]
-
-      {:inline_match, pattern, value} ->
+      {:inline_match, _meta, [pattern, value]} ->
         [pattern, value]
 
-      {:inline_match, pattern, value, _loc} ->
-        [pattern, value]
-
-      {:function_call, _name, args} ->
+      {:function_call, _meta, args} when is_list(args) ->
         args
 
-      {:function_call, _name, args, _loc} ->
-        args
+      {:list, _meta, elements} when is_list(elements) ->
+        elements
 
-      {:attribute_access, obj, _attr} ->
-        [obj]
+      {:map, _meta, pairs} when is_list(pairs) ->
+        pairs
 
-      {:attribute_access, obj, _attr, _loc} ->
-        [obj]
+      {:pair, _meta, [key, value]} ->
+        [key, value]
 
-      {:augmented_assignment, target, _op, value} ->
+      {:tuple, _meta, elements} when is_list(elements) ->
+        elements
+
+      {:attribute_access, _meta, [receiver]} ->
+        [receiver]
+
+      {:augmented_assignment, _meta, [target, value]} ->
         [target, value]
 
-      {:augmented_assignment, target, _op, value, _loc} ->
-        [target, value]
+      # M2.2 Extended layer - 3-tuple format
+      {:loop, _meta, children} when is_list(children) ->
+        # :while has [condition, body], :for/:for_each has [iterator, collection, body]
+        children
 
-      # M2.2 Extended layer
-      {:loop, :while, cond, body} ->
-        [cond, body]
+      {:lambda, _meta, body} when is_list(body) ->
+        # Body statements as children
+        body
 
-      {:loop, :while, cond, body, _loc} ->
-        [cond, body]
+      {:collection_op, _meta, children} when is_list(children) ->
+        # [func, collection] or [func, collection, initial]
+        children
 
-      {:loop, _, iter, coll, body} ->
-        [iter, coll, body]
+      {:pattern_match, _meta, children} when is_list(children) ->
+        # [scrutinee | match_arms]
+        children
 
-      {:loop, _, iter, coll, body, _loc} ->
-        [iter, coll, body]
+      {:match_arm, _meta, body} when is_list(body) ->
+        # Body statements
+        body
 
-      {:lambda, _params, _captures, body} ->
-        # Lambda is {:lambda, params, captures, body}
-        [body]
+      {:exception_handling, _meta, children} when is_list(children) ->
+        # [try_block | catch_blocks]
+        children
 
-      {:lambda, _params, _captures, body, _loc} ->
-        [body]
+      {:async_operation, _meta, [operation]} ->
+        [operation]
 
-      # Reduce: 6-tuple with location (must come first)
-      {:collection_op, _, func, coll, init, loc} when is_map(loc) ->
-        [func, coll, init]
+      # M2.2s Structural layer - 3-tuple format
+      {:container, _meta, body} when is_list(body) ->
+        body
 
-      # Map/filter: 5-tuple with location
-      {:collection_op, _, func, coll, loc} when is_map(loc) ->
-        [func, coll]
+      {:function_def, _meta, body} when is_list(body) ->
+        body
 
-      # Reduce: 5-tuple without location
-      {:collection_op, _, func, coll, init} ->
-        [func, coll, init]
+      {:property, _meta, children} when is_list(children) ->
+        # [getter, setter] - filter out nils
+        Enum.filter(children, &(&1 != nil))
 
-      # Map/filter: 4-tuple without location
-      {:collection_op, _, func, coll} ->
-        [func, coll]
-
-      {:pattern_match, patterns, _opts} when is_list(patterns) ->
-        Enum.flat_map(patterns, &extract_pattern_children/1)
-
-      {:exception_handling, try_block, catches, else_block} ->
-        [try_block] ++ extract_catches(catches) ++ [else_block]
-
-      {:async_operation, _type, expr} ->
-        [expr]
-
-      # M2.2s Structural layer
-      {:container, _type, _name, _parent, _type_params, _implements, body} ->
-        # container: type, name, parent, type_params, implements, body
-        if is_list(body), do: body, else: [body]
-
-      {:container, _type, _name, _parent, _type_params, _implements, body, _loc} ->
-        if is_list(body), do: body, else: [body]
-
-      {:function_def, _name, _params, _ret_type, _opts, body} ->
-        [body]
-
-      {:function_def, _name, _params, _ret_type, _opts, body, _loc} ->
-        [body]
-
-      {:property, _name, getter, setter, _opts} ->
-        [getter, setter]
-
-      {:property, _name, getter, setter, _opts, _loc} ->
-        [getter, setter]
-
-      # Literals and variables have no children
-      {:literal, _, _} ->
-        []
-
-      {:literal, _, _, _loc} ->
-        []
-
-      {:variable, _} ->
-        []
-
-      {:variable, _, _loc} ->
-        []
-
-      # Language-specific nodes - use transformed body from metadata if available
-      {:language_specific, _, _original_ast, _tag, metadata} when is_map(metadata) ->
-        # Try to get transformed body from metadata first
-        case Map.get(metadata, :body) do
+      # M2.3 Native layer - 3-tuple format
+      {:language_specific, meta, native_ast} ->
+        # Check for body in metadata first
+        case Keyword.get(meta, :body) do
           body when not is_nil(body) -> [body]
-          nil -> []
+          nil -> extract_language_specific_children(native_ast, language)
         end
 
-      {:language_specific, _, original_ast, _} ->
-        # Fallback: extract children from the original language-specific AST
-        extract_language_specific_children(original_ast, language)
-
-      # List of nodes
+      # List of nodes (for traversing lists of statements)
       list when is_list(list) ->
         list
 
-      # Unknown - no children
+      # Unknown/unrecognized format - try generic extraction
       _ ->
-        []
+        generic_extract_children(ast)
     end
   end
 
-  defp extract_pattern_children({_pattern, body}), do: [body]
-  defp extract_pattern_children(_), do: []
+  # Note: extract_pattern_children and extract_catches removed -
+  # no longer needed with 3-tuple format where children are always in elem(ast, 2)
 
   # Extract children from language-specific AST nodes
   # Delegates to the adapter for the specified language
@@ -441,15 +395,6 @@ defmodule Metastatic.Analysis.Runner do
 
   defp generic_extract_children(_), do: []
 
-  defp extract_catches(catches) when is_list(catches) do
-    Enum.flat_map(catches, fn
-      {_exc_type, body} -> [body]
-      _ -> []
-    end)
-  end
-
-  defp extract_catches(_), do: []
-
   defp apply_analyzer(analyzer, ast, context) do
     analyzer.analyze(ast, context)
   rescue
@@ -473,37 +418,42 @@ defmodule Metastatic.Analysis.Runner do
     end)
   end
 
+  # Update context based on current AST node using new 3-tuple format:
+  # {type_atom, keyword_meta, children_or_value}
+  #
+  # Track function names, module names, etc. for analyzers that need them.
+  # Container/function_def have name in keyword meta.
   defp update_contexts(contexts, ast) do
-    # Update context based on current AST node
-    # Track function names, module names, etc. for analyzers that need them
     case ast do
-      # Container without location metadata (7-tuple)
-      {:container, _type, name, _, _, _, _} ->
-        # Entering a module/class/namespace
-        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
-          Map.put(acc, analyzer, Map.put(ctx, :module_name, name))
-        end)
+      # Container: {:container, [container_type: t, name: n, ...], body}
+      {:container, meta, _body} when is_list(meta) ->
+        name = Keyword.get(meta, :name)
 
-      # Container with location metadata (8-tuple)
-      {:container, _type, name, _, _, _, _, _loc} ->
-        # Entering a module/class/namespace
-        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
-          Map.put(acc, analyzer, Map.put(ctx, :module_name, name))
-        end)
+        if name do
+          Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
+            Map.put(acc, analyzer, Map.put(ctx, :module_name, name))
+          end)
+        else
+          contexts
+        end
 
-      # Function definition without location metadata (6-tuple)
-      {:function_def, name, _params, _ret_type, _opts, _body} ->
-        # Entering a function definition
-        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
-          Map.put(acc, analyzer, Map.put(ctx, :function_name, name))
-        end)
+      # Function definition: {:function_def, [name: n, params: [...], ...], body}
+      {:function_def, meta, _body} when is_list(meta) ->
+        name = Keyword.get(meta, :name)
+        arity = length(Keyword.get(meta, :params, []))
 
-      # Function definition with location metadata (7-tuple)
-      {:function_def, name, _params, _ret_type, _opts, _body, _loc} ->
-        # Entering a function definition
-        Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
-          Map.put(acc, analyzer, Map.put(ctx, :function_name, name))
-        end)
+        if name do
+          Enum.reduce(contexts, %{}, fn {analyzer, ctx}, acc ->
+            ctx =
+              ctx
+              |> Map.put(:function_name, name)
+              |> Map.put(:function_arity, arity)
+
+            Map.put(acc, analyzer, ctx)
+          end)
+        else
+          contexts
+        end
 
       _ ->
         # No context update for other nodes

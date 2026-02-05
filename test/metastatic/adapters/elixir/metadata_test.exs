@@ -4,11 +4,19 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
   Verifies that module context, function context, and location information
   are properly attached to structural nodes (container, function_def).
+
+  New 3-tuple format:
+    {:container, meta, children}
+    {:function_def, meta, children}
+
+  where meta is a keyword list containing:
+    - container_type, name, module, language, line, etc. for containers
+    - name, params, visibility, arity, function, language, line, etc. for function_def
   """
 
   use ExUnit.Case, async: true
 
-  alias Metastatic.{AST, Builder}
+  alias Metastatic.Builder
 
   describe "module context preservation" do
     test "attaches module name to container node" do
@@ -23,11 +31,13 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
       {:ok, doc} = Builder.from_source(source, :elixir)
 
       # Top-level node should be a container with location metadata
-      assert {:container, :module, "MyApp.UserController", nil, [], [], _body, location} = doc.ast
-      assert is_map(location)
-      assert location.module == "MyApp.UserController"
-      assert location.language == :elixir
-      assert is_integer(location.line)
+      # Body is a list of children in the new 3-tuple format
+      assert {:container, meta, _children} = doc.ast
+      assert Keyword.get(meta, :container_type) == :module
+      assert Keyword.get(meta, :name) == "MyApp.UserController"
+      assert Keyword.get(meta, :module) == "MyApp.UserController"
+      assert Keyword.get(meta, :language) == :elixir
+      assert is_integer(Keyword.get(meta, :line))
     end
 
     test "preserves module context in nested modules" do
@@ -41,12 +51,19 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "Outer", nil, [], [], body, outer_loc} = doc.ast
-      assert outer_loc.module == "Outer"
+      assert {:container, outer_meta, children} = doc.ast
+      assert Keyword.get(outer_meta, :name) == "Outer"
 
-      # Inner module is in the body
-      assert {:container, :module, "Inner", nil, [], [], _inner_body, inner_loc} = body
-      assert inner_loc.module == "Inner"
+      # Inner module is in the body (list of children)
+      # Could be [inner_module] or just inner_module depending on implementation
+      inner =
+        case children do
+          [child] -> child
+          child -> child
+        end
+
+      assert {:container, inner_meta, _inner_children} = inner
+      assert Keyword.get(inner_meta, :name) == "Inner"
     end
   end
 
@@ -62,19 +79,22 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "UserService", nil, [], [], body, _loc} = doc.ast
-      assert {:function_def, "create_user", params, nil, opts, _body, location} = body
+      assert {:container, _module_meta, children} = doc.ast
+      # Children is a list in 3-tuple format
+      [func] = children
+      assert {:function_def, meta, _body} = func
 
       # Check function metadata
-      assert location.function == "create_user"
-      assert location.arity == 2
-      assert location.visibility == :public
-      assert location.language == :elixir
-      assert is_integer(location.line)
+      assert Keyword.get(meta, :name) == "create_user"
+      assert Keyword.get(meta, :function) == "create_user"
+      assert Keyword.get(meta, :arity) == 2
+      assert Keyword.get(meta, :visibility) == :public
+      assert Keyword.get(meta, :language) == :elixir
+      assert is_integer(Keyword.get(meta, :line))
 
       # Check params
+      params = Keyword.get(meta, :params, [])
       assert length(params) == 2
-      assert opts.visibility == :public
     end
 
     test "distinguishes between public and private functions" do
@@ -87,16 +107,24 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "Math", nil, [], [], {:block, functions}, _loc} = doc.ast
+      assert {:container, _module_meta, children} = doc.ast
+      # Multiple functions - children is either a block or a list
+      functions =
+        case children do
+          [{:block, _, funcs}] -> funcs
+          {:block, _, funcs} -> funcs
+          funcs when is_list(funcs) -> funcs
+        end
+
       assert [add_fn, multiply_fn] = functions
 
       # Public function
-      assert {:function_def, "add", _params, nil, _opts, _body, add_loc} = add_fn
-      assert add_loc.visibility == :public
+      assert {:function_def, add_meta, _} = add_fn
+      assert Keyword.get(add_meta, :visibility) == :public
 
       # Private function
-      assert {:function_def, "multiply", _params, nil, _opts, _body, mult_loc} = multiply_fn
-      assert mult_loc.visibility == :private
+      assert {:function_def, mult_meta, _} = multiply_fn
+      assert Keyword.get(mult_meta, :visibility) == :private
     end
 
     test "handles zero-arity functions" do
@@ -110,11 +138,14 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "Config", nil, [], [], body, _loc} = doc.ast
-      assert {:function_def, "get_api_url", params, nil, _opts, _body, location} = body
+      assert {:container, _module_meta, children} = doc.ast
+      [func] = children
+      assert {:function_def, meta, _body} = func
 
-      assert location.function == "get_api_url"
-      assert location.arity == 0
+      assert Keyword.get(meta, :name) == "get_api_url"
+      assert Keyword.get(meta, :function) == "get_api_url"
+      assert Keyword.get(meta, :arity) == 0
+      params = Keyword.get(meta, :params, [])
       assert params == []
     end
 
@@ -128,17 +159,25 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "List", nil, [], [], {:block, functions}, _loc} = doc.ast
+      assert {:container, _module_meta, children} = doc.ast
+
+      functions =
+        case children do
+          [{:block, _, funcs}] -> funcs
+          {:block, _, funcs} -> funcs
+          funcs when is_list(funcs) -> funcs
+        end
+
       assert [sum1, sum2] = functions
 
       # Both clauses have same arity
-      assert {:function_def, "sum", params1, nil, _opts1, _body1, loc1} = sum1
-      assert {:function_def, "sum", params2, nil, _opts2, _body2, loc2} = sum2
+      assert {:function_def, meta1, _} = sum1
+      assert {:function_def, meta2, _} = sum2
 
-      assert loc1.arity == 1
-      assert loc2.arity == 1
-      assert length(params1) == 1
-      assert length(params2) == 1
+      assert Keyword.get(meta1, :arity) == 1
+      assert Keyword.get(meta2, :arity) == 1
+      assert length(Keyword.get(meta1, :params, [])) == 1
+      assert length(Keyword.get(meta2, :params, [])) == 1
     end
   end
 
@@ -158,18 +197,45 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
       {:ok, doc} = Builder.from_source(source, :elixir)
 
       # Module attributes are transformed to assignments
-      assert {:container, :module, "Config", nil, [], [], {:block, [attr1, attr2, func]}, _loc} =
-               doc.ast
+      assert {:container, _module_meta, children} = doc.ast
 
-      # Check first attribute assignment
-      assert {:assignment, {:variable, "@api_url"}, {:literal, :string, _url}} = attr1
+      items =
+        case children do
+          [{:block, _, list}] -> list
+          {:block, _, list} -> list
+          list when is_list(list) -> list
+        end
 
-      # Check second attribute
-      assert {:assignment, {:variable, "@timeout"}, {:literal, :integer, 5000}} = attr2
+      # Find assignments and function
+      attrs =
+        Enum.filter(items, fn
+          {:assignment, _, _} -> true
+          _ -> false
+        end)
+
+      funcs =
+        Enum.filter(items, fn
+          {:function_def, _, _} -> true
+          _ -> false
+        end)
+
+      assert length(attrs) == 2
+      assert length(funcs) == 1
+
+      # Check that attributes are assignments
+      Enum.each(attrs, fn attr ->
+        assert {:assignment, attr_meta, [target, value]} = attr
+        assert Keyword.get(attr_meta, :attribute_type) == :module_attribute
+        assert {:variable, _, _} = target
+        # Value should be a literal
+        assert {:literal, _, _} = value
+      end)
 
       # Function should have its context
-      assert {:function_def, "get_config", [], nil, _opts, _body, func_loc} = func
-      assert func_loc.function == "get_config"
+      [func] = funcs
+      assert {:function_def, func_meta, _} = func
+      assert Keyword.get(func_meta, :name) == "get_config"
+      assert Keyword.get(func_meta, :function) == "get_config"
     end
   end
 
@@ -189,19 +255,27 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "Sample", nil, [], [], {:block, [fn1, fn2]}, container_loc} =
-               doc.ast
+      assert {:container, container_meta, children} = doc.ast
+
+      functions =
+        case children do
+          [{:block, _, funcs}] -> funcs
+          {:block, _, funcs} -> funcs
+          funcs when is_list(funcs) -> funcs
+        end
+
+      assert [fn1, fn2] = functions
 
       # Container should have line 1
-      assert container_loc.line == 1
+      assert Keyword.get(container_meta, :line) == 1
 
       # Functions should have different line numbers
-      assert {:function_def, "first", _, _, _, _, loc1} = fn1
-      assert {:function_def, "second", _, _, _, _, loc2} = fn2
+      assert {:function_def, meta1, _} = fn1
+      assert {:function_def, meta2, _} = fn2
 
-      assert is_integer(loc1.line)
-      assert is_integer(loc2.line)
-      assert loc1.line < loc2.line
+      assert is_integer(Keyword.get(meta1, :line))
+      assert is_integer(Keyword.get(meta2, :line))
+      assert Keyword.get(meta1, :line) < Keyword.get(meta2, :line)
     end
 
     test "always includes language field" do
@@ -213,11 +287,12 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "Test", nil, [], [], body, container_loc} = doc.ast
-      assert container_loc.language == :elixir
+      assert {:container, container_meta, children} = doc.ast
+      assert Keyword.get(container_meta, :language) == :elixir
 
-      assert {:function_def, "test", _, _, _, _, func_loc} = body
-      assert func_loc.language == :elixir
+      [func] = children
+      assert {:function_def, func_meta, _} = func
+      assert Keyword.get(func_meta, :language) == :elixir
     end
   end
 
@@ -233,33 +308,23 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "Calculator", nil, [], [], func, _container_loc} = doc.ast
-
-      assert {:function_def, "add", _params, nil, _opts, body, _func_loc} = func
+      assert {:container, _container_meta, children} = doc.ast
+      [func] = children
+      assert {:function_def, _func_meta, body_children} = func
 
       # The body is a binary_op - may or may not have location metadata
       # But if it does, it should NOT have module/function enrichment
-      case body do
-        {:binary_op, :arithmetic, :+, left, _right, loc} when is_map(loc) ->
-          # Has location, but should not have module/function context
-          refute Map.has_key?(loc, :module)
-          refute Map.has_key?(loc, :function)
-          assert loc.language == :elixir
+      [body] = body_children
+      assert {:binary_op, op_meta, [left, _right]} = body
 
-          # Check left variable too
-          case left do
-            {:variable, "a", var_loc} when is_map(var_loc) ->
-              refute Map.has_key?(var_loc, :module)
-              refute Map.has_key?(var_loc, :function)
+      # Has original_meta but should not have module/function context
+      refute Keyword.has_key?(op_meta, :module)
+      refute Keyword.has_key?(op_meta, :function)
 
-            {:variable, "a"} ->
-              :ok
-          end
-
-        {:binary_op, :arithmetic, :+, _left, _right} ->
-          # No location is also fine
-          :ok
-      end
+      # Check left variable too
+      assert {:variable, var_meta, "a"} = left
+      refute Keyword.has_key?(var_meta, :module)
+      refute Keyword.has_key?(var_meta, :function)
     end
   end
 
@@ -273,20 +338,21 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "MyMod", nil, [], [], body, _loc} = doc.ast
-      assert {:function_def, "my_func", _params, nil, _opts, _body, _func_loc} = body
+      assert {:container, container_meta, children} = doc.ast
+      [func] = children
+      assert {:function_def, func_meta, _} = func
 
-      # Use AST.extract_metadata to retrieve context
-      module_name = AST.extract_metadata(doc.ast, :module)
+      # Use Keyword.get to retrieve context from 3-tuple meta
+      module_name = Keyword.get(container_meta, :module)
       assert module_name == "MyMod"
 
-      func_name = AST.extract_metadata(body, :function)
+      func_name = Keyword.get(func_meta, :function)
       assert func_name == "my_func"
 
-      arity = AST.extract_metadata(body, :arity)
+      arity = Keyword.get(func_meta, :arity)
       assert arity == 1
 
-      visibility = AST.extract_metadata(body, :visibility)
+      visibility = Keyword.get(func_meta, :visibility)
       assert visibility == :public
     end
 
@@ -299,13 +365,15 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "TestMod", nil, [], [], body, _loc} = doc.ast
+      assert {:container, container_meta, children} = doc.ast
+      [func] = children
+      assert {:function_def, func_meta, _} = func
 
-      # Use convenience extractors
-      assert AST.node_module(doc.ast) == "TestMod"
-      assert AST.node_function(body) == "private_func"
-      assert AST.node_arity(body) == 3
-      assert AST.node_visibility(body) == :private
+      # Use Keyword.get on meta for 3-tuple format
+      assert Keyword.get(container_meta, :module) == "TestMod"
+      assert Keyword.get(func_meta, :function) == "private_func"
+      assert Keyword.get(func_meta, :arity) == 3
+      assert Keyword.get(func_meta, :visibility) == :private
     end
   end
 
@@ -331,29 +399,38 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
 
       {:ok, doc} = Builder.from_source(source, :elixir)
 
-      assert {:container, :module, "MyAppWeb.UserController", nil, [], [], {:block, functions},
-              container_loc} = doc.ast
+      assert {:container, container_meta, children} = doc.ast
 
-      assert container_loc.module == "MyAppWeb.UserController"
+      functions =
+        case children do
+          [{:block, _, funcs}] -> funcs
+          {:block, _, funcs} -> funcs
+          funcs when is_list(funcs) -> funcs
+        end
+
+      assert Keyword.get(container_meta, :module) == "MyAppWeb.UserController"
       assert length(functions) == 3
 
       # Check each function has proper context
       [index, show, render] = functions
 
-      assert {:function_def, "index", _p1, nil, _o1, _b1, loc1} = index
-      assert loc1.function == "index"
-      assert loc1.arity == 2
-      assert loc1.visibility == :public
+      assert {:function_def, meta1, _} = index
+      assert Keyword.get(meta1, :name) == "index"
+      assert Keyword.get(meta1, :function) == "index"
+      assert Keyword.get(meta1, :arity) == 2
+      assert Keyword.get(meta1, :visibility) == :public
 
-      assert {:function_def, "show", _p2, nil, _o2, _b2, loc2} = show
-      assert loc2.function == "show"
-      assert loc2.arity == 2
-      assert loc2.visibility == :public
+      assert {:function_def, meta2, _} = show
+      assert Keyword.get(meta2, :name) == "show"
+      assert Keyword.get(meta2, :function) == "show"
+      assert Keyword.get(meta2, :arity) == 2
+      assert Keyword.get(meta2, :visibility) == :public
 
-      assert {:function_def, "render", _p3, nil, _o3, _b3, loc3} = render
-      assert loc3.function == "render"
-      assert loc3.arity == 3
-      assert loc3.visibility == :private
+      assert {:function_def, meta3, _} = render
+      assert Keyword.get(meta3, :name) == "render"
+      assert Keyword.get(meta3, :function) == "render"
+      assert Keyword.get(meta3, :arity) == 3
+      assert Keyword.get(meta3, :visibility) == :private
     end
 
     test "GenServer with callbacks" do
@@ -382,29 +459,33 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
       {:ok, doc} = Builder.from_source(source, :elixir)
 
       # Extract all function_def nodes
-      assert {:container, :module, "MyWorker", nil, [], [], body, _loc} = doc.ast
+      assert {:container, _container_meta, children} = doc.ast
 
       # Body contains: use GenServer macro call + functions
-      functions =
-        case body do
-          {:block, items} ->
-            Enum.filter(items, fn
-              {:function_def, _, _, _, _, _, _} -> true
-              _ -> false
-            end)
-
-          {:function_def, _, _, _, _, _, _} = single ->
-            [single]
+      items =
+        case children do
+          [{:block, _, list}] -> list
+          {:block, _, list} -> list
+          list when is_list(list) -> list
         end
+
+      functions =
+        Enum.filter(items, fn
+          {:function_def, _, _} -> true
+          _ -> false
+        end)
 
       # Verify all have correct metadata
       Enum.each(functions, fn func ->
-        {:function_def, name, params, nil, _opts, _body, loc} = func
+        {:function_def, meta, _body} = func
+        name = Keyword.get(meta, :name)
+        params = Keyword.get(meta, :params, [])
+
         assert is_binary(name)
-        assert loc.function == name
-        assert loc.arity == length(params)
-        assert loc.visibility in [:public, :private]
-        assert loc.language == :elixir
+        assert Keyword.get(meta, :function) == name
+        assert Keyword.get(meta, :arity) == length(params)
+        assert Keyword.get(meta, :visibility) in [:public, :private]
+        assert Keyword.get(meta, :language) == :elixir
       end)
     end
   end

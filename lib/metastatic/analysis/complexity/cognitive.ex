@@ -5,6 +5,11 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   Cognitive complexity measures how difficult code is to understand, taking into
   account nested structures that increase the mental burden on readers.
 
+  ## 3-Tuple Format
+
+  All MetaAST nodes use the uniform 3-tuple structure:
+  `{type_atom, keyword_meta, children_or_value}`
+
   ## Algorithm
 
   Based on the Sonar cognitive complexity specification:
@@ -31,14 +36,15 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   ## Examples
 
       # Simple conditional: cognitive = 1
-      iex> ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      iex> ast = {:conditional, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
       iex> Metastatic.Analysis.Complexity.Cognitive.calculate(ast)
       1
 
       # Nested conditional: cognitive = 3 (1 + 2)
-      iex> ast = {:conditional, {:variable, "x"},
-      ...>   {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-      ...>   {:literal, :integer, 3}}
+      iex> ast = {:conditional, [], [
+      ...>   {:variable, [], "x"},
+      ...>   {:conditional, [], [{:variable, [], "y"}, {:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]},
+      ...>   {:literal, [subtype: :integer], 3}]}
       iex> Metastatic.Analysis.Complexity.Cognitive.calculate(ast)
       3
   """
@@ -52,13 +58,14 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> Metastatic.Analysis.Complexity.Cognitive.calculate(ast)
       0
 
-      iex> ast = {:conditional, {:variable, "x"},
-      ...>   {:literal, :integer, 1},
-      ...>   {:literal, :integer, 2}}
+      iex> ast = {:conditional, [], [
+      ...>   {:variable, [], "x"},
+      ...>   {:literal, [subtype: :integer], 1},
+      ...>   {:literal, [subtype: :integer], 2}]}
       iex> Metastatic.Analysis.Complexity.Cognitive.calculate(ast)
       1
   """
@@ -71,151 +78,173 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
 
   # walk(ast, nesting_level, accumulator) -> accumulator
 
-  # Conditional: +1 +nesting_level
-  defp walk({:conditional, cond, then_br, else_br}, nesting, acc) do
+  # Conditional (3-tuple): +1 +nesting_level
+  defp walk({:conditional, _meta, [cond_expr, then_br, else_br]}, nesting, acc) do
     acc = acc + 1 + nesting
-    acc = walk(cond, nesting, acc)
+    acc = walk(cond_expr, nesting, acc)
     # Increment nesting for branches
     acc = walk(then_br, nesting + 1, acc)
     walk(else_br, nesting + 1, acc)
   end
 
-  # Loop: +1 +nesting_level
-  defp walk({:loop, :while, cond, body}, nesting, acc) do
+  # Loop (3-tuple): +1 +nesting_level
+  defp walk({:loop, meta, children}, nesting, acc) when is_list(meta) do
+    loop_type = Keyword.get(meta, :loop_type)
     acc = acc + 1 + nesting
-    acc = walk(cond, nesting, acc)
-    walk(body, nesting + 1, acc)
+
+    case {loop_type, children} do
+      {:while, [cond_expr, body]} ->
+        acc = walk(cond_expr, nesting, acc)
+        walk(body, nesting + 1, acc)
+
+      {_, [iter, coll, body]} ->
+        acc = walk(iter, nesting, acc)
+        acc = walk(coll, nesting, acc)
+        walk(body, nesting + 1, acc)
+
+      _ ->
+        Enum.reduce(children, acc, fn child, a -> walk(child, nesting, a) end)
+    end
   end
 
-  defp walk({:loop, _, iter, coll, body}, nesting, acc) do
-    acc = acc + 1 + nesting
-    acc = walk(iter, nesting, acc)
-    acc = walk(coll, nesting, acc)
-    walk(body, nesting + 1, acc)
-  end
+  # Boolean operators (3-tuple) (and/or): +1 (no nesting penalty)
+  defp walk({:binary_op, meta, [left, right]}, nesting, acc) when is_list(meta) do
+    category = Keyword.get(meta, :category)
+    op = Keyword.get(meta, :operator)
 
-  # Boolean operators (and/or): +1 (no nesting penalty)
-  defp walk({:binary_op, :boolean, op, left, right}, nesting, acc) when op in [:and, :or] do
-    acc = acc + 1
+    acc =
+      if category == :boolean and op in [:and, :or] do
+        acc + 1
+      else
+        acc
+      end
+
     acc = walk(left, nesting, acc)
     walk(right, nesting, acc)
   end
 
-  # Other binary operators: no complexity
-  defp walk({:binary_op, _, _, left, right}, nesting, acc) do
-    acc = walk(left, nesting, acc)
-    walk(right, nesting, acc)
-  end
-
-  # Unary operator
-  defp walk({:unary_op, _, operand}, nesting, acc) do
+  # Unary operator (3-tuple)
+  defp walk({:unary_op, _meta, [operand]}, nesting, acc) do
     walk(operand, nesting, acc)
   end
 
-  # Exception handling: +1 +nesting_level
-  defp walk({:exception_handling, try_block, catches, else_block}, nesting, acc) do
+  # Exception handling (3-tuple): +1 +nesting_level
+  defp walk({:exception_handling, _meta, [try_block, catches, else_block]}, nesting, acc) do
     acc = acc + 1 + nesting
     acc = walk(try_block, nesting + 1, acc)
 
+    catches_list = if is_list(catches), do: catches, else: []
+
     acc =
-      Enum.reduce(catches, acc, fn {_type, _var, catch_body}, a ->
-        walk(catch_body, nesting + 1, a)
+      Enum.reduce(catches_list, acc, fn
+        {:catch_clause, _, [_type, _var, catch_body]}, a ->
+          walk(catch_body, nesting + 1, a)
+
+        {_type, _var, catch_body}, a ->
+          walk(catch_body, nesting + 1, a)
+
+        other, a ->
+          walk(other, nesting + 1, a)
       end)
 
     walk(else_block, nesting + 1, acc)
   end
 
-  # Pattern match: +1 +nesting_level per branch
-  defp walk({:pattern_match, value, branches}, nesting, acc) do
+  # Pattern match (3-tuple): +1 +nesting_level per branch
+  defp walk({:pattern_match, _meta, [value, branches | _]}, nesting, acc) do
     acc = walk(value, nesting, acc)
+    branches_list = if is_list(branches), do: branches, else: []
 
-    Enum.reduce(branches, acc, fn
-      {:match_arm, _pattern, _guard, body}, a ->
+    Enum.reduce(branches_list, acc, fn
+      {:match_arm, _, [_pattern, _guard, body]}, a ->
         a = a + 1 + nesting
         walk(body, nesting + 1, a)
+
+      {:pair, _, [_pattern, branch]}, a ->
+        a = a + 1 + nesting
+        walk(branch, nesting + 1, a)
 
       {_pattern, branch}, a ->
         a = a + 1 + nesting
         walk(branch, nesting + 1, a)
+
+      other, a ->
+        walk(other, nesting, a)
     end)
   end
 
-  # Match arm (used in pattern matching and guarded functions)
-  defp walk({:match_arm, _pattern, guard, body}, nesting, acc) do
+  # Match arm (3-tuple)
+  defp walk({:match_arm, _meta, [_pattern, guard, body]}, nesting, acc) do
     acc = if guard, do: walk(guard, nesting, acc), else: acc
     walk(body, nesting + 1, acc)
   end
 
-  # Block: walk statements at same nesting level
-  defp walk({:block, stmts}, nesting, acc) when is_list(stmts) do
+  # Block (3-tuple): walk statements at same nesting level
+  defp walk({:block, _meta, stmts}, nesting, acc) when is_list(stmts) do
     Enum.reduce(stmts, acc, fn stmt, a -> walk(stmt, nesting, a) end)
   end
 
-  # Function call: walk arguments
-  defp walk({:function_call, _name, args}, nesting, acc) do
+  # Function call (3-tuple): walk arguments
+  defp walk({:function_call, _meta, args}, nesting, acc) when is_list(args) do
     Enum.reduce(args, acc, fn arg, a -> walk(arg, nesting, a) end)
   end
 
-  # Lambda: increase nesting for body
-  defp walk({:lambda, _params, body}, nesting, acc) do
+  # Lambda (3-tuple): increase nesting for body
+  defp walk({:lambda, _meta, [body]}, nesting, acc) do
     walk(body, nesting + 1, acc)
   end
 
-  # Collection operations
-  defp walk({:collection_op, _, func, coll}, nesting, acc) do
-    acc = walk(func, nesting, acc)
-    walk(coll, nesting, acc)
+  # Collection operations (3-tuple)
+  defp walk({:collection_op, _meta, children}, nesting, acc) when is_list(children) do
+    Enum.reduce(children, acc, fn child, a -> walk(child, nesting, a) end)
   end
 
-  defp walk({:collection_op, _, func, coll, init}, nesting, acc) do
-    acc = walk(func, nesting, acc)
-    acc = walk(coll, nesting, acc)
-    walk(init, nesting, acc)
-  end
-
-  # Assignment
-  defp walk({:assignment, target, value}, nesting, acc) do
+  # Assignment (3-tuple)
+  defp walk({:assignment, _meta, [target, value]}, nesting, acc) do
     acc = walk(target, nesting, acc)
     walk(value, nesting, acc)
   end
 
-  # Inline match
-  defp walk({:inline_match, pattern, value}, nesting, acc) do
+  # Inline match (3-tuple)
+  defp walk({:inline_match, _meta, [pattern, value]}, nesting, acc) do
     acc = walk(pattern, nesting, acc)
     walk(value, nesting, acc)
   end
 
-  # Early return
-  defp walk({:early_return, value}, nesting, acc) do
+  # Early return (3-tuple)
+  defp walk({:early_return, _meta, [value]}, nesting, acc) do
     walk(value, nesting, acc)
   end
 
-  # Tuple
-  defp walk({:tuple, elems}, nesting, acc) when is_list(elems) do
+  # List (3-tuple)
+  defp walk({:list, _meta, elems}, nesting, acc) when is_list(elems) do
     Enum.reduce(elems, acc, fn elem, a -> walk(elem, nesting, a) end)
   end
 
-  # List
-  defp walk({:list, elems}, nesting, acc) when is_list(elems) do
-    Enum.reduce(elems, acc, fn elem, a -> walk(elem, nesting, a) end)
-  end
+  # Map (3-tuple)
+  defp walk({:map, _meta, pairs}, nesting, acc) when is_list(pairs) do
+    Enum.reduce(pairs, acc, fn
+      {:pair, _, [key, value]}, a ->
+        a = walk(key, nesting, a)
+        walk(value, nesting, a)
 
-  # Map
-  defp walk({:map, pairs}, nesting, acc) when is_list(pairs) do
-    Enum.reduce(pairs, acc, fn {key, value}, a ->
-      a = walk(key, nesting, a)
-      walk(value, nesting, a)
+      {key, value}, a ->
+        a = walk(key, nesting, a)
+        walk(value, nesting, a)
+
+      other, a ->
+        walk(other, nesting, a)
     end)
   end
 
-  # Async operation
-  defp walk({:async_operation, _type, body}, nesting, acc) do
+  # Async operation (3-tuple)
+  defp walk({:async_operation, _meta, [body]}, nesting, acc) do
     walk(body, nesting, acc)
   end
 
-  # M2.2s: Structural/Organizational types
-  # Container: walk body (7-tuple format)
-  defp walk({:container, _type, _name, _parent, _type_params, _implements, body}, nesting, acc) do
+  # M2.2s: Structural/Organizational types (3-tuple format)
+  # Container: walk body
+  defp walk({:container, _meta, [body]}, nesting, acc) do
     if is_list(body) do
       Enum.reduce(body, acc, fn member, a -> walk(member, nesting, a) end)
     else
@@ -223,12 +252,13 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
     end
   end
 
-  # Function definition: walk body (6-tuple format)
-  defp walk({:function_def, _name, params, _ret_type, opts, body}, nesting, acc)
-       when is_list(params) do
+  # Function definition (3-tuple): walk body
+  defp walk({:function_def, meta, [body]}, nesting, acc) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
+
     acc =
       Enum.reduce(params, acc, fn
-        {:param, _name, pattern, default}, a ->
+        {:param, _, [_name, pattern, default]}, a ->
           a = if pattern, do: walk(pattern, nesting, a), else: a
           if default, do: walk(default, nesting, a), else: a
 
@@ -237,46 +267,48 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
       end)
 
     acc =
-      if is_map(opts) do
-        case Map.get(opts, :guards) do
-          nil -> acc
-          guard -> walk(guard, nesting, acc)
-        end
-      else
-        acc
+      case Keyword.get(meta, :guards) do
+        nil -> acc
+        guard -> walk(guard, nesting, acc)
       end
 
     walk(body, nesting, acc)
   end
 
-  defp walk({:attribute_access, receiver, _attribute}, nesting, acc) do
+  # Attribute access (3-tuple)
+  defp walk({:attribute_access, _meta, [receiver, _attribute]}, nesting, acc) do
     walk(receiver, nesting, acc)
   end
 
-  defp walk({:augmented_assignment, _op, target, value}, nesting, acc) do
+  # Augmented assignment (3-tuple)
+  defp walk({:augmented_assignment, _meta, [target, value]}, nesting, acc) do
     acc = walk(target, nesting, acc)
     walk(value, nesting, acc)
   end
 
-  defp walk({:property, _name, getter, setter, _metadata}, nesting, acc) do
+  # Property (3-tuple)
+  defp walk({:property, _meta, [getter, setter]}, nesting, acc) do
     acc = if getter, do: walk(getter, nesting, acc), else: acc
     if setter, do: walk(setter, nesting, acc), else: acc
   end
 
-  # Language-specific: traverse embedded body if present
-  defp walk({:language_specific, _, _, _, metadata}, nesting, acc) when is_map(metadata) do
-    case Map.get(metadata, :body) do
-      nil -> acc
-      body -> walk(body, nesting, acc)
+  # Language-specific (3-tuple)
+  defp walk({:language_specific, meta, native_ast}, nesting, acc) when is_list(meta) do
+    case native_ast do
+      %{body: body} when not is_nil(body) -> walk(body, nesting, acc)
+      _ -> acc
     end
   end
 
-  defp walk({:language_specific, _, _, _}, _nesting, acc), do: acc
-  defp walk({:language_specific, _, _}, _nesting, acc), do: acc
+  # Literals and variables (3-tuple): no complexity
+  defp walk({:literal, _meta, _value}, _nesting, acc), do: acc
+  defp walk({:variable, _meta, _name}, _nesting, acc), do: acc
 
-  # Literals and variables: no complexity
-  defp walk({:literal, _, _}, _nesting, acc), do: acc
-  defp walk({:variable, _}, _nesting, acc), do: acc
+  # Pair (3-tuple)
+  defp walk({:pair, _meta, [key, value]}, nesting, acc) do
+    acc = walk(key, nesting, acc)
+    walk(value, nesting, acc)
+  end
 
   # Nil
   defp walk(nil, _nesting, acc), do: acc

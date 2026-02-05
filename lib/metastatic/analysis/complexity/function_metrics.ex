@@ -17,7 +17,7 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
 
   ## Examples
 
-      iex> ast = {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> metrics = Metastatic.Analysis.Complexity.FunctionMetrics.calculate(ast)
       iex> metrics.statement_count
       1
@@ -39,7 +39,7 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
 
   ## Examples
 
-      iex> ast = {:early_return, {:variable, "x"}}
+      iex> ast = {:early_return, [], [{:variable, [], "x"}]}
       iex> metrics = Metastatic.Analysis.Complexity.FunctionMetrics.calculate(ast)
       iex> metrics.return_points
       1
@@ -65,81 +65,80 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     walk_statements(ast, 0)
   end
 
-  defp walk_statements({:assignment, _, _}, count), do: count + 1
-  defp walk_statements({:inline_match, _, _}, count), do: count + 1
-  defp walk_statements({:function_call, _, _}, count), do: count + 1
-  defp walk_statements({:early_return, _}, count), do: count + 1
+  # 3-tuple format patterns
+  defp walk_statements({:assignment, _meta, _children}, count), do: count + 1
+  defp walk_statements({:inline_match, _meta, _children}, count), do: count + 1
+  defp walk_statements({:function_call, _meta, _args}, count), do: count + 1
+  defp walk_statements({:early_return, _meta, _children}, count), do: count + 1
 
-  defp walk_statements({:conditional, _, then_br, else_br}, count) do
+  defp walk_statements({:conditional, _meta, [_cond, then_br, else_br]}, count) do
     count = count + 1
     count = walk_statements(then_br, count)
     walk_statements(else_br, count)
   end
 
-  defp walk_statements({:loop, :while, _, body}, count) do
+  defp walk_statements({:loop, meta, children}, count) when is_list(meta) and is_list(children) do
     count = count + 1
-    walk_statements(body, count)
+    Enum.reduce(children, count, fn child, c -> walk_statements(child, c) end)
   end
 
-  defp walk_statements({:loop, _, _, _, body}, count) do
-    count = count + 1
-    walk_statements(body, count)
-  end
-
-  defp walk_statements({:exception_handling, try_block, catches, else_block}, count) do
+  defp walk_statements({:exception_handling, _meta, [try_block, catches, else_block]}, count) do
     count = count + 1
     count = walk_statements(try_block, count)
 
+    catches_list = if is_list(catches), do: catches, else: []
+
     count =
-      Enum.reduce(catches, count, fn {_, _, catch_body}, c ->
-        walk_statements(catch_body, c)
+      Enum.reduce(catches_list, count, fn catch_clause, c ->
+        walk_statements(catch_clause, c)
       end)
 
     walk_statements(else_block, count)
   end
 
-  defp walk_statements({:pattern_match, _, branches}, count) do
+  defp walk_statements({:pattern_match, _meta, [_value, branches | _]}, count) do
     count = count + 1
 
-    Enum.reduce(branches, count, fn
-      {:match_arm, _pattern, _guard, body}, c -> walk_statements(body, c)
-      {_, branch}, c -> walk_statements(branch, c)
+    branches_list = if is_list(branches), do: branches, else: []
+
+    Enum.reduce(branches_list, count, fn
+      {:match_arm, _, [_pattern, _guard, body]}, c -> walk_statements(body, c)
+      {:pair, _, [_, branch]}, c -> walk_statements(branch, c)
+      other, c -> walk_statements(other, c)
     end)
   end
 
-  defp walk_statements({:match_arm, _pattern, guard, body}, count) do
+  defp walk_statements({:match_arm, _meta, [_pattern, guard, body]}, count) do
     count = if guard, do: walk_statements(guard, count), else: count
     walk_statements(body, count)
   end
 
-  defp walk_statements({:lambda, _, body}, count) do
+  defp walk_statements({:lambda, _meta, [body]}, count) do
     count = count + 1
     walk_statements(body, count)
   end
 
-  defp walk_statements({:block, stmts}, count) when is_list(stmts) do
+  defp walk_statements({:block, _meta, stmts}, count) when is_list(stmts) do
     Enum.reduce(stmts, count, fn stmt, c -> walk_statements(stmt, c) end)
   end
 
-  # M2.2s: Structural/Organizational Types
+  # M2.2s: Structural/Organizational Types (3-tuple format)
 
-  # {:container, type, name, parent, type_params, implements, body}
-  defp walk_statements(
-         {:container, _type, _name, _parent, _type_params, _implements, body},
-         count
-       ) do
+  # Container (3-tuple)
+  defp walk_statements({:container, meta, [body]}, count) when is_list(meta) do
     count = count + 1
     walk_statements(body, count)
   end
 
-  # {:function_def, name, params, ret_type, opts, body}
-  defp walk_statements({:function_def, _name, params, _ret_type, opts, body}, count) do
+  # Function definition (3-tuple)
+  defp walk_statements({:function_def, meta, [body]}, count) when is_list(meta) do
     count = count + 1
+    params = Keyword.get(meta, :params, [])
 
-    # Walk parameters (new format: {:param, name, pattern, default})
+    # Walk parameters
     count =
       Enum.reduce(params, count, fn
-        {:param, _name, pattern, default}, c ->
+        {:param, _, [_name, pattern, default]}, c ->
           c = if pattern, do: walk_statements(pattern, c), else: c
           if default, do: walk_statements(default, c), else: c
 
@@ -147,53 +146,47 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
           c
       end)
 
-    # Walk guards if present (now in opts map)
+    # Walk guards if present
     count =
-      if is_map(opts) do
-        case Map.get(opts, :guards) do
-          nil -> count
-          guard -> walk_statements(guard, count)
-        end
-      else
-        count
+      case Keyword.get(meta, :guards) do
+        nil -> count
+        guard -> walk_statements(guard, count)
       end
 
     # Walk body
     walk_statements(body, count)
   end
 
-  defp walk_statements({:attribute_access, obj, _attr}, count) do
+  defp walk_statements({:attribute_access, _meta, [obj, _attr]}, count) do
     walk_statements(obj, count)
   end
 
-  defp walk_statements({:augmented_assignment, _op, _target, value}, count) do
+  defp walk_statements({:augmented_assignment, _meta, [_target, value]}, count) do
     count = count + 1
     walk_statements(value, count)
   end
 
-  defp walk_statements({:property, _name, getter, setter, _metadata}, count) do
+  defp walk_statements({:property, _meta, [getter, setter]}, count) do
     count = count + 1
     count = if getter, do: walk_statements(getter, count), else: count
     if setter, do: walk_statements(setter, count), else: count
   end
 
-  defp walk_statements({:async_operation, _, body}, count) do
+  defp walk_statements({:async_operation, _meta, [body]}, count) do
     count = count + 1
     walk_statements(body, count)
   end
 
-  # Language-specific: traverse embedded body if present
-  defp walk_statements({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
+  # Language-specific (3-tuple)
+  defp walk_statements({:language_specific, meta, native_ast}, count) when is_list(meta) do
     count = count + 1
 
-    case Map.get(metadata, :body) do
-      nil -> count
-      body -> walk_statements(body, count)
+    case native_ast do
+      %{body: body} when not is_nil(body) -> walk_statements(body, count)
+      _ -> count
     end
   end
 
-  defp walk_statements({:language_specific, _, _, _}, count), do: count + 1
-  defp walk_statements({:language_specific, _, _}, count), do: count + 1
   defp walk_statements(nil, count), do: count
   defp walk_statements(_, count), do: count
 
@@ -201,58 +194,66 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     walk_returns(ast, 0)
   end
 
-  defp walk_returns({:early_return, _}, count), do: count + 1
+  defp walk_returns({:early_return, _meta, _children}, count), do: count + 1
 
-  defp walk_returns({:conditional, _, then_br, else_br}, count) do
+  defp walk_returns({:conditional, _meta, [_cond, then_br, else_br]}, count) do
     count = walk_returns(then_br, count)
     walk_returns(else_br, count)
   end
 
-  defp walk_returns({:loop, :while, _, body}, count), do: walk_returns(body, count)
-  defp walk_returns({:loop, _, _, _, body}, count), do: walk_returns(body, count)
+  defp walk_returns({:loop, meta, children}, count) when is_list(meta) and is_list(children) do
+    Enum.reduce(children, count, fn child, c -> walk_returns(child, c) end)
+  end
 
-  defp walk_returns({:exception_handling, try_block, catches, else_block}, count) do
+  defp walk_returns({:exception_handling, _meta, [try_block, catches, else_block]}, count) do
     count = walk_returns(try_block, count)
 
+    catches_list = if is_list(catches), do: catches, else: []
+
     count =
-      Enum.reduce(catches, count, fn {_, _, catch_body}, c ->
-        walk_returns(catch_body, c)
+      Enum.reduce(catches_list, count, fn catch_clause, c ->
+        walk_returns(catch_clause, c)
       end)
 
     walk_returns(else_block, count)
   end
 
-  defp walk_returns({:pattern_match, _, branches}, count) do
-    Enum.reduce(branches, count, fn
-      {:match_arm, _pattern, _guard, body}, c -> walk_returns(body, c)
-      {_, branch}, c -> walk_returns(branch, c)
+  defp walk_returns({:pattern_match, _meta, [_value, branches | _]}, count) do
+    branches_list = if is_list(branches), do: branches, else: []
+
+    Enum.reduce(branches_list, count, fn
+      {:match_arm, _, [_pattern, _guard, body]}, c -> walk_returns(body, c)
+      {:pair, _, [_, branch]}, c -> walk_returns(branch, c)
+      other, c -> walk_returns(other, c)
     end)
   end
 
-  defp walk_returns({:match_arm, _pattern, guard, body}, count) do
+  defp walk_returns({:match_arm, _meta, [_pattern, guard, body]}, count) do
     count = if guard, do: walk_returns(guard, count), else: count
     walk_returns(body, count)
   end
 
-  defp walk_returns({:lambda, _, body}, count), do: walk_returns(body, count)
+  defp walk_returns({:lambda, _meta, [body]}, count), do: walk_returns(body, count)
 
-  defp walk_returns({:block, stmts}, count) when is_list(stmts) do
+  defp walk_returns({:block, _meta, stmts}, count) when is_list(stmts) do
     Enum.reduce(stmts, count, fn stmt, c -> walk_returns(stmt, c) end)
   end
 
-  # M2.2s: Structural/Organizational Types
+  # M2.2s: Structural/Organizational Types (3-tuple format)
 
-  # {:container, type, name, parent, type_params, implements, body}
-  defp walk_returns({:container, _type, _name, _parent, _type_params, _implements, body}, count) do
+  # Container (3-tuple)
+  defp walk_returns({:container, meta, [body]}, count) when is_list(meta) do
     walk_returns(body, count)
   end
 
-  # {:function_def, name, params, ret_type, opts, body}
-  defp walk_returns({:function_def, _name, params, _ret_type, opts, body}, count) do
-    # Walk parameters (new format: {:param, name, pattern, default})
+  # Function definition (3-tuple)
+  defp walk_returns({:function_def, meta, [body]}, count) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
+
+    # Walk parameters
     count =
       Enum.reduce(params, count, fn
-        {:param, _name, pattern, default}, c ->
+        {:param, _, [_name, pattern, default]}, c ->
           c = if pattern, do: walk_returns(pattern, c), else: c
           if default, do: walk_returns(default, c), else: c
 
@@ -260,46 +261,40 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
           c
       end)
 
-    # Walk guards if present (now in opts map)
+    # Walk guards if present
     count =
-      if is_map(opts) do
-        case Map.get(opts, :guards) do
-          nil -> count
-          guard -> walk_returns(guard, count)
-        end
-      else
-        count
+      case Keyword.get(meta, :guards) do
+        nil -> count
+        guard -> walk_returns(guard, count)
       end
 
     # Walk body
     walk_returns(body, count)
   end
 
-  defp walk_returns({:attribute_access, obj, _attr}, count) do
+  defp walk_returns({:attribute_access, _meta, [obj, _attr]}, count) do
     walk_returns(obj, count)
   end
 
-  defp walk_returns({:augmented_assignment, _op, _target, value}, count) do
+  defp walk_returns({:augmented_assignment, _meta, [_target, value]}, count) do
     walk_returns(value, count)
   end
 
-  defp walk_returns({:property, _name, getter, setter, _metadata}, count) do
+  defp walk_returns({:property, _meta, [getter, setter]}, count) do
     count = if getter, do: walk_returns(getter, count), else: count
     if setter, do: walk_returns(setter, count), else: count
   end
 
-  defp walk_returns({:async_operation, _, body}, count), do: walk_returns(body, count)
+  defp walk_returns({:async_operation, _meta, [body]}, count), do: walk_returns(body, count)
 
-  # Language-specific: traverse embedded body if present
-  defp walk_returns({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
-    case Map.get(metadata, :body) do
-      nil -> count
-      body -> walk_returns(body, count)
+  # Language-specific (3-tuple)
+  defp walk_returns({:language_specific, meta, native_ast}, count) when is_list(meta) do
+    case native_ast do
+      %{body: body} when not is_nil(body) -> walk_returns(body, count)
+      _ -> count
     end
   end
 
-  defp walk_returns({:language_specific, _, _, _}, count), do: count
-  defp walk_returns({:language_specific, _, _}, count), do: count
   defp walk_returns(nil, count), do: count
   defp walk_returns(_, count), do: count
 end

@@ -5,9 +5,30 @@ defmodule Metastatic.ValidatorTest do
 
   doctest Metastatic.Validator
 
+  # Helper to build 3-tuple MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+
+  defp binary_op(category, operator, left, right),
+    do: {:binary_op, [category: category, operator: operator], [left, right]}
+
+  defp block(children), do: {:block, [], children}
+
+  defp loop(loop_type, condition, body),
+    do: {:loop, [loop_type: loop_type], [condition, body]}
+
+  defp lambda(params, guards, body),
+    do: {:lambda, [params: params, guards: guards], [body]}
+
+  defp collection_op(op_type, fn_node, collection),
+    do: {:collection_op, [op_type: op_type], [fn_node, collection]}
+
+  defp language_specific(language, data),
+    do: {:language_specific, [language: language], data}
+
   describe "validate/2 with M2.1 Core" do
     test "validates literal" do
-      doc = Document.new({:literal, :integer, 42}, :python)
+      doc = Document.new(literal(:integer, 42), :python)
 
       assert {:ok, meta} = Validator.validate(doc)
       assert meta.level == :core
@@ -18,7 +39,7 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "validates binary operation" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       doc = Document.new(ast, :python)
 
       assert {:ok, meta} = Validator.validate(doc)
@@ -30,9 +51,12 @@ defmodule Metastatic.ValidatorTest do
     test "validates nested expression" do
       # (x + 5) * 2
       ast =
-        {:binary_op, :arithmetic, :*,
-         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}},
-         {:literal, :integer, 2}}
+        binary_op(
+          :arithmetic,
+          :*,
+          binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5)),
+          literal(:integer, 2)
+        )
 
       doc = Document.new(ast, :python)
 
@@ -45,8 +69,11 @@ defmodule Metastatic.ValidatorTest do
   describe "validate/2 with M2.2 Extended" do
     test "validates loop" do
       ast =
-        {:loop, :while, {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
-         {:block, [{:variable, "x"}]}}
+        loop(
+          :while,
+          binary_op(:comparison, :>, variable("x"), literal(:integer, 0)),
+          block([variable("x")])
+        )
 
       doc = Document.new(ast, :python)
 
@@ -57,8 +84,11 @@ defmodule Metastatic.ValidatorTest do
 
     test "validates lambda" do
       ast =
-        {:lambda, ["x"], [],
-         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
+        lambda(
+          ["x"],
+          [],
+          binary_op(:arithmetic, :+, variable("x"), literal(:integer, 1))
+        )
 
       doc = Document.new(ast, :python)
 
@@ -68,10 +98,15 @@ defmodule Metastatic.ValidatorTest do
 
     test "validates collection operation" do
       ast =
-        {:collection_op, :map,
-         {:lambda, ["x"], [],
-          {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
-         {:variable, "list"}}
+        collection_op(
+          :map,
+          lambda(
+            ["x"],
+            [],
+            binary_op(:arithmetic, :*, variable("x"), literal(:integer, 2))
+          ),
+          variable("list")
+        )
 
       doc = Document.new(ast, :python)
 
@@ -83,8 +118,10 @@ defmodule Metastatic.ValidatorTest do
   describe "validate/2 with M2.3 Native" do
     test "validates language-specific construct" do
       ast =
-        {:language_specific, :python,
-         %{construct: :list_comprehension, data: "[x for x in range(10)]"}}
+        language_specific(:python, %{
+          construct: :list_comprehension,
+          data: "[x for x in range(10)]"
+        })
 
       doc = Document.new(ast, :python)
 
@@ -96,11 +133,10 @@ defmodule Metastatic.ValidatorTest do
 
     test "counts multiple native constructs" do
       ast =
-        {:block,
-         [
-           {:language_specific, :python, %{construct: :decorator, data: "@property"}},
-           {:language_specific, :python, %{construct: :walrus, data: ":="}}
-         ]}
+        block([
+          language_specific(:python, %{construct: :decorator, data: "@property"}),
+          language_specific(:python, %{construct: :walrus, data: ":="})
+        ])
 
       doc = Document.new(ast, :python)
 
@@ -112,8 +148,7 @@ defmodule Metastatic.ValidatorTest do
 
   describe "validate/2 with validation modes" do
     test "strict mode rejects native constructs" do
-      ast =
-        {:language_specific, :python, %{construct: :list_comprehension, data: "..."}}
+      ast = language_specific(:python, %{construct: :list_comprehension, data: "..."})
 
       doc = Document.new(ast, :python)
 
@@ -121,21 +156,20 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "strict mode accepts core constructs" do
-      doc = Document.new({:literal, :integer, 42}, :python)
+      doc = Document.new(literal(:integer, 42), :python)
 
       assert {:ok, _} = Validator.validate(doc, mode: :strict)
     end
 
     test "strict mode accepts extended constructs" do
-      ast = {:lambda, ["x"], [], {:variable, "x"}}
+      ast = lambda(["x"], [], variable("x"))
       doc = Document.new(ast, :python)
 
       assert {:ok, _} = Validator.validate(doc, mode: :strict)
     end
 
     test "standard mode accepts native constructs with warning" do
-      ast =
-        {:language_specific, :python, %{construct: :list_comprehension, data: "..."}}
+      ast = language_specific(:python, %{construct: :list_comprehension, data: "..."})
 
       doc = Document.new(ast, :python)
 
@@ -144,8 +178,7 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "permissive mode accepts everything" do
-      ast =
-        {:language_specific, :python, %{construct: :list_comprehension, data: "..."}}
+      ast = language_specific(:python, %{construct: :list_comprehension, data: "..."})
 
       doc = Document.new(ast, :python)
 
@@ -155,10 +188,10 @@ defmodule Metastatic.ValidatorTest do
 
   describe "validate/2 with constraints" do
     test "enforces max depth" do
-      # Create deeply nested expression
+      # Create deeply nested expression in new 3-tuple format
       ast =
-        Enum.reduce(1..15, {:literal, :integer, 0}, fn _, acc ->
-          {:binary_op, :arithmetic, :+, acc, {:literal, :integer, 1}}
+        Enum.reduce(1..15, literal(:integer, 0), fn _, acc ->
+          binary_op(:arithmetic, :+, acc, literal(:integer, 1))
         end)
 
       doc = Document.new(ast, :python)
@@ -168,9 +201,9 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "enforces max variables" do
-      # Create AST with many variables
-      variables = for i <- 1..15, do: {:variable, "x#{i}"}
-      ast = {:block, variables}
+      # Create AST with many variables in new format
+      variables = for i <- 1..15, do: variable("x#{i}")
+      ast = block(variables)
 
       doc = Document.new(ast, :python)
 
@@ -181,7 +214,7 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "accepts within constraints" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
+      ast = binary_op(:arithmetic, :+, variable("x"), variable("y"))
       doc = Document.new(ast, :python)
 
       assert {:ok, _} = Validator.validate(doc, max_depth: 10, max_variables: 10)
@@ -190,10 +223,10 @@ defmodule Metastatic.ValidatorTest do
 
   describe "validate/2 warnings" do
     test "warns on deep nesting" do
-      # Create expression with depth > 100
+      # Create expression with depth > 100 in new format
       ast =
-        Enum.reduce(1..105, {:literal, :integer, 0}, fn _, acc ->
-          {:binary_op, :arithmetic, :+, acc, {:literal, :integer, 1}}
+        Enum.reduce(1..105, literal(:integer, 0), fn _, acc ->
+          binary_op(:arithmetic, :+, acc, literal(:integer, 1))
         end)
 
       doc = Document.new(ast, :python)
@@ -203,9 +236,9 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "warns on large AST" do
-      # Create AST with > 1000 nodes
-      large_block = for i <- 1..1100, do: {:literal, :integer, i}
-      ast = {:block, large_block}
+      # Create AST with > 1000 nodes in new format
+      large_block = for i <- 1..1100, do: literal(:integer, i)
+      ast = block(large_block)
 
       doc = Document.new(ast, :python)
 
@@ -214,7 +247,7 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "no warnings for simple AST" do
-      doc = Document.new({:literal, :integer, 42}, :python)
+      doc = Document.new(literal(:integer, 42), :python)
 
       assert {:ok, meta} = Validator.validate(doc)
       assert meta.warnings == []
@@ -224,7 +257,7 @@ defmodule Metastatic.ValidatorTest do
   describe "validate/2 invalid structures" do
     test "rejects invalid meta-type" do
       doc = %Document{
-        ast: {:invalid_type, "data"},
+        ast: {:invalid_type, [], "data"},
         language: :python,
         metadata: %{}
       }
@@ -232,9 +265,10 @@ defmodule Metastatic.ValidatorTest do
       assert {:error, {:invalid_structure, _}} = Validator.validate(doc)
     end
 
-    test "rejects malformed binary_op" do
+    test "rejects malformed binary_op (wrong arity)" do
+      # binary_op needs [category:, operator:] in meta and [left, right] children
       doc = %Document{
-        ast: {:binary_op, :+, {:variable, "x"}},
+        ast: {:binary_op, [:+], [variable("x")]},
         language: :python,
         metadata: %{}
       }
@@ -245,14 +279,14 @@ defmodule Metastatic.ValidatorTest do
 
   describe "valid?/2" do
     test "returns true for valid document" do
-      doc = Document.new({:literal, :integer, 42}, :python)
+      doc = Document.new(literal(:integer, 42), :python)
 
       assert Validator.valid?(doc)
     end
 
     test "returns false for invalid document" do
       doc = %Document{
-        ast: {:invalid_type, "bad"},
+        ast: {:invalid_type, [], "bad"},
         language: :python,
         metadata: %{}
       }
@@ -263,14 +297,14 @@ defmodule Metastatic.ValidatorTest do
 
   describe "validate_ast/2" do
     test "validates AST directly without Document wrapper" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
 
       assert {:ok, meta} = Validator.validate_ast(ast)
       assert meta.level == :core
     end
 
     test "rejects invalid AST" do
-      ast = {:invalid_type, "bad"}
+      ast = {:invalid_type, [], "bad"}
 
       assert {:error, {:invalid_structure, _}} = Validator.validate_ast(ast)
     end

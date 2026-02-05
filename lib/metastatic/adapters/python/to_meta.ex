@@ -46,16 +46,22 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   Returns `{:ok, meta_ast, metadata}` on success or `{:error, reason}` on failure.
 
+  ## New 3-Tuple Format
+
+  All MetaAST nodes are uniform 3-element tuples:
+
+      {type_atom, keyword_meta, children_or_value}
+
   ## Examples
 
       iex> transform(%{"_type" => "Constant", "value" => 42})
-      {:ok, {:literal, :integer, 42}, %{}}
+      {:ok, {:literal, [subtype: :integer], 42}, %{}}
 
       iex> transform(%{"_type" => "Name", "id" => "x"})
-      {:ok, {:variable, "x"}, %{}}
+      {:ok, {:variable, [], "x"}, %{}}
 
       iex> transform(%{"_type" => "BinOp", "op" => %{"_type" => "Add"}, ...})
-      {:ok, {:binary_op, :arithmetic, :+, left, right}, %{}}
+      {:ok, {:binary_op, [category: :arithmetic, operator: :+], [left, right]}, %{}}
   """
   @spec transform(map()) :: {:ok, term(), map()} | {:error, String.t()}
 
@@ -63,9 +69,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "Module", "body" => body}) do
     with {:ok, statements} <- transform_list(body) do
       case statements do
-        [] -> {:ok, {:block, []}, %{}}
+        [] -> {:ok, {:block, [], []}, %{}}
         [single] -> {:ok, single, %{}}
-        multiple -> {:ok, {:block, multiple}, %{}}
+        multiple -> {:ok, {:block, [], multiple}, %{}}
       end
     end
   end
@@ -85,33 +91,33 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Legacy literal nodes (Python 3.7 compatibility)
   def transform(%{"_type" => "Num", "n" => value}) when is_integer(value) do
-    {:ok, {:literal, :integer, value}, %{}}
+    {:ok, {:literal, [subtype: :integer], value}, %{}}
   end
 
   def transform(%{"_type" => "Num", "n" => value}) when is_float(value) do
-    {:ok, {:literal, :float, value}, %{}}
+    {:ok, {:literal, [subtype: :float], value}, %{}}
   end
 
   def transform(%{"_type" => "Str", "s" => value}) do
-    {:ok, {:literal, :string, value}, %{}}
+    {:ok, {:literal, [subtype: :string], value}, %{}}
   end
 
   def transform(%{"_type" => "NameConstant", "value" => true}) do
-    {:ok, {:literal, :boolean, true}, %{}}
+    {:ok, {:literal, [subtype: :boolean], true}, %{}}
   end
 
   def transform(%{"_type" => "NameConstant", "value" => false}) do
-    {:ok, {:literal, :boolean, false}, %{}}
+    {:ok, {:literal, [subtype: :boolean], false}, %{}}
   end
 
   def transform(%{"_type" => "NameConstant", "value" => nil}) do
-    {:ok, {:literal, :null, nil}, %{}}
+    {:ok, {:literal, [subtype: :null], nil}, %{}}
   end
 
   # Variables - M2.1 Core Layer
 
   def transform(%{"_type" => "Name", "id" => name} = node) do
-    {:ok, add_location({:variable, name}, node), %{}}
+    {:ok, add_location({:variable, [], name}, node), %{}}
   end
 
   # Binary Operators - M2.1 Core Layer
@@ -121,7 +127,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
          {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
       {category, operator} = op_meta
-      ast = {:binary_op, category, operator, left_meta, right_meta}
+      ast = {:binary_op, [category: category, operator: operator], [left_meta, right_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -134,7 +140,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, op_meta} <- transform_compare_op(op),
          {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      ast = {:binary_op, :comparison, op_meta, left_meta, right_meta}
+      ast = {:binary_op, [category: :comparison, operator: op_meta], [left_meta, right_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -148,10 +154,8 @@ defmodule Metastatic.Adapters.Python.ToMeta do
       })
       when length(ops) > 1 do
     # For now, treat as language_specific
-    {:ok,
-     {:language_specific, :python,
-      %{"_type" => "Compare", "left" => left, "ops" => ops, "comparators" => comparators},
-      :chained_comparison}, %{}}
+    native = %{"_type" => "Compare", "left" => left, "ops" => ops, "comparators" => comparators}
+    {:ok, {:language_specific, [language: :python, hint: :chained_comparison], native}, %{}}
   end
 
   # Boolean Operators - M2.1 Core Layer
@@ -160,7 +164,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, op_meta} <- transform_bool_op(op),
          {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
-      ast = {:binary_op, :boolean, op_meta, left_meta, right_meta}
+      ast = {:binary_op, [category: :boolean, operator: op_meta], [left_meta, right_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -171,11 +175,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
          {:ok, transformed_values} <- transform_list(values) do
       # Chain: a and b and c → (a and b) and c
       [first, second | rest] = transformed_values
-      initial = {:binary_op, :boolean, op_meta, first, second}
+      initial = {:binary_op, [category: :boolean, operator: op_meta], [first, second]}
 
       result =
         Enum.reduce(rest, initial, fn value, acc ->
-          {:binary_op, :boolean, op_meta, acc, value}
+          {:binary_op, [category: :boolean, operator: op_meta], [acc, value]}
         end)
 
       {:ok, result, %{}}
@@ -187,7 +191,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "UnaryOp", "op" => op, "operand" => operand} = node) do
     with {:ok, {category, operator}} <- transform_unary_op(op),
          {:ok, operand_meta, _} <- transform(operand) do
-      ast = {:unary_op, category, operator, operand_meta}
+      ast = {:unary_op, [category: category, operator: operator], [operand_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -197,7 +201,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "Call", "func" => func, "args" => args} = node) do
     with {:ok, func_name} <- extract_function_name(func),
          {:ok, args_meta} <- transform_list(args) do
-      ast = {:function_call, func_name, args_meta}
+      ast = {:function_call, [name: func_name], args_meta}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -209,7 +213,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, test_meta, _} <- transform(test),
          {:ok, body_meta, _} <- transform_body(body),
          {:ok, else_meta, _} <- transform_body_or_nil(orelse) do
-      ast = {:conditional, test_meta, body_meta, else_meta}
+      ast = {:conditional, [], [test_meta, body_meta, else_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -219,7 +223,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, test_meta, _} <- transform(test),
          {:ok, body_meta, _} <- transform(body),
          {:ok, else_meta, _} <- transform(orelse) do
-      ast = {:conditional, test_meta, body_meta, else_meta}
+      ast = {:conditional, [], [test_meta, body_meta, else_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -228,17 +232,17 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   def transform(%{"_type" => "Return", "value" => value} = node) do
     with {:ok, value_meta, _} <- transform_or_nil(value) do
-      ast = {:early_return, value_meta}
+      ast = {:early_return, [kind: :return], [value_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
 
   def transform(%{"_type" => "Break"}) do
-    {:ok, {:early_return, :break, nil}, %{}}
+    {:ok, {:early_return, [kind: :break], [nil]}, %{}}
   end
 
   def transform(%{"_type" => "Continue"}) do
-    {:ok, {:early_return, :continue, nil}, %{}}
+    {:ok, {:early_return, [kind: :continue], [nil]}, %{}}
   end
 
   # Assignment - M2.1 Core Layer
@@ -253,7 +257,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         value_metadata: value_metadata
       }
 
-      ast = {:assignment, target_meta, value_meta}
+      ast = {:assignment, [], [target_meta, value_meta]}
       {:ok, add_location(ast, node), metadata}
     end
   end
@@ -275,7 +279,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
               value_metadata: %{}
             }
 
-            {:ok, {:assignment, target_meta, current_value}, metadata}
+            {:ok, {:assignment, [], [target_meta, current_value]}, metadata}
           end
         end)
 
@@ -290,7 +294,8 @@ defmodule Metastatic.Adapters.Python.ToMeta do
          {:ok, {category, operator}} <- transform_binop(op),
          {:ok, value_meta, _} <- transform(value) do
       # Desugar: x += 1 becomes x = x + 1
-      desugared_value = {:binary_op, category, operator, target_meta, value_meta}
+      desugared_value =
+        {:binary_op, [category: category, operator: operator], [target_meta, value_meta]}
 
       metadata = %{
         target_metadata: target_metadata,
@@ -298,7 +303,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         augmented_op: operator
       }
 
-      {:ok, {:assignment, target_meta, desugared_value}, metadata}
+      {:ok, {:assignment, [], [target_meta, desugared_value]}, metadata}
     end
   end
 
@@ -313,20 +318,20 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         value_metadata: value_metadata
       }
 
-      {:ok, {:assignment, target_meta, value_meta}, metadata}
+      {:ok, {:assignment, [], [target_meta, value_meta]}, metadata}
     end
   end
 
   # Annotated assignment without value: x: int (declaration only)
   def transform(%{"_type" => "AnnAssign", "target" => _target, "value" => nil} = node) do
     # Type-only annotation, treat as language-specific
-    {:ok, {:language_specific, :python, node, :type_annotation}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :type_annotation], node}, %{}}
   end
 
   # Lists - M2.1 Core Layer
   def transform(%{"_type" => "List", "elts" => elements} = node) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      ast = {:list, elements_meta}
+      ast = {:list, [], elements_meta}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -335,8 +340,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "Dict", "keys" => keys, "values" => values} = node) do
     with {:ok, keys_meta} <- transform_list(keys),
          {:ok, values_meta} <- transform_list(values) do
-      pairs = Enum.zip(keys_meta, values_meta)
-      ast = {:map, pairs}
+      # Transform pairs to {:pair, [], [key, value]} format
+      pairs = Enum.zip_with(keys_meta, values_meta, fn k, v -> {:pair, [], [k, v]} end)
+      ast = {:map, [], pairs}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -344,7 +350,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Tuples - Used in patterns and values
   def transform(%{"_type" => "Tuple", "elts" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:tuple, elements_meta}, %{}}
+      {:ok, {:tuple, [], elements_meta}, %{}}
     end
   end
 
@@ -354,7 +360,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "While", "test" => test, "body" => body} = node) do
     with {:ok, test_meta, _} <- transform(test),
          {:ok, body_meta, _} <- transform_body(body) do
-      ast = {:loop, :while, test_meta, body_meta}
+      ast = {:loop, [loop_type: :while], [test_meta, body_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -364,7 +370,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, target_meta, _} <- transform(target),
          {:ok, iter_meta, _} <- transform(iter),
          {:ok, body_meta, _} <- transform_body(body) do
-      ast = {:loop, :for_each, target_meta, iter_meta, body_meta}
+      ast = {:loop, [loop_type: :for_each], [target_meta, iter_meta, body_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -375,7 +381,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, params} <- extract_lambda_params(args),
          {:ok, body_meta, _} <- transform(body) do
       # Lambdas don't capture variables explicitly in Python AST
-      {:ok, {:lambda, params, [], body_meta}, %{}}
+      {:ok, {:lambda, [params: params, captures: []], [body_meta]}, %{}}
     end
   end
 
@@ -390,16 +396,16 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, target_meta, _} <- transform(target),
          {:ok, iter_meta, _} <- transform(iter),
          {:ok, elt_meta, _} <- transform(elt) do
-      # Convert to: {:collection_op, :map, {:lambda, [param], [], body}, collection}
+      # Convert to: {:collection_op, [op_type: :map], [lambda, collection]}
       param_name = extract_variable_name(target_meta)
-      lambda = {:lambda, [param_name], [], elt_meta}
-      {:ok, {:collection_op, :map, lambda, iter_meta}, %{}}
+      lambda = {:lambda, [params: [param_name], captures: []], [elt_meta]}
+      {:ok, {:collection_op, [op_type: :map], [lambda, iter_meta]}, %{}}
     end
   end
 
   # Complex list comprehension with filters → language_specific
   def transform(%{"_type" => "ListComp"} = comp) do
-    {:ok, {:language_specific, :python, comp, :list_comprehension}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :list_comprehension], comp}, %{}}
   end
 
   # Exception Handling - M2.2 Extended Layer
@@ -414,7 +420,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, body_meta, _} <- transform_body(body),
          {:ok, rescue_clauses} <- transform_exception_handlers(handlers),
          {:ok, finally_meta, _} <- transform_body_or_nil(finalbody) do
-      {:ok, {:exception_handling, body_meta, rescue_clauses, finally_meta}, %{}}
+      {:ok, {:exception_handling, [], [body_meta, rescue_clauses, finally_meta]}, %{}}
     end
   end
 
@@ -422,13 +428,13 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Function definitions with decorators
   def transform(%{"_type" => "FunctionDef", "decorator_list" => [_ | _] = _decorators} = node) do
-    {:ok, {:language_specific, :python, node, :function_with_decorators}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :function_with_decorators], node}, %{}}
   end
 
   # Generator functions (FunctionDef containing Yield/YieldFrom)
   def transform(%{"_type" => "FunctionDef", "body" => body} = node) do
     if contains_yield?(body) do
-      {:ok, {:language_specific, :python, node, :function_with_generator}, %{}}
+      {:ok, {:language_specific, [language: :python, hint: :function_with_generator], node}, %{}}
     else
       # Regular function - not implemented yet, falls through to catch-all
       {:error, "Unsupported Python AST construct: #{inspect(node)}"}
@@ -437,106 +443,106 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Async function definitions
   def transform(%{"_type" => "AsyncFunctionDef"} = node) do
-    {:ok, {:language_specific, :python, node, :async_function}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :async_function], node}, %{}}
   end
 
   # Class definitions
   def transform(%{"_type" => "ClassDef"} = node) do
-    {:ok, {:language_specific, :python, node, :class}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :class], node}, %{}}
   end
 
   # Context managers (with statement)
   def transform(%{"_type" => "With"} = node) do
-    {:ok, {:language_specific, :python, node, :context_manager}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :context_manager], node}, %{}}
   end
 
   # Async context managers (async with)
   def transform(%{"_type" => "AsyncWith"} = node) do
-    {:ok, {:language_specific, :python, node, :async_context_manager}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :async_context_manager], node}, %{}}
   end
 
   # Generators (yield)
   def transform(%{"_type" => "Yield"} = node) do
-    {:ok, {:language_specific, :python, node, :yield}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :yield], node}, %{}}
   end
 
   # Yield from (Python 3.3+)
   def transform(%{"_type" => "YieldFrom"} = node) do
-    {:ok, {:language_specific, :python, node, :yield_from}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :yield_from], node}, %{}}
   end
 
   # Await expressions
   def transform(%{"_type" => "Await"} = node) do
-    {:ok, {:language_specific, :python, node, :await}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :await], node}, %{}}
   end
 
   # Async for loops
   def transform(%{"_type" => "AsyncFor"} = node) do
-    {:ok, {:language_specific, :python, node, :async_for}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :async_for], node}, %{}}
   end
 
   # Import statements
   def transform(%{"_type" => "Import"} = node) do
-    {:ok, {:language_specific, :python, node, :import}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :import], node}, %{}}
   end
 
   # Import from statements
   def transform(%{"_type" => "ImportFrom"} = node) do
-    {:ok, {:language_specific, :python, node, :import_from}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :import_from], node}, %{}}
   end
 
   # Dict comprehensions
   def transform(%{"_type" => "DictComp"} = node) do
-    {:ok, {:language_specific, :python, node, :dict_comprehension}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :dict_comprehension], node}, %{}}
   end
 
   # Set comprehensions
   def transform(%{"_type" => "SetComp"} = node) do
-    {:ok, {:language_specific, :python, node, :set_comprehension}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :set_comprehension], node}, %{}}
   end
 
   # Generator expressions
   def transform(%{"_type" => "GeneratorExp"} = node) do
-    {:ok, {:language_specific, :python, node, :generator_expression}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :generator_expression], node}, %{}}
   end
 
   # Match statements (Python 3.10+)
   def transform(%{"_type" => "Match"} = node) do
-    {:ok, {:language_specific, :python, node, :pattern_match}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :pattern_match], node}, %{}}
   end
 
   # Walrus operator (Python 3.8+)
   def transform(%{"_type" => "NamedExpr"} = node) do
-    {:ok, {:language_specific, :python, node, :named_expr}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :named_expr], node}, %{}}
   end
 
   # Global/nonlocal declarations
   def transform(%{"_type" => "Global"} = node) do
-    {:ok, {:language_specific, :python, node, :global}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :global], node}, %{}}
   end
 
   def transform(%{"_type" => "Nonlocal"} = node) do
-    {:ok, {:language_specific, :python, node, :nonlocal}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :nonlocal], node}, %{}}
   end
 
   # Assert statements
   def transform(%{"_type" => "Assert"} = node) do
-    {:ok, {:language_specific, :python, node, :assert}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :assert], node}, %{}}
   end
 
   # Raise statements
   def transform(%{"_type" => "Raise"} = node) do
-    {:ok, {:language_specific, :python, node, :raise}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :raise], node}, %{}}
   end
 
   # Delete statements
   def transform(%{"_type" => "Delete"} = node) do
-    {:ok, {:language_specific, :python, node, :delete}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :delete], node}, %{}}
   end
 
   # Pass statement
   def transform(%{"_type" => "Pass"} = node) do
-    {:ok, {:language_specific, :python, node, :pass}, %{}}
+    {:ok, {:language_specific, [language: :python, hint: :pass], node}, %{}}
   end
 
   # Catch-all for unsupported constructs
@@ -563,24 +569,26 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp transform_or_nil(nil), do: {:ok, nil, %{}}
   defp transform_or_nil(value), do: transform(value)
 
-  defp transform_body([]), do: {:ok, {:block, []}, %{}}
+  defp transform_body([]), do: {:ok, {:block, [], []}, %{}}
   defp transform_body([single]), do: transform(single)
 
   defp transform_body(statements) when is_list(statements) do
     with {:ok, transformed} <- transform_list(statements) do
-      {:ok, {:block, transformed}, %{}}
+      {:ok, {:block, [], transformed}, %{}}
     end
   end
 
   defp transform_body_or_nil([]), do: {:ok, nil, %{}}
   defp transform_body_or_nil(body), do: transform_body(body)
 
-  defp infer_literal_type(value) when is_integer(value), do: {:literal, :integer, value}
-  defp infer_literal_type(value) when is_float(value), do: {:literal, :float, value}
-  defp infer_literal_type(value) when is_binary(value), do: {:literal, :string, value}
-  defp infer_literal_type(true), do: {:literal, :boolean, true}
-  defp infer_literal_type(false), do: {:literal, :boolean, false}
-  defp infer_literal_type(nil), do: {:literal, :null, nil}
+  defp infer_literal_type(value) when is_integer(value),
+    do: {:literal, [subtype: :integer], value}
+
+  defp infer_literal_type(value) when is_float(value), do: {:literal, [subtype: :float], value}
+  defp infer_literal_type(value) when is_binary(value), do: {:literal, [subtype: :string], value}
+  defp infer_literal_type(true), do: {:literal, [subtype: :boolean], true}
+  defp infer_literal_type(false), do: {:literal, [subtype: :boolean], false}
+  defp infer_literal_type(nil), do: {:literal, [subtype: :null], nil}
 
   # Operator transformations
 
@@ -711,11 +719,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp extract_exception_type(_), do: {:ok, :error}
 
   defp transform_or_name(nil), do: {:ok, nil, %{}}
-  defp transform_or_name(name) when is_binary(name), do: {:ok, {:variable, name}, %{}}
+  defp transform_or_name(name) when is_binary(name), do: {:ok, {:variable, [], name}, %{}}
   defp transform_or_name(node), do: transform(node)
 
   # Extract variable name from MetaAST node
-  defp extract_variable_name({:variable, name}), do: name
+  defp extract_variable_name({:variable, _, name}), do: name
   defp extract_variable_name(_), do: "_x"
 
   # Add location information from Python AST node to MetaAST

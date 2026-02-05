@@ -5,63 +5,46 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   This module implements the abstraction function α_Elixir that lifts
   Elixir-specific AST structures to the meta-level representation.
 
-  ## Transformation Strategy
+  ## New 3-Tuple Format
 
-  The transformation follows a pattern-matching approach, handling each
-  Elixir AST construct and mapping it to the appropriate MetaAST node type.
+  All MetaAST nodes are uniform 3-element tuples:
 
-  ### M2.1 (Core Layer)
+      {type_atom, keyword_meta, children_or_value}
 
-  - Literals: integers, floats, strings, booleans, nil, atoms
-  - Variables: single-identifier references
-  - Binary operators: arithmetic, comparison, boolean
-  - Unary operators: negation, logical not
-  - Function calls
-  - Conditionals: if/unless
-  - Blocks: multiple sequential expressions
-  - Early returns: (simulated via throw/catch in Elixir)
-
-  ### M2.2 (Extended Layer)
-
-  - Anonymous functions (fn)
-  - Collection operations (Enum.map, filter, reduce)
-  - Pattern matching (case)
-  - List comprehensions (for)
-
-  ### M2.3 (Native Layer)
-
-  - Pipe operator (|>)
-  - with expressions
-  - Macros (quote/unquote)
+  Where:
+  - `type_atom` - Node type (e.g., `:literal`, `:binary_op`, `:function_def`)
+  - `keyword_meta` - Keyword list with metadata (line, subtype, operator, etc.)
+  - `children_or_value` - Value for leaf nodes, list of children for composites
 
   ## Metadata Preservation
 
-  The transformation preserves M1-specific information in metadata:
-  - `:line` - line number from original source
-  - `:context` - variable context (Elixir, nil, module name)
-  - `:elixir_meta` - original Elixir metadata keyword list
+  The transformation preserves M1-specific information:
+  - `:original_meta` - Original Elixir AST metadata keyword list
+  - `:original_code` - Source code snippet (when available)
+  - `:line`, `:col` - Source location from Elixir metadata
 
-  ## Context Threading (M1 Metadata Enrichment)
+  ## Transformation Strategy
 
-  The adapter now threads contextual information through the transformation,
-  attaching module name, function name, arity, and visibility to each node's
-  location metadata. This enables rich context-aware analysis while maintaining
-  M2 abstraction.
+  Uses `Macro.traverse/4` for bottom-up AST transformation:
+  1. Pre-pass: Track context (module, function, arity)
+  2. Post-pass: Transform Elixir nodes to MetaAST nodes
 
-  Context structure:
+  ## Examples
 
-      %{
-        language: :elixir,
-        module: "MyApp.UserController",
-        function: "create",
-        arity: 2,
-        visibility: :public
-      }
-
-  This enables high-fidelity round-trips (M1 → M2 → M1).
+      iex> {:ok, ast} = Code.string_to_quoted("x + 5")
+      iex> {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+      iex> meta_ast
+      {:binary_op, [category: :arithmetic, operator: :+, original_meta: [line: 1]],
+       [{:variable, [original_meta: [line: 1]], "x"},
+        {:literal, [subtype: :integer], 5}]}
   """
 
-  alias Metastatic.AST
+  # Arithmetic operators
+  @arithmetic_ops [:+, :-, :*, :/, :rem, :div]
+  # Comparison operators
+  @comparison_ops [:==, :!=, :<, :>, :<=, :>=, :===, :!==]
+  # Boolean operators
+  @boolean_ops [:and, :or, :&&, :||]
 
   @doc """
   Transform Elixir AST to MetaAST.
@@ -70,539 +53,978 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   ## Examples
 
-      iex> transform(42)
-      {:ok, {:literal, :integer, 42}, %{}}
+      iex> ToMeta.transform(42)
+      {:ok, {:literal, [subtype: :integer], 42}, %{}}
 
-      iex> transform({:x, [], Elixir})
-      {:ok, {:variable, "x"}, %{context: Elixir}}
-
-      iex> transform({:+, [], [{:x, [], Elixir}, 5]})
-      {:ok, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}, %{}}
+      iex> ToMeta.transform({:x, [line: 1], nil})
+      {:ok, {:variable, [line: 1, original_meta: [line: 1]], "x"}, %{}}
   """
   @spec transform(term()) :: {:ok, term(), map()} | {:error, String.t()}
+  def transform(elixir_ast) do
+    try do
+      # Initial context for tracking module/function/arity
+      initial_context = %{
+        module: nil,
+        function: nil,
+        arity: nil,
+        visibility: :public
+      }
 
-  # Literals - M2.1 Core Layer
+      # Use Macro.traverse for bottom-up transformation
+      {meta_ast, final_context} =
+        Macro.traverse(
+          elixir_ast,
+          initial_context,
+          &pre_transform/2,
+          &post_transform/2
+        )
 
-  def transform(value) when is_integer(value) do
-    {:ok, {:literal, :integer, value}, %{}}
-  end
-
-  def transform(value) when is_float(value) do
-    {:ok, {:literal, :float, value}, %{}}
-  end
-
-  def transform(value) when is_binary(value) do
-    {:ok, {:literal, :string, value}, %{}}
-  end
-
-  def transform(true) do
-    {:ok, {:literal, :boolean, true}, %{}}
-  end
-
-  def transform(false) do
-    {:ok, {:literal, :boolean, false}, %{}}
-  end
-
-  def transform(nil) do
-    {:ok, {:literal, :null, nil}, %{}}
-  end
-
-  def transform(atom) when is_atom(atom) and atom not in [true, false, nil] do
-    # Atoms become symbols
-    {:ok, {:literal, :symbol, atom}, %{}}
-  end
-
-  # List literals - M2.1 Core Layer
-  # Note: List literals don't have metadata in Elixir AST, so no location added
-  def transform(list) when is_list(list) do
-    # Lists in Elixir can be literal lists like [1, 2, 3]
-    with {:ok, items_meta} <- transform_list(list) do
-      {:ok, {:list, items_meta}, %{}}
+      {:ok, meta_ast, final_context}
+    rescue
+      e -> {:error, "Transform failed: #{Exception.message(e)}"}
     end
   end
 
-  # Map literals - M2.1 Core Layer
-  def transform({:%{}, _meta, [{:|, _bar_meta, [map_name, pairs]}]}) when is_list(pairs) do
-    reshaped =
-      quote do: Enum.reduce(pairs, unquote(map_name), fn {k, v}, acc -> Map.put(acc, k, v) end)
+  # ----- Pre-Transform: Context Tracking Only -----
+  # We only use pre-transform to track module/function context.
+  # The actual transformation happens in post_transform.
 
-    transform(reshaped)
+  # Track entering a module
+  defp pre_transform({:defmodule, _meta, [{:__aliases__, _, parts} | _]} = ast, ctx) do
+    module_name = Enum.map_join(parts, ".", &Atom.to_string/1)
+    {ast, %{ctx | module: module_name}}
   end
 
-  def transform({:%{}, meta, pairs}) when is_list(pairs) do
-    # Map literal: %{key => value, ...}
-    with {:ok, pairs_meta} <- transform_map_pairs(pairs) do
-      ast = {:map, pairs_meta}
-      {:ok, add_location(ast, meta), %{}}
-    end
+  # Track entering a function
+  defp pre_transform({func_type, _meta, [{name, _, args} | _]} = ast, ctx)
+       when func_type in [:def, :defp, :defmacro, :defmacrop] and is_atom(name) do
+    arity = if is_list(args), do: length(args), else: 0
+    visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
+    {ast, %{ctx | function: Atom.to_string(name), arity: arity, visibility: visibility}}
   end
 
-  # Tuple literals - M2.1 Core Layer
-  # Two-element tuple shorthand: {x, y}
-  # Need to distinguish between actual tuples and Elixir AST nodes
-  def transform({left, right}) do
-    # Check if this is an Elixir AST node (has metadata and context)
-    # AST nodes are 3-tuples: {atom, metadata, context}
-    # So if left is a 2-tuple, it's likely a real tuple
-    case {left, right, is_tuple(left), is_tuple(right)} do
-      # Both are 3-element tuples (likely AST nodes) - this is a tuple of AST nodes
-      {{_, _, _}, {_, _, _}, true, true} ->
-        with {:ok, left_meta, _} <- transform(left),
-             {:ok, right_meta, _} <- transform(right) do
-          {:ok, {:tuple, [left_meta, right_meta]}, %{}}
-        end
+  # Track entering a guarded function
+  defp pre_transform({func_type, _meta, [{:when, _, [{name, _, args} | _]} | _]} = ast, ctx)
+       when func_type in [:def, :defp, :defmacro, :defmacrop] and is_atom(name) do
+    arity = if is_list(args), do: length(args), else: 0
+    visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
+    {ast, %{ctx | function: Atom.to_string(name), arity: arity, visibility: visibility}}
+  end
 
-      # At least one is NOT a 3-tuple, so this is a literal tuple
+  # Handle function captures in pre_transform to prevent Macro.traverse from
+  # descending into the body and transforming it before we can process &1, &2, etc.
+  defp pre_transform({:&, _meta, [_body]} = ast, ctx) do
+    # Instead of transforming here, we mark captures to skip normal traversal.
+    # We'll return a marker tuple that tells post_transform to handle the original AST.
+    # Using nil as context marks it as a variable (leaf node) so Macro.traverse won't descend.
+    {{:__capture_marker__, [], nil}, Map.put(ctx, :pending_capture, ast)}
+  end
+
+  # Handle try/rescue/catch in pre_transform to preserve clause structure
+  # before children get transformed. We store the original and return a marker.
+  defp pre_transform({:try, _meta, [[{:do, _} | _] = _clauses]} = ast, ctx) do
+    {{:__try_marker__, [], nil}, Map.put(ctx, :pending_try, ast)}
+  end
+
+  # Default: pass through
+  defp pre_transform(ast, ctx), do: {ast, ctx}
+
+  # ----- Function Capture (called from pre_transform) -----
+
+  defp transform_capture(body, meta) do
+    case body do
+      # &1, &2, etc - argument reference
+      n when is_integer(n) ->
+        param_name = "arg_#{n}"
+
+        node_meta =
+          [params: [{:param, param_name, nil, nil}], capture_form: :argument_reference] ++
+            build_meta(meta)
+
+        body_ast = {:variable, [], param_name}
+        {:lambda, node_meta, [body_ast]}
+
+      # &Module.function/arity
+      {:/, _, [func_ref, arity]} when is_integer(arity) ->
+        func_name = extract_captured_function_name(func_ref)
+        params = for i <- 1..arity, do: {:param, "arg_#{i}", nil, nil}
+        args = for i <- 1..arity, do: {:variable, [], "arg_#{i}"}
+        body_ast = {:function_call, [name: func_name], args}
+        node_meta = [params: params, capture_form: :named_function] ++ build_meta(meta)
+        {:lambda, node_meta, [body_ast]}
+
+      # &(&1 + &2) - expression capture
       _ ->
-        with {:ok, left_meta, _} <- transform(left),
-             {:ok, right_meta, _} <- transform(right) do
-          {:ok, {:tuple, [left_meta, right_meta]}, %{}}
+        {transformed_body, arg_count} = transform_capture_body_recursive(body)
+
+        if arg_count == 0 do
+          # No capture arguments - treat as zero-arity lambda
+          node_meta = [params: [], capture_form: :no_arguments] ++ build_meta(meta)
+          {:lambda, node_meta, [transformed_body]}
+        else
+          params = for i <- 1..arg_count, do: {:param, "arg_#{i}", nil, nil}
+
+          node_meta =
+            [params: params, capture_form: :expression, arity: arg_count] ++ build_meta(meta)
+
+          {:lambda, node_meta, [transformed_body]}
         end
     end
   end
 
-  # Three or more element tuple: {x, y, z, ...}
-  def transform({:{}, _meta, elements}) when is_list(elements) do
-    with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:tuple, elements_meta}, %{}}
+  # Transform capture body recursively without using Macro.traverse
+  defp transform_capture_body_recursive(body) do
+    do_transform_capture_body(body, 0)
+  end
+
+  defp do_transform_capture_body({:&, _, [n]}, max_arg) when is_integer(n) do
+    # Replace &1, &2, etc. with variable references
+    {{:variable, [], "arg_#{n}"}, max(max_arg, n)}
+  end
+
+  defp do_transform_capture_body({op, meta, args}, max_arg) when is_atom(op) and is_list(args) do
+    # Transform children first
+    {transformed_args, new_max} =
+      Enum.map_reduce(args, max_arg, fn arg, acc ->
+        {t_arg, new_acc} = do_transform_capture_body(arg, acc)
+        {t_arg, new_acc}
+      end)
+
+    # Now transform this node
+    case classify_op(op) do
+      {:arithmetic, operator} ->
+        [left, right] = transformed_args
+
+        {{:binary_op, [category: :arithmetic, operator: operator] ++ build_meta(meta),
+          [left, right]}, new_max}
+
+      {:comparison, operator} ->
+        [left, right] = transformed_args
+
+        {{:binary_op, [category: :comparison, operator: operator] ++ build_meta(meta),
+          [left, right]}, new_max}
+
+      {:boolean, operator} ->
+        [left, right] = transformed_args
+
+        {{:binary_op, [category: :boolean, operator: operator] ++ build_meta(meta),
+          [left, right]}, new_max}
+
+      :function_call ->
+        # It's a function call
+        func_name = Atom.to_string(op)
+        {{:function_call, [name: func_name] ++ build_meta(meta), transformed_args}, new_max}
+
+      :unknown ->
+        # Keep as-is but with transformed children
+        {{op, meta, transformed_args}, new_max}
     end
   end
 
-  # Variables - M2.1 Core Layer
+  # Remote function call: Module.func(args) in capture
+  defp do_transform_capture_body({{:., dot_meta, [module, func]}, call_meta, args}, max_arg) do
+    {transformed_args, new_max} =
+      Enum.map_reduce(args, max_arg, fn arg, acc ->
+        {t_arg, new_acc} = do_transform_capture_body(arg, acc)
+        {t_arg, new_acc}
+      end)
 
-  # Module aliases: User, MyApp.User, etc.
-  def transform({:__aliases__, meta, parts}) when is_list(parts) do
-    # __aliases__ represents module names like User, MyApp.User
-    # Treat as a variable reference to the module
-    module_name = module_to_string({:__aliases__, meta, parts})
-    {:ok, {:variable, module_name}, %{}}
+    module_name = extract_module_name(module)
+    func_name = "#{module_name}.#{func}"
+    node_meta = [name: func_name] ++ build_meta(call_meta) ++ build_meta(dot_meta)
+    {{:function_call, node_meta, transformed_args}, new_max}
   end
 
-  def transform({var, meta, context}) when is_atom(var) and is_atom(context) do
-    # Variable reference
-    # Check if it's a special form or actual variable
-    var_str = Atom.to_string(var)
+  # Two-element tuple in capture: {&1, &2}
+  defp do_transform_capture_body({left, right}, max_arg) do
+    {t_left, max1} = do_transform_capture_body(left, max_arg)
+    {t_right, max2} = do_transform_capture_body(right, max1)
+    {{:tuple, [], [t_left, t_right]}, max2}
+  end
 
-    if special_form?(var) do
-      # This is a special form or keyword, treat differently
-      ast = {:literal, :symbol, var}
-      {:ok, add_location(ast, meta), %{elixir_meta: meta}}
+  # List in capture: [&1, &2, &3]
+  defp do_transform_capture_body(list, max_arg) when is_list(list) do
+    {transformed, new_max} =
+      Enum.map_reduce(list, max_arg, fn elem, acc ->
+        {t_elem, new_acc} = do_transform_capture_body(elem, acc)
+        {t_elem, new_acc}
+      end)
+
+    {{:list, [], transformed}, new_max}
+  end
+
+  # Literals
+  defp do_transform_capture_body(value, max_arg) when is_integer(value) do
+    {{:literal, [subtype: :integer], value}, max_arg}
+  end
+
+  defp do_transform_capture_body(value, max_arg) when is_float(value) do
+    {{:literal, [subtype: :float], value}, max_arg}
+  end
+
+  defp do_transform_capture_body(value, max_arg) when is_binary(value) do
+    {{:literal, [subtype: :string], value}, max_arg}
+  end
+
+  defp do_transform_capture_body(true, max_arg) do
+    {{:literal, [subtype: :boolean], true}, max_arg}
+  end
+
+  defp do_transform_capture_body(false, max_arg) do
+    {{:literal, [subtype: :boolean], false}, max_arg}
+  end
+
+  defp do_transform_capture_body(nil, max_arg) do
+    {{:literal, [subtype: :null], nil}, max_arg}
+  end
+
+  defp do_transform_capture_body(atom, max_arg) when is_atom(atom) do
+    {{:literal, [subtype: :symbol], atom}, max_arg}
+  end
+
+  # Fallback - keep as is
+  defp do_transform_capture_body(other, max_arg) do
+    {other, max_arg}
+  end
+
+  defp classify_op(op) when op in @arithmetic_ops, do: {:arithmetic, op}
+  defp classify_op(op) when op in @comparison_ops, do: {:comparison, op}
+  defp classify_op(op) when op in @boolean_ops, do: {:boolean, normalize_bool_op(op)}
+  defp classify_op(:not), do: {:unary_boolean, :not}
+  defp classify_op(op) when is_atom(op), do: :function_call
+  defp classify_op(_), do: :unknown
+
+  defp normalize_bool_op(:&&), do: :and
+  defp normalize_bool_op(:||), do: :or
+  defp normalize_bool_op(op), do: op
+
+  # ----- Try/Rescue transformation (called from pre_transform marker) -----
+
+  # Transform a try/rescue/catch block before children are transformed
+  defp transform_try(clauses, meta) when is_list(clauses) do
+    try_block = Keyword.get(clauses, :do)
+    rescue_clauses = Keyword.get(clauses, :rescue, [])
+    catch_clauses = Keyword.get(clauses, :catch, [])
+    after_block = Keyword.get(clauses, :after)
+
+    # Transform the try block body
+    {:ok, try_body, _} = transform(try_block)
+
+    # Transform rescue clauses
+    handlers =
+      Enum.map(rescue_clauses ++ catch_clauses, fn
+        {:->, clause_meta, [[pattern], body]} ->
+          {:ok, transformed_body, _} = transform(body)
+          {:ok, transformed_pattern, _} = transform(pattern)
+          node_meta = [pattern: transformed_pattern] ++ build_meta(clause_meta)
+          {:match_arm, node_meta, flatten_body_ast(transformed_body)}
+
+        other ->
+          {:ok, transformed, _} = transform(other)
+          {:match_arm, [], [transformed]}
+      end)
+
+    # Transform after block if present
+    children = [try_body | handlers]
+
+    children =
+      if after_block do
+        {:ok, transformed_after, _} = transform(after_block)
+        children ++ [transformed_after]
+      else
+        children
+      end
+
+    node_meta = build_meta(meta)
+    {:exception_handling, node_meta, children}
+  end
+
+  # ----- Post-Transform: Node Conversion -----
+
+  # Handle __capture_marker__ - retrieve original capture from context and transform it
+  defp post_transform({:__capture_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_capture) do
+      {{:&, meta, [body]}, new_ctx} ->
+        result = transform_capture(body, meta)
+        {result, new_ctx}
+
+      {nil, ctx} ->
+        # Should not happen, but handle gracefully
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
+  # Handle __try_marker__ - retrieve original try/rescue from context and transform it
+  defp post_transform({:__try_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_try) do
+      {{:try, meta, [clauses]}, new_ctx} ->
+        result = transform_try(clauses, meta)
+        {result, new_ctx}
+
+      {nil, ctx} ->
+        # Should not happen, but handle gracefully
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
+  # Already transformed nodes - pass through
+  defp post_transform({type, meta, _children} = ast, ctx)
+       when is_atom(type) and is_list(meta) and
+              type in [
+                :literal,
+                :variable,
+                :binary_op,
+                :unary_op,
+                :function_call,
+                :conditional,
+                :block,
+                :list,
+                :map,
+                :pair,
+                :tuple,
+                :inline_match,
+                :assignment,
+                :container,
+                :function_def,
+                :lambda,
+                :pattern_match,
+                :match_arm,
+                :early_return,
+                :attribute_access,
+                :language_specific,
+                :collection_op
+              ] do
+    {ast, ctx}
+  end
+
+  # ----- Literals -----
+
+  # Integer
+  defp post_transform(value, ctx) when is_integer(value) do
+    {{:literal, [subtype: :integer], value}, ctx}
+  end
+
+  # Float
+  defp post_transform(value, ctx) when is_float(value) do
+    {{:literal, [subtype: :float], value}, ctx}
+  end
+
+  # String (binary)
+  defp post_transform(value, ctx) when is_binary(value) do
+    {{:literal, [subtype: :string], value}, ctx}
+  end
+
+  # Boolean
+  defp post_transform(true, ctx) do
+    {{:literal, [subtype: :boolean], true}, ctx}
+  end
+
+  defp post_transform(false, ctx) do
+    {{:literal, [subtype: :boolean], false}, ctx}
+  end
+
+  # Nil
+  defp post_transform(nil, ctx) do
+    {{:literal, [subtype: :null], nil}, ctx}
+  end
+
+  # Atom (not true/false/nil)
+  defp post_transform(atom, ctx) when is_atom(atom) do
+    {{:literal, [subtype: :symbol], atom}, ctx}
+  end
+
+  # ----- Lists -----
+
+  # List literal (already transformed children)
+  defp post_transform(list, ctx) when is_list(list) do
+    # Check if children are already MetaAST nodes
+    if Enum.all?(list, &meta_ast_node?/1) do
+      {{:list, [], list}, ctx}
     else
-      # Regular variable
-      ast = {:variable, var_str}
-      metadata = %{context: context}
-      metadata = if meta != [], do: Map.put(metadata, :elixir_meta, meta), else: metadata
-      {:ok, add_location(ast, meta), metadata}
+      # Mixed or keyword list - transform remaining elements
+      transformed = Enum.map(list, &ensure_meta_ast/1)
+      {{:list, [], transformed}, ctx}
     end
   end
 
-  # Binary Operators - M2.1 Core Layer
+  # ----- Variables -----
+
+  # Variable reference
+  defp post_transform({name, meta, context}, ctx)
+       when is_atom(name) and is_atom(context) and not is_nil(context) do
+    node_meta = build_meta(meta)
+    {{:variable, node_meta, Atom.to_string(name)}, ctx}
+  end
+
+  # Variable with nil context
+  defp post_transform({name, meta, nil}, ctx) when is_atom(name) do
+    # Check if it's a special form
+    if special_form?(name) do
+      {{:literal, [subtype: :symbol] ++ build_meta(meta), name}, ctx}
+    else
+      node_meta = build_meta(meta)
+      {{:variable, node_meta, Atom.to_string(name)}, ctx}
+    end
+  end
+
+  # ----- Binary Operators -----
 
   # Arithmetic operators
-  def transform({op, meta, [left, right]}) when op in [:+, :-, :*, :/, :rem, :div] do
-    with {:ok, left_meta, _} <- transform(left),
-         {:ok, right_meta, _} <- transform(right) do
-      ast = {:binary_op, :arithmetic, op, left_meta, right_meta}
-      {:ok, add_location(ast, meta), %{}}
-    end
-  end
-
-  # Comparison operators
-  def transform({op, meta, [left, right]})
-      when op in [:==, :!=, :<, :>, :<=, :>=, :===, :!==] do
-    with {:ok, left_meta, _} <- transform(left),
-         {:ok, right_meta, _} <- transform(right) do
-      ast = {:binary_op, :comparison, op, left_meta, right_meta}
-      {:ok, add_location(ast, meta), %{}}
-    end
-  end
-
-  # Boolean operators
-  def transform({op, meta, [left, right]}) when op in [:and, :or] do
-    with {:ok, left_meta, _} <- transform(left),
-         {:ok, right_meta, _} <- transform(right) do
-      ast = {:binary_op, :boolean, op, left_meta, right_meta}
-      {:ok, add_location(ast, meta), %{}}
-    end
+  defp post_transform({op, meta, [left, right]}, ctx) when op in @arithmetic_ops do
+    node_meta = [category: :arithmetic, operator: op] ++ build_meta(meta)
+    {{:binary_op, node_meta, [left, right]}, ctx}
   end
 
   # String concatenation
-  def transform({:<>, meta, [left, right]}) do
-    with {:ok, left_meta, _} <- transform(left),
-         {:ok, right_meta, _} <- transform(right) do
-      ast = {:binary_op, :arithmetic, :<>, left_meta, right_meta}
-      {:ok, add_location(ast, meta), %{}}
+  defp post_transform({:<>, meta, [left, right]}, ctx) do
+    node_meta = [category: :arithmetic, operator: :<>] ++ build_meta(meta)
+    {{:binary_op, node_meta, [left, right]}, ctx}
+  end
+
+  # Comparison operators
+  defp post_transform({op, meta, [left, right]}, ctx) when op in @comparison_ops do
+    node_meta = [category: :comparison, operator: op] ++ build_meta(meta)
+    {{:binary_op, node_meta, [left, right]}, ctx}
+  end
+
+  # Boolean operators
+  defp post_transform({op, meta, [left, right]}, ctx) when op in @boolean_ops do
+    node_meta = [category: :boolean, operator: op] ++ build_meta(meta)
+    {{:binary_op, node_meta, [left, right]}, ctx}
+  end
+
+  # ----- Unary Operators -----
+
+  # Negation (unary minus) - distinguish from binary minus by single arg
+  defp post_transform({:-, meta, [operand]}, ctx) do
+    node_meta = [category: :arithmetic, operator: :-] ++ build_meta(meta)
+    {{:unary_op, node_meta, [operand]}, ctx}
+  end
+
+  # Unary plus
+  defp post_transform({:+, meta, [operand]}, ctx) do
+    node_meta = [category: :arithmetic, operator: :+] ++ build_meta(meta)
+    {{:unary_op, node_meta, [operand]}, ctx}
+  end
+
+  # Logical not
+  defp post_transform({:not, meta, [operand]}, ctx) do
+    node_meta = [category: :boolean, operator: :not] ++ build_meta(meta)
+    {{:unary_op, node_meta, [operand]}, ctx}
+  end
+
+  defp post_transform({:!, meta, [operand]}, ctx) do
+    node_meta = [category: :boolean, operator: :!] ++ build_meta(meta)
+    {{:unary_op, node_meta, [operand]}, ctx}
+  end
+
+  # ----- Match Operator -----
+
+  defp post_transform({:=, meta, [pattern, value]}, ctx) do
+    node_meta = build_meta(meta)
+    {{:inline_match, node_meta, [pattern, value]}, ctx}
+  end
+
+  # ----- Maps -----
+
+  # Map literal - after traversal, pairs become {:tuple, [], [key_ast, value_ast]}
+  defp post_transform({:%{}, meta, pairs}, ctx) when is_list(pairs) do
+    # Transform pairs to {:pair, [], [key, value]} format
+    pair_nodes =
+      Enum.map(pairs, fn
+        # Already transformed as tuple: {:tuple, [], [key_ast, value_ast]}
+        {:tuple, _, [key_ast, value_ast]} ->
+          {:pair, [], [key_ast, value_ast]}
+
+        # Already a pair node
+        {:pair, _, _} = pair ->
+          pair
+
+        # Keyword-style pair {atom, value} - shouldn't happen after traversal but handle anyway
+        {key, value} when is_atom(key) ->
+          key_ast = {:literal, [subtype: :symbol], key}
+          {:pair, [], [key_ast, ensure_meta_ast(value)]}
+
+        # Other tuple - treat as key-value pair
+        {key, value} ->
+          {:pair, [], [ensure_meta_ast(key), ensure_meta_ast(value)]}
+      end)
+
+    node_meta = build_meta(meta)
+    {{:map, node_meta, pair_nodes}, ctx}
+  end
+
+  # ----- Tuples -----
+
+  # 2-element tuple shorthand
+  defp post_transform({left, right}, ctx)
+       when not is_atom(left) or
+              left not in [
+                :literal,
+                :variable,
+                :binary_op,
+                :unary_op,
+                :function_call,
+                :conditional,
+                :block,
+                :list,
+                :map,
+                :pair,
+                :tuple,
+                :inline_match,
+                :assignment,
+                :container,
+                :function_def,
+                :lambda,
+                :pattern_match,
+                :match_arm,
+                :early_return,
+                :attribute_access,
+                :language_specific,
+                :collection_op,
+                :loop,
+                :exception_handling,
+                :async_operation,
+                :property,
+                :augmented_assignment
+              ] do
+    {{:tuple, [], [ensure_meta_ast(left), ensure_meta_ast(right)]}, ctx}
+  end
+
+  # N-element tuple
+  defp post_transform({:{}, meta, elements}, ctx) when is_list(elements) do
+    node_meta = build_meta(meta)
+    {{:tuple, node_meta, elements}, ctx}
+  end
+
+  # ----- Blocks -----
+
+  defp post_transform({:__block__, meta, statements}, ctx) when is_list(statements) do
+    node_meta = build_meta(meta)
+    {{:block, node_meta, statements}, ctx}
+  end
+
+  # ----- Conditionals -----
+
+  # if expression - clauses might be keyword list or transformed list
+  defp post_transform({:if, meta, [condition, clauses]}, ctx) do
+    {then_branch, else_branch} = extract_do_else(clauses)
+    node_meta = build_meta(meta)
+    {{:conditional, node_meta, [condition, then_branch, else_branch]}, ctx}
+  end
+
+  # unless expression (transform to conditional with negated condition)
+  defp post_transform({:unless, meta, [condition, clauses]}, ctx) do
+    {then_branch, else_branch} = extract_do_else(clauses)
+    negated = {:unary_op, [category: :boolean, operator: :not], [condition]}
+    node_meta = [original_form: :unless] ++ build_meta(meta)
+    {{:conditional, node_meta, [negated, then_branch, else_branch]}, ctx}
+  end
+
+  # cond expression - transform to nested conditionals
+  defp post_transform({:cond, meta, [clauses_wrapper]}, ctx) do
+    clauses = extract_do_clauses(clauses_wrapper)
+    nested = cond_to_nested_conditional(clauses)
+    node_meta = [original_form: :cond] ++ build_meta(meta)
+    # Merge meta into the top conditional
+    case nested do
+      {:conditional, inner_meta, children} ->
+        {{:conditional, Keyword.merge(inner_meta, node_meta), children}, ctx}
+
+      other ->
+        {other, ctx}
     end
   end
 
-  # Pipe operator - M2.3 Native Layer
-  # [TODO] UNPIPE it!
-  # ast |> Enum.reduce(fn {{fun, meta, args}, 0}, {value, 0} -> {{fun, meta, [value | args]}, 0} end)
-  def transform({:|>, _meta, [left, {_fun, _fun_meta, _args} = right]}) do
-    # Pipe is language-specific to Elixir/Erlang
-    with {:ok, left_meta, _} <- transform(left),
-         {:ok, right_meta, _} <- transform(right) do
-      {:ok, {:language_specific, :elixir, {:|>, [], [left, right]}, :pipe},
-       %{left: left_meta, right: right_meta}}
-    end
+  # ----- Case (Pattern Match) -----
+
+  defp post_transform({:case, meta, [scrutinee, clauses_wrapper]}, ctx) do
+    clauses = extract_do_clauses(clauses_wrapper)
+
+    arms =
+      Enum.map(clauses, fn
+        # Original format {:->, meta, [[pattern], body]}
+        {:->, clause_meta, [[pattern], body]} ->
+          arm_meta = build_meta(clause_meta)
+          {:match_arm, [pattern: pattern] ++ arm_meta, flatten_body(body)}
+
+        # Transformed as function_call
+        {:function_call, clause_meta, [{:list, _, [pattern]}, body]} ->
+          if Keyword.get(clause_meta, :name) == "->" do
+            arm_meta = build_meta(Keyword.get(clause_meta, :original_meta, []))
+            {:match_arm, [pattern: pattern] ++ arm_meta, flatten_body_ast(body)}
+          else
+            # Unexpected format
+            {:match_arm, [], [body]}
+          end
+
+        other ->
+          {:match_arm, [], [other]}
+      end)
+
+    node_meta = build_meta(meta)
+    {{:pattern_match, node_meta, [scrutinee | arms]}, ctx}
   end
 
-  # Match Operator (=) - M2.1 Core Layer
-  # In Elixir, = is pattern matching, not assignment
-  def transform({:=, meta, [left, right]}) do
-    with {:ok, pattern_meta, pattern_metadata} <- transform_pattern(left),
-         {:ok, value_meta, value_metadata} <- transform(right) do
-      # Preserve Elixir metadata for round-trip fidelity
-      metadata = %{
-        elixir_meta: meta,
-        pattern_metadata: pattern_metadata,
-        value_metadata: value_metadata
-      }
+  # ----- Function Calls -----
 
-      {:ok, {:inline_match, pattern_meta, value_meta}, metadata}
-    end
-  end
-
-  # Unary Operators - M2.1 Core Layer
-
-  def transform({:not, meta, [operand]}) do
-    with {:ok, operand_meta, _} <- transform(operand) do
-      ast = {:unary_op, :boolean, :not, operand_meta}
-      {:ok, add_location(ast, meta), %{}}
-    end
-  end
-
-  def transform({:-, meta, [operand]}) do
-    with {:ok, operand_meta, _} <- transform(operand) do
-      ast = {:unary_op, :arithmetic, :-, operand_meta}
-      {:ok, add_location(ast, meta), %{}}
-    end
-  end
-
-  def transform({:+, meta, [operand]}) do
-    with {:ok, operand_meta, _} <- transform(operand) do
-      ast = {:unary_op, :arithmetic, :+, operand_meta}
-      {:ok, add_location(ast, meta), %{}}
-    end
-  end
-
-  # Module Definitions - M2.2s Structural Layer
-
-  # defmodule - maps to container
-  def transform({:defmodule, meta, [name, [do: body]]}) do
-    with {:ok, body_meta, _} <- transform(body) do
-      module_name = module_to_string(name)
-
-      # Add module context to the container node itself, not its children
-      module_context = %{
-        language: :elixir,
-        module: module_name
-      }
-
-      # Use container type for module
-      # Format: {:container, type, name, parent, type_params, implements, body}
-      container = {:container, :module, module_name, nil, [], [], body_meta}
-
-      {:ok, add_location_with_context(container, meta, module_context),
-       %{elixir_meta: meta, original_name: name}}
-    end
-  end
-
-  # def / defp (function definitions) - maps to function_def
-  def transform({func_type, meta, [signature, [do: body]]})
-      when func_type in [:def, :defp, :defmacro, :defmacrop] do
-    with {:ok, body_meta, _} <- transform(body) do
-      func_name = extract_function_name(signature)
-      params = extract_function_params(signature)
-      arity = length(params)
-      visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
-
-      # Add function context to the function_def node itself, not its children
-      func_context = %{
-        language: :elixir,
-        function: func_name,
-        arity: arity,
-        visibility: visibility
-      }
-
-      # Use function_def type
-      func_def =
-        {:function_def, func_name, params, nil, %{visibility: visibility}, body_meta}
-
-      {:ok, add_location_with_context(func_def, meta, func_context),
-       %{elixir_meta: meta, function_type: func_type}}
-    end
-  end
-
-  # Module attributes (@moduledoc, @doc, etc.)
-  def transform({:@, meta, [{attr_name, attr_meta, [value]}]}) do
-    # Transform the value so literals can be analyzed
-    with {:ok, value_meta, _} <- transform(value) do
-      # Use assignment to represent module attribute
-      # @attr value becomes an assignment
-      {:ok, {:assignment, {:variable, "@" <> Atom.to_string(attr_name)}, value_meta},
-       %{elixir_meta: meta, attribute_meta: attr_meta, attribute_type: :module_attribute}}
-    end
-  end
-
-  # Function Calls - M2.1 Core Layer
-
-  # Function capture - M2.2 Extended Layer
-  # Handles various forms:
-  # &1, &2, etc. - argument references
-  # &(&1 + 1) - anonymous function with capture
-  # &Module.function/arity - named function capture
-  # &function/arity - local function capture
-  def transform({:&, meta, [body]}) do
-    transform_function_capture(body, meta)
-  end
-
-  # Map field access
-  def transform({{:., _, [{var, _var_meta, nil_or_empty}, field]}, _meta, []})
-      when nil_or_empty in [nil, []] do
-    {:ok, {:attribute_access, {:variable, var}, field}, %{kind: :map}}
-  end
-
-  # Anonymous function call
-  # {{:., _fun_meta, [{fun_name, _fun_name_meta, _nil}]}, _meta, args}
-  def transform({{:., _fun_meta, [{fun_name, _fun_name_meta, _nil}]}, _meta, args})
-      when is_list(args) do
-    with {:ok, args_meta} <- transform_list(args) do
-      {:ok, {:function_call, fun_name, args_meta}, %{call_type: :local}}
-    end
-  end
-
-  # Remote call (Module.function)
-  # [TODO] This is simplified, better traverse is needed
-  def transform(
-        {{:., _outer_meta,
-          [{{:., _inner_meta, [_inner_module, _inner_func]}, _, _inner_args} = inner, _fun_or_key]},
-         _, _outer_args} = whole
-      ) do
-    require Logger
-    Logger.notice("Incomplete transform: " <> inspect(whole))
-    transform(inner)
-  end
-
-  def transform(
-        {{:., _call_meta, [{:@, _inner_meta, [_inner_arg]}, _func]} = inner, _outer_meta,
-         _outer_args} = whole
-      ) do
-    require Logger
-    Logger.notice("Incomplete transform: " <> inspect(whole))
-    transform(inner)
-  end
-
-  def transform({{:., _call_meta, [module, func]}, _meta, args}) when is_list(args) do
-    module_name = module_to_string(module)
-    func_name = Atom.to_string(func)
-    qualified_name = "#{module_name}.#{func_name}"
-
-    # Check for Enum operations - M2.2 Extended Layer
-    case {module_name, func_name, args} do
-      {"Enum", "map", [collection, fun]} ->
-        transform_enum_map(collection, fun)
-
-      {"Enum", "filter", [collection, fun]} ->
-        transform_enum_filter(collection, fun)
-
-      {"Enum", "reduce", [collection, initial, fun]} ->
-        transform_enum_reduce(collection, initial, fun)
-
-      _ ->
-        with {:ok, args_meta} <- transform_list(args) do
-          {:ok, {:function_call, qualified_name, args_meta}, %{call_type: :remote}}
-        end
-    end
-  end
-
-  # Local call
-  def transform({func, _meta, args}) when is_atom(func) and is_list(args) do
-    func_name = Atom.to_string(func)
-
-    # Check if this is actually a function call or a special form
-    case {func, args} do
-      # Anonymous functions
-      {:fn, _} ->
-        transform_fn({:fn, nil, args})
-
-      # Conditionals
-      {:if, _} ->
-        transform_if(args)
-
-      {:unless, _} ->
-        transform_unless(args)
-
-      {:cond, _} ->
-        transform_cond(args)
-
-      {:case, _} ->
-        transform_case(args)
-
-      # Comprehensions
-      {:for, _} ->
-        transform_comprehension(args)
-
-      # with expressions
-      {:with, _} ->
-        transform_with(args)
-
-      # try/rescue/catch
-      {:try, _} ->
-        transform_try(args)
-
-      # Blocks
-      {:__block__, _} ->
-        transform_block(args)
-
-      # Regular function call
-      _ ->
-        with {:ok, args_meta} <- transform_list(args) do
-          {:ok, {:function_call, func_name, args_meta}, %{}}
-        end
-    end
-  end
-
-  # Anonymous Functions - M2.2 Extended Layer
-
-  def transform({:fn, meta, clauses}) do
-    transform_fn({:fn, meta, clauses})
-  end
-
-  # unquote(:"coerce_#{key}")(value)
-  # [TODO] handle this somehow
-  def transform({{:unquote, _unquote_meta, _quoted_content}, _meta, _args} = unexpected) do
-    require Logger
-    Logger.notice("Unsupported unquote: " <> inspect(unexpected))
-    {:ok, [], %{}}
-  end
-
-  # Catch-all for unsupported constructs
-  def transform(unsupported) do
-    {:error, "Unsupported Elixir AST construct: #{inspect(unsupported)}"}
-  end
-
-  # Conditionals - M2.1 Core Layer
-
-  # Standalone if: if condition do ... end
-  defp transform_if([condition, clauses]) do
-    then_clause = Keyword.get(clauses, :do)
-    else_clause = Keyword.get(clauses, :else)
-
-    with {:ok, cond_meta, _} <- transform(condition),
-         {:ok, then_meta, _} <- transform(then_clause),
-         {:ok, else_meta, _} <- transform_or_nil(else_clause) do
-      {:ok, {:conditional, cond_meta, then_meta, else_meta}, %{}}
-    end
-  end
-
-  # Piped if: expr |> if do ... end
-  # The condition comes from the pipe, so args only contains the clauses
-  defp transform_if([clauses]) do
-    # The condition is implicit from the pipe - mark as language-specific for now
-    {:ok, {:language_specific, :elixir, {:if, [], [clauses]}, "piped if expression"}, %{}}
-  end
-
-  defp transform_unless([condition, clauses]) do
-    then_clause = Keyword.get(clauses, :do)
-    else_clause = Keyword.get(clauses, :else)
-
-    # unless is "if not"
-    with {:ok, cond_meta, _} <- transform(condition),
-         {:ok, then_meta, _} <- transform(then_clause),
-         {:ok, else_meta, _} <- transform_or_nil(else_clause) do
-      # Negate condition
-      negated_cond = {:unary_op, :boolean, :not, cond_meta}
-      {:ok, {:conditional, negated_cond, then_meta, else_meta}, %{original_form: :unless}}
-    end
-  end
-
-  defp transform_cond([clauses]) do
-    # cond is a series of condition -> body pairs
-    # Transform to nested if/else
-    # Extract the clause list from [do: [clauses]]
-    clause_list = Keyword.get(clauses, :do, [])
-
-    with {:ok, meta_ast} <- cond_to_nested_if(clause_list) do
-      {:ok, meta_ast, %{original_form: :cond}}
-    end
-  end
-
-  # Standalone case: case expr do ... end
-  defp transform_case([scrutinee, clauses]) do
-    # case expression with pattern matching
-    case_clauses = Keyword.get(clauses, :do, [])
-
-    with {:ok, scrutinee_meta, _} <- transform(scrutinee),
-         {:ok, arms} <- transform_case_arms(case_clauses) do
-      {:ok, {:pattern_match, scrutinee_meta, arms}, %{}}
-    end
-  end
-
-  # Piped case: expr |> case do ... end
-  # The scrutinee comes from the pipe, so args only contains the clauses
-  defp transform_case([clauses]) do
-    # The scrutinee is implicit from the pipe - we need to get it from context
-    # For now, create a placeholder that indicates this needs pipe handling
-    case_clauses = Keyword.get(clauses, :do, [])
-
-    with {:ok, _arms} <- transform_case_arms(case_clauses) do
-      # Mark this as needing the pipe argument
-      {:ok, {:language_specific, :elixir, {:case, [], [clauses]}, "piped case expression"}, %{}}
-    end
-  end
-
-  # Blocks - M2.1 Core Layer
-
-  defp transform_block(expressions) do
-    with {:ok, exprs_meta} <- transform_list(expressions) do
-      {:ok, {:block, exprs_meta}, %{}}
-    end
-  end
-
-  # Helper Functions
-
-  defp transform_list(items) when is_list(items) do
-    items
-    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
-      # Transform each item
-      case transform(item) do
-        {:ok, meta, _} -> {:cont, {:ok, [meta | acc]}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-    |> case do
-      {:ok, items} -> {:ok, Enum.reverse(items)}
-      error -> error
-    end
-  end
-
-  defp transform_or_nil(nil), do: {:ok, nil, %{}}
-  defp transform_or_nil(value), do: transform(value)
-
-  defp module_to_string({:__aliases__, _, parts}) do
-    # Handle special forms like __MODULE__ in alias paths
-    parts_strings =
-      Enum.map(parts, fn
+  # Module alias - parts may be atoms (raw) or {:literal, _, atom} (transformed)
+  defp post_transform({:__aliases__, meta, parts}, ctx) when is_list(parts) do
+    module_name =
+      Enum.map_join(parts, ".", fn
+        {:literal, _, atom} when is_atom(atom) -> Atom.to_string(atom)
         atom when is_atom(atom) -> Atom.to_string(atom)
-        {:__MODULE__, _, _} -> "__MODULE__"
         other -> inspect(other)
       end)
 
-    Enum.join(parts_strings, ".")
+    node_meta = build_meta(meta)
+    {{:variable, node_meta, module_name}, ctx}
   end
 
-  defp module_to_string(atom) when is_atom(atom), do: Atom.to_string(atom)
-  # Handle variable or dynamic module reference (e.g., {:module, meta, nil})
-  defp module_to_string({name, _meta, context}) when is_atom(name) and is_atom(context) do
-    Atom.to_string(name)
+  # Remote call: Module.function(args) - raw atom function name
+  defp post_transform({{:., _dot_meta, [module, func]}, meta, args}, ctx)
+       when is_atom(func) and is_list(args) do
+    handle_remote_call(module, func, args, meta, ctx)
   end
 
-  # Fallback for complex expressions (function calls, etc.) - return inspected form
-  defp module_to_string(expr), do: inspect(expr)
+  # Remote call: Module.function(args) - transformed literal function name
+  defp post_transform({{:., _dot_meta, [module, {:literal, _, func}]}, meta, args}, ctx)
+       when is_atom(func) and is_list(args) do
+    handle_remote_call(module, func, args, meta, ctx)
+  end
 
-  defp special_form?(atom) do
-    atom in [
+  # Remote call: Transformed function_call representing :. operator
+  # This catches cases where the inner :. got transformed to a function_call
+  defp post_transform({{:function_call, dot_meta, [module, func_literal]}, meta, args}, ctx)
+       when is_list(args) do
+    if Keyword.get(dot_meta, :name) == "." do
+      func = extract_func_name(func_literal)
+      handle_remote_call(module, func, args, meta, ctx)
+    else
+      # Not a remote call, pass through
+      {{:function_call, dot_meta, [module, func_literal]}, ctx}
+    end
+  end
+
+  defp handle_remote_call(module, func, args, meta, ctx) when is_atom(func) do
+    module_name = extract_module_name(module)
+    func_name = "#{module_name}.#{func}"
+
+    # Check for Enum operations
+    case {module_name, func, args} do
+      {"Enum", :map, [collection, func_arg]} ->
+        node_meta = [op_type: :map] ++ build_meta(meta)
+        {{:collection_op, node_meta, [func_arg, collection]}, ctx}
+
+      {"Enum", :filter, [collection, func_arg]} ->
+        node_meta = [op_type: :filter] ++ build_meta(meta)
+        {{:collection_op, node_meta, [func_arg, collection]}, ctx}
+
+      {"Enum", :reduce, [collection, initial, func_arg]} ->
+        node_meta = [op_type: :reduce] ++ build_meta(meta)
+        {{:collection_op, node_meta, [func_arg, collection, initial]}, ctx}
+
+      _ ->
+        node_meta = [name: func_name] ++ build_meta(meta)
+        {{:function_call, node_meta, args}, ctx}
+    end
+  end
+
+  defp extract_func_name({:literal, _, func}) when is_atom(func), do: func
+  defp extract_func_name(func) when is_atom(func), do: func
+  defp extract_func_name(_), do: :unknown
+
+  # Local function call
+  defp post_transform({func, meta, args}, ctx)
+       when is_atom(func) and is_list(args) and
+              func not in [
+                :fn,
+                :def,
+                :defp,
+                :defmodule,
+                :defmacro,
+                :defmacrop,
+                :if,
+                :unless,
+                :cond,
+                :case,
+                :try,
+                :with,
+                :for,
+                :quote,
+                :unquote,
+                :@,
+                :&
+              ] do
+    node_meta = [name: Atom.to_string(func)] ++ build_meta(meta)
+    {{:function_call, node_meta, args}, ctx}
+  end
+
+  # ----- Anonymous Functions -----
+
+  # After traversal, clauses become {:function_call, [name: "->"], [params_list, body]}
+  defp post_transform({:fn, meta, clauses}, ctx) when is_list(clauses) do
+    case clauses do
+      # Single clause lambda - transformed clause format (check name inside body)
+      [{:function_call, clause_meta, [{:list, _, params}, body]}] ->
+        if Keyword.get(clause_meta, :name) == "->" do
+          param_names = extract_param_names_from_meta_ast(params)
+          node_meta = [params: param_names] ++ build_meta(meta)
+          {{:lambda, node_meta, flatten_body_ast(body)}, ctx}
+        else
+          # Unexpected structure - pass through
+          {{{:fn, meta, clauses}}, ctx}
+        end
+
+      # Original format (shouldn't happen after traversal but handle for safety)
+      [{:->, _clause_meta, [params, body]}] ->
+        param_names = extract_param_names(params)
+        node_meta = [params: param_names] ++ build_meta(meta)
+        {{:lambda, node_meta, flatten_body(body)}, ctx}
+
+      # Multi-clause
+      _ ->
+        arms =
+          Enum.map(clauses, fn
+            {:function_call, clause_meta, [{:list, _, params}, body]} ->
+              if Keyword.get(clause_meta, :name) == "->" do
+                pattern = params_to_pattern_meta_ast(params)
+                arm_meta = build_meta(Keyword.get(clause_meta, :original_meta, []))
+                {:match_arm, [pattern: pattern] ++ arm_meta, flatten_body_ast(body)}
+              else
+                {:match_arm, [], []}
+              end
+
+            {:->, clause_meta, [params, body]} ->
+              pattern = params_to_pattern(params)
+              arm_meta = build_meta(clause_meta)
+              {:match_arm, [pattern: pattern] ++ arm_meta, flatten_body(body)}
+
+            _ ->
+              {:match_arm, [], []}
+          end)
+
+        node_meta = [multi_clause: true] ++ build_meta(meta)
+        {{:lambda, node_meta, arms}, ctx}
+    end
+  end
+
+  # ----- Function Capture -----
+  # Note: Captures ({:&, meta, [body]}) are handled in pre_transform to prevent
+  # Macro.traverse from descending into the body and corrupting &1, &2 references.
+  # The {:lambda, meta, children} nodes returned from pre_transform will pass through here.
+
+  # ----- Module Definition -----
+
+  # After traversal, children are transformed:
+  # - name becomes {:variable, meta, "Module.Name"}
+  # - body becomes {:list, [], [{:tuple, [], [{:literal, :do}, body_ast]}]}
+  defp post_transform({:defmodule, meta, [name, body_container]}, ctx) do
+    module_name = extract_module_name_from_meta_ast(name)
+    body = extract_body_from_transformed(body_container)
+
+    node_meta =
+      [
+        container_type: :module,
+        name: module_name,
+        module: module_name,
+        language: :elixir
+      ] ++ build_meta(meta)
+
+    {{:container, node_meta, flatten_body_ast(body)}, ctx}
+  end
+
+  # ----- Function Definition -----
+
+  # After traversal, the children are already transformed:
+  # - signature becomes {:function_call, [name: "func_name"], [param vars...]}
+  # - body becomes {:list, [], [{:tuple, [], [{:literal, :do}, body_ast]}]}
+  defp post_transform({func_type, meta, [signature, body_container]}, ctx)
+       when func_type in [:def, :defp, :defmacro, :defmacrop] do
+    {func_name, params, guards} = extract_signature_from_meta_ast(signature)
+    visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
+    arity = length(params)
+
+    # Extract body from the transformed container
+    body = extract_body_from_transformed(body_container)
+
+    node_meta =
+      [
+        name: func_name,
+        params: params,
+        visibility: visibility,
+        arity: arity,
+        function: func_name,
+        language: :elixir
+      ] ++ build_meta(meta)
+
+    # Add guards if present
+    node_meta = if guards, do: [guards: guards] ++ node_meta, else: node_meta
+
+    {{:function_def, node_meta, flatten_body_ast(body)}, ctx}
+  end
+
+  # ----- Module Attributes -----
+
+  defp post_transform({:@, meta, [{attr_name, _attr_meta, [value]}]}, ctx) do
+    var_name = "@#{attr_name}"
+    node_meta = [attribute_type: :module_attribute] ++ build_meta(meta)
+    target = {:variable, [], var_name}
+    {{:assignment, node_meta, [target, value]}, ctx}
+  end
+
+  # ----- Try/Rescue -----
+
+  defp post_transform({:try, meta, [[do: try_block] ++ rest]}, ctx) do
+    rescue_clauses = Keyword.get(rest, :rescue, [])
+    catch_clauses = Keyword.get(rest, :catch, [])
+    after_block = Keyword.get(rest, :after)
+
+    handlers = transform_rescue_clauses(rescue_clauses ++ catch_clauses)
+    node_meta = build_meta(meta)
+
+    children = [try_block | handlers]
+    children = if after_block, do: children ++ [after_block], else: children
+
+    {{:exception_handling, node_meta, children}, ctx}
+  end
+
+  # ----- Pipe Operator -----
+
+  defp post_transform({:|>, meta, [left, right]}, ctx) do
+    node_meta = [language: :elixir, hint: :pipe] ++ build_meta(meta)
+    {{:language_specific, node_meta, {:|>, meta, [left, right]}}, ctx}
+  end
+
+  # ----- With Expression -----
+
+  defp post_transform({:with, meta, _args} = ast, ctx) do
+    node_meta = [language: :elixir, hint: :with] ++ build_meta(meta)
+    {{:language_specific, node_meta, ast}, ctx}
+  end
+
+  # ----- For Comprehension -----
+
+  defp post_transform({:for, meta, args}, ctx) do
+    {generators, opts} = extract_comprehension_parts(args)
+    body = Keyword.get(opts, :do)
+
+    case generators do
+      [{:<-, _, [var, collection]}] ->
+        # Simple map-like comprehension
+        var_name = extract_var_name(var)
+        param = {:param, var_name, nil, nil}
+        lambda = {:lambda, [params: [param]], flatten_body(body)}
+        node_meta = [op_type: :map, original_form: :comprehension] ++ build_meta(meta)
+        {{:collection_op, node_meta, [lambda, collection]}, ctx}
+
+      _ ->
+        # Complex comprehension - preserve as language_specific
+        node_meta = [language: :elixir, hint: :comprehension] ++ build_meta(meta)
+        {{:language_specific, node_meta, {:for, meta, args}}, ctx}
+    end
+  end
+
+  # ----- Attribute Access -----
+
+  # Map/struct field access: map.field
+  defp post_transform({{:., _dot_meta, [receiver, field]}, meta, []}, ctx)
+       when is_atom(field) do
+    node_meta = [attribute: Atom.to_string(field)] ++ build_meta(meta)
+    {{:attribute_access, node_meta, [receiver]}, ctx}
+  end
+
+  # ----- Catch-all -----
+
+  # Anything else passes through unchanged
+  defp post_transform(ast, ctx) do
+    {ast, ctx}
+  end
+
+  # ----- Helper Functions -----
+
+  # Build metadata keyword list from Elixir AST meta
+  defp build_meta(elixir_meta) when is_list(elixir_meta) do
+    base = [original_meta: elixir_meta]
+
+    base
+    |> maybe_add(:line, Keyword.get(elixir_meta, :line))
+    |> maybe_add(:col, Keyword.get(elixir_meta, :column))
+  end
+
+  defp build_meta(_), do: []
+
+  defp maybe_add(keyword, _key, nil), do: keyword
+  defp maybe_add(keyword, key, value), do: Keyword.put(keyword, key, value)
+
+  # Check if a value is already a MetaAST node
+  defp meta_ast_node?({type, meta, _children})
+       when is_atom(type) and is_list(meta) and
+              type in [
+                :literal,
+                :variable,
+                :binary_op,
+                :unary_op,
+                :function_call,
+                :conditional,
+                :block,
+                :list,
+                :map,
+                :pair,
+                :tuple,
+                :inline_match,
+                :assignment,
+                :container,
+                :function_def,
+                :lambda,
+                :pattern_match,
+                :match_arm,
+                :early_return,
+                :attribute_access,
+                :language_specific,
+                :collection_op,
+                :loop,
+                :exception_handling,
+                :async_operation,
+                :property,
+                :augmented_assignment
+              ] do
+    true
+  end
+
+  defp meta_ast_node?(_), do: false
+
+  # Ensure a value is a MetaAST node
+  defp ensure_meta_ast(value) when is_integer(value) do
+    {:literal, [subtype: :integer], value}
+  end
+
+  defp ensure_meta_ast(value) when is_float(value) do
+    {:literal, [subtype: :float], value}
+  end
+
+  defp ensure_meta_ast(value) when is_binary(value) do
+    {:literal, [subtype: :string], value}
+  end
+
+  defp ensure_meta_ast(true), do: {:literal, [subtype: :boolean], true}
+  defp ensure_meta_ast(false), do: {:literal, [subtype: :boolean], false}
+  defp ensure_meta_ast(nil), do: {:literal, [subtype: :null], nil}
+
+  defp ensure_meta_ast(atom) when is_atom(atom) do
+    {:literal, [subtype: :symbol], atom}
+  end
+
+  defp ensure_meta_ast({type, meta, _children} = ast)
+       when is_atom(type) and is_list(meta) do
+    if meta_ast_node?(ast), do: ast, else: {:literal, [subtype: :symbol], ast}
+  end
+
+  defp ensure_meta_ast(other), do: other
+
+  # Check if an atom is a special form
+  defp special_form?(name) do
+    name in [
       :__block__,
       :__aliases__,
       :__MODULE__,
@@ -612,612 +1034,232 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       :__STACKTRACE__,
       :_,
       :^,
-      :when
+      :when,
+      :%{},
+      :{}
     ]
   end
 
-  defp cond_to_nested_if([]) do
-    # Empty cond - shouldn't happen but handle gracefully
-    {:ok, {:literal, :null, nil}}
+  # Extract module name from AST
+  defp extract_module_name({:__aliases__, _, parts}) do
+    Enum.map_join(parts, ".", &Atom.to_string/1)
   end
 
-  defp cond_to_nested_if([{:->, _, [[condition], body]} | rest]) do
-    with {:ok, cond_meta, _} <- transform(condition),
-         {:ok, body_meta, _} <- transform(body),
-         {:ok, else_meta} <- cond_to_nested_if(rest) do
-      {:ok, {:conditional, cond_meta, body_meta, else_meta}}
-    end
-  end
+  defp extract_module_name({:variable, _, name}) when is_binary(name), do: name
 
-  defp cond_to_nested_if([_invalid | rest]) do
-    # Skip invalid clauses and continue
-    cond_to_nested_if(rest)
-  end
+  # Handle transformed literal atoms (e.g., :telemetry becomes {:literal, _, :telemetry})
+  defp extract_module_name({:literal, _, atom}) when is_atom(atom), do: Atom.to_string(atom)
 
-  defp transform_case_arms([_ | _] = clauses) do
-    clauses
-    |> Enum.reduce_while({:ok, []}, fn {:->, _, [[pattern], body]}, {:ok, acc} ->
-      with {:ok, pattern_meta, _} <- transform_pattern(pattern),
-           {:ok, body_meta, _} <- transform(body) do
-        arm = {:match_arm, pattern_meta, nil, body_meta}
-        {:cont, {:ok, [arm | acc]}}
-      else
-        error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, arms} -> {:ok, Enum.reverse(arms)}
-      error -> error
-    end
-  end
+  defp extract_module_name(atom) when is_atom(atom), do: Atom.to_string(atom)
+  defp extract_module_name({name, _, _}) when is_atom(name), do: Atom.to_string(name)
+  defp extract_module_name(_), do: "unknown"
 
-  # [TODO] this is a stub, needs better handling
-  defp transform_case_arms(_clauses), do: {:ok, []}
-
-  defp transform_pattern(pattern) do
-    # Pattern matching patterns - similar to regular transforms but allow wildcards
-    case pattern do
-      # Wildcard pattern
-      {:_, _, _} ->
-        {:ok, :_, %{}}
-
-      # Pin operator: ^variable
-      {:^, meta, [var]} ->
-        with {:ok, var_meta, var_metadata} <- transform(var) do
-          {:ok, {:pin, var_meta}, Map.merge(%{elixir_meta: meta}, var_metadata)}
-        end
-
-      # Tuple pattern: {x, y, z}
-      {:{}, _meta, elements} ->
-        with {:ok, elements_meta} <- transform_pattern_list(elements) do
-          {:ok, {:tuple, elements_meta}, %{}}
-        end
-
-      # Two-element tuple shorthand: {x, y}
-      {left, right} when not is_atom(left) or not is_atom(right) ->
-        with {:ok, left_meta, _} <- transform_pattern(left),
-             {:ok, right_meta, _} <- transform_pattern(right) do
-          {:ok, {:tuple, [left_meta, right_meta]}, %{}}
-        end
-
-      # List pattern: [h | t] or [1, 2, 3]
-      [_ | _] = list ->
-        transform_list_pattern(list)
-
-      [] ->
-        {:ok, {:literal, :collection, []}, %{collection_type: :list}}
-
-      # Variable or literal
-      _ ->
-        transform(pattern)
-    end
-  end
-
-  defp transform_pattern_list(patterns) when is_list(patterns) do
-    patterns
-    |> Enum.reduce_while({:ok, []}, fn pattern, {:ok, acc} ->
-      case transform_pattern(pattern) do
-        {:ok, pattern_meta, _} -> {:cont, {:ok, [pattern_meta | acc]}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
-    |> case do
-      {:ok, patterns} -> {:ok, Enum.reverse(patterns)}
-      error -> error
-    end
-  end
-
-  defp transform_list_pattern(list) do
-    # Check if it's a cons pattern [head | tail]
-    case list do
-      [head | tail] when is_list(tail) and tail != [] ->
-        # Check if tail is a single variable (cons pattern)
-        case tail do
-          [{var, _, context}] when is_atom(var) and is_atom(context) ->
-            # This is [head | tail] pattern
-            with {:ok, head_meta, _} <- transform_pattern(head),
-                 {:ok, tail_meta, _} <- transform_pattern({var, [], context}) do
-              {:ok, {:cons_pattern, head_meta, tail_meta}, %{}}
-            end
-
-          _ ->
-            # List with multiple elements - transform each
-            with {:ok, elements_meta} <- transform_pattern_list(list) do
-              {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
-            end
-        end
-
-      [single] ->
-        # Single element list
-        with {:ok, element_meta, _} <- transform_pattern(single) do
-          {:ok, {:literal, :collection, [element_meta]}, %{collection_type: :list}}
-        end
+  # Extract parameter names (for lambdas)
+  defp extract_param_names(params) when is_list(params) do
+    Enum.map(params, fn
+      {name, _, context} when is_atom(name) and is_atom(context) ->
+        {:param, Atom.to_string(name), nil, nil}
 
       _ ->
-        # Empty or literal list
-        with {:ok, elements_meta} <- transform_pattern_list(list) do
-          {:ok, {:literal, :collection, elements_meta}, %{collection_type: :list}}
-        end
-    end
-  end
-
-  defp transform_fn({:fn, _meta, clauses}) do
-    # Anonymous function with one or more clauses
-    with {:ok, transformed_clauses} <- transform_fn_clauses(clauses) do
-      # For single clause, return simple lambda
-      # For multiple clauses, return pattern_match lambda
-      case transformed_clauses do
-        [single_clause] ->
-          {:ok, single_clause, %{}}
-
-        multiple_clauses ->
-          {:ok, {:language_specific, :elixir, {:fn, nil, clauses}, :multi_clause_fn},
-           %{clauses: multiple_clauses}}
-      end
-    end
-  end
-
-  defp transform_fn_clauses(clauses) do
-    clauses
-    |> Enum.reduce_while({:ok, []}, fn {:->, _, [params, body]}, {:ok, acc} ->
-      # Extract guard if present
-      {params_list, guard} = extract_guard_from_params(params)
-
-      with {:ok, params_meta} <- transform_fn_params(params_list),
-           {:ok, guard_meta} <- transform_guard(guard),
-           {:ok, body_meta, _} <- transform(body) do
-        # Create lambda - use match_arm if guard present
-        lambda =
-          if guard_meta do
-            # Lambda clause with guard
-            # Pattern is just the params as a tuple or single param
-            pattern =
-              case params_meta do
-                [single] -> single
-                multiple -> {:tuple, multiple}
-              end
-
-            {:match_arm, pattern, guard_meta, body_meta}
-          else
-            # Simple lambda without guard - use 3-tuple with empty captures
-            {:lambda, params_meta, [], body_meta}
-          end
-
-        {:cont, {:ok, [lambda | acc]}}
-      else
-        error -> {:halt, error}
-      end
+        {:param, "_", nil, nil}
     end)
-    |> case do
-      {:ok, clauses} -> {:ok, Enum.reverse(clauses)}
-      error -> error
-    end
   end
 
-  defp extract_guard_from_params(params) do
-    # Check if any parameter has a guard (when clause)
-    # In Elixir AST: fn x when is_integer(x) -> ... end
-    # params is [{:when, _, [param, guard_expr]}] or just [param1, param2, ...]
-    case params do
-      [{:when, _, params_part_and_guard_expr}] ->
-        {params, [guard_expr]} = Enum.split(params_part_and_guard_expr, -1)
-        {params, guard_expr}
+  defp extract_param_names(_), do: []
+
+  # Convert params list to pattern for multi-clause lambdas
+  defp params_to_pattern([single]), do: single
+  defp params_to_pattern(params), do: {:tuple, [], params}
+
+  # Extract parameter names from already-transformed MetaAST params
+  defp extract_param_names_from_meta_ast(params) when is_list(params) do
+    Enum.map(params, fn
+      {:variable, _, name} -> {:param, name, nil, nil}
+      _ -> {:param, "_", nil, nil}
+    end)
+  end
+
+  defp extract_param_names_from_meta_ast(_), do: []
+
+  # Convert transformed params list to pattern for multi-clause lambdas
+  defp params_to_pattern_meta_ast([single]), do: single
+  defp params_to_pattern_meta_ast(params), do: {:tuple, [], params}
+
+  # Extract variable name
+  defp extract_var_name({name, _, _}) when is_atom(name), do: Atom.to_string(name)
+  defp extract_var_name(_), do: "_"
+
+  # Flatten body to list of statements (for raw Elixir AST)
+  defp flatten_body({:__block__, _, statements}), do: statements
+  defp flatten_body({:block, _, statements}), do: statements
+  defp flatten_body(nil), do: []
+  defp flatten_body(single), do: [single]
+
+  # Flatten body that's already transformed to MetaAST
+  defp flatten_body_ast({:block, _, statements}), do: statements
+  defp flatten_body_ast(nil), do: []
+  defp flatten_body_ast({:literal, [subtype: :null], nil}), do: []
+  defp flatten_body_ast(single), do: [single]
+
+  # Extract function signature info from transformed MetaAST
+  # With args: signature becomes {:function_call, [name: "func_name"], [params...]}
+  # Without args: signature becomes {:variable, meta, "func_name"}
+  defp extract_signature_from_meta_ast({:function_call, meta, params}) do
+    func_name = Keyword.get(meta, :name, "anonymous")
+    # Convert parameter MetaAST nodes to {:param, name, nil, nil} format
+    param_list =
+      Enum.map(params, fn
+        {:variable, _, name} -> {:param, name, nil, nil}
+        _ -> {:param, "_", nil, nil}
+      end)
+
+    {func_name, param_list, nil}
+  end
+
+  # Zero-arity function: signature becomes a variable
+  defp extract_signature_from_meta_ast({:variable, _, func_name}) do
+    {func_name, [], nil}
+  end
+
+  # Handle guarded functions - signature would include guard info
+  defp extract_signature_from_meta_ast(_), do: {"anonymous", [], nil}
+
+  # Extract module name from transformed MetaAST
+  # The name becomes {:variable, meta, "Module.Name"}
+  defp extract_module_name_from_meta_ast({:variable, _, name}), do: name
+
+  defp extract_module_name_from_meta_ast({:literal, _, atom}) when is_atom(atom),
+    do: Atom.to_string(atom)
+
+  defp extract_module_name_from_meta_ast(_), do: "unknown"
+
+  # Extract body from transformed container
+  # Body becomes {:list, [], [{:tuple, [], [{:literal, :do}, body_ast]}]}
+  defp extract_body_from_transformed({:list, _, items}) do
+    # Find the :do item
+    Enum.find_value(items, nil, fn
+      {:tuple, _, [{:literal, [subtype: :symbol], :do}, body]} -> body
+      {:pair, _, [{:literal, [subtype: :symbol], :do}, body]} -> body
+      _ -> nil
+    end)
+  end
+
+  defp extract_body_from_transformed([{:tuple, _, [{:literal, [subtype: :symbol], :do}, body]}]) do
+    body
+  end
+
+  defp extract_body_from_transformed(_), do: nil
+
+  # Extract do/else branches from clauses (handles both raw keyword and transformed list)
+  defp extract_do_else(clauses) when is_list(clauses) do
+    # Check if this is a keyword list [do: x, else: y] or transformed list
+    case clauses do
+      [{key, _value} | _] when is_atom(key) ->
+        # Raw keyword list
+        then_branch = Keyword.get(clauses, :do)
+        else_branch = Keyword.get(clauses, :else)
+        {then_branch, else_branch}
 
       _ ->
-        # No guard
-        {params, nil}
+        # Not a keyword list - might be transformed or something else
+        {nil, nil}
     end
   end
 
-  defp transform_guard(nil), do: {:ok, nil}
+  defp extract_do_else({:list, _, items}) do
+    # Transformed list: {:list, [], [{:tuple, [], [{:literal, :do}, x]}, ...]}
+    then_branch =
+      Enum.find_value(items, nil, fn
+        {:tuple, _, [{:literal, [subtype: :symbol], :do}, body]} -> body
+        {:pair, _, [{:literal, [subtype: :symbol], :do}, body]} -> body
+        _ -> nil
+      end)
 
-  defp transform_guard(guard_expr) do
-    case transform(guard_expr) do
-      {:ok, guard_meta, _} -> {:ok, guard_meta}
-      error -> error
-    end
+    else_branch =
+      Enum.find_value(items, nil, fn
+        {:tuple, _, [{:literal, [subtype: :symbol], :else}, body]} -> body
+        {:pair, _, [{:literal, [subtype: :symbol], :else}, body]} -> body
+        _ -> nil
+      end)
+
+    {then_branch, else_branch}
   end
 
-  defp transform_fn_params(params) do
-    params
-    |> Enum.reduce_while({:ok, []}, fn param, {:ok, acc} ->
-      case param do
-        # guards
-        # {key, %{} = map}, {into, path, errors} when not is_struct(map)
-        {:when, _guard_meta, _} ->
-          {params_list, _guard} = extract_guard_from_params(param)
-          {:cont, {:ok, [transform_fn_params(params_list) | acc]}}
+  defp extract_do_else(_), do: {nil, nil}
 
-        # Simple variable: x, acc, etc.
-        {name, _meta, context} when is_atom(name) and is_atom(context) ->
-          {:cont, {:ok, [{:param, Atom.to_string(name), nil, nil} | acc]}}
+  # Extract do clauses from wrapper (handles both raw keyword and transformed)
+  defp extract_do_clauses(do: clauses) when is_list(clauses), do: clauses
+  defp extract_do_clauses(do: single), do: [single]
 
-        # Map match: %{} = map
-        # {:=, [line: 231], [{:%{}, [line: 231], []}, {:map, [line: 231], nil}]}
-        {:=, _meta, [{_pattern, _, pattern_context}, {match, _match_meta, _match_context}]}
-        when is_list(pattern_context) ->
-          {:cont, {:ok, [{:param, Atom.to_string(match), nil, nil} | acc]}}
-
-        {:=, _meta, [{match, _match_meta, _match_context}, {_pattern, _, pattern_context}]}
-        when is_list(pattern_context) ->
-          {:cont, {:ok, [{:param, Atom.to_string(match), nil, nil} | acc]}}
-
-        {:=, _meta, [{_pattern, _pattern_context}, {match, _match_meta, _match_context}]} ->
-          {:cont, {:ok, [{:param, Atom.to_string(match), nil, nil} | acc]}}
-
-        # Map pattern: %{key: value}, %{"key" => value}, etc.
-        {:%{}, _, _fields} = map_pattern ->
-          # Map patterns in params - preserve as pattern metadata
-          {:cont, {:ok, [{:param, "_map_pattern", nil, %{pattern: map_pattern}} | acc]}}
-
-        # Tuple pattern: {x, y}, {fun, arity}, etc.
-        {:{}, _, _elements} = tuple_pattern ->
-          # For tuple patterns, create a param with pattern metadata
-          # The pattern will be preserved but we use a generic name
-          {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: tuple_pattern}} | acc]}}
-
-        # Two-element tuple (special syntax) or match: `{x, y}` or `_ = %{}`
-        {left, right} when not is_list(left) ->
-          {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: {left, right}}} | acc]}}
-
-        # Match (reversed order)
-        {left, right} when not is_list(right) ->
-          {:cont, {:ok, [{:param, "_pattern", nil, %{pattern: {right, left}}} | acc]}}
-
-        literal when is_number(literal) or is_atom(literal) or is_binary(literal) ->
-          {:cont, transform(literal)}
-
-        _ ->
-          {:halt, {:error, "Unsupported parameter pattern: #{inspect(param)}"}}
-      end
+  defp extract_do_clauses({:list, _, items}) do
+    # Find :do item and extract its content
+    Enum.find_value(items, [], fn
+      {:tuple, _, [{:literal, [subtype: :symbol], :do}, {:list, _, clauses}]} -> clauses
+      {:pair, _, [{:literal, [subtype: :symbol], :do}, {:list, _, clauses}]} -> clauses
+      {:tuple, _, [{:literal, [subtype: :symbol], :do}, body]} -> [body]
+      {:pair, _, [{:literal, [subtype: :symbol], :do}, body]} -> [body]
+      _ -> nil
     end)
-    |> case do
-      {:ok, params} -> {:ok, Enum.reverse(params)}
-      error -> error
+  end
+
+  defp extract_do_clauses(_), do: []
+
+  # Transform cond clauses to nested conditionals
+  defp cond_to_nested_conditional([]), do: {:literal, [subtype: :null], nil}
+
+  defp cond_to_nested_conditional([{:->, _, [[condition], body]} | rest]) do
+    else_branch = cond_to_nested_conditional(rest)
+    {:conditional, [], [condition, body, else_branch]}
+  end
+
+  # Handle transformed cond clauses
+  defp cond_to_nested_conditional([
+         {:function_call, meta, [{:list, _, [condition]}, body]} | rest
+       ]) do
+    if Keyword.get(meta, :name) == "->" do
+      else_branch = cond_to_nested_conditional(rest)
+      {:conditional, [], [condition, body, else_branch]}
+    else
+      {:literal, [subtype: :null], nil}
     end
   end
 
-  # Comprehensions - M2.2 Extended Layer
+  defp cond_to_nested_conditional(_), do: {:literal, [subtype: :null], nil}
 
-  defp transform_comprehension(args) do
-    # for comprehension: for x <- collection, do: expr
-    # Extract generators and body
-    {generators, opts} = extract_comprehension_parts(args)
-    body = Keyword.get(opts, :do)
-
-    case generators do
-      [{:<-, _, [var, collection]}] ->
-        # Simple map-like comprehension
-        with {:ok, var_name} <- extract_var_name(var),
-             {:ok, collection_meta, _} <- transform(collection),
-             {:ok, body_meta, _} <- transform(body) do
-          # Build lambda for the body
-          lambda = {:lambda, [{:param, var_name, nil, nil}], [], body_meta}
-          {:ok, {:collection_op, :map, lambda, collection_meta}, %{original_form: :comprehension}}
-        end
-
-      _ ->
-        # Complex comprehension - use language_specific
-        {:ok, {:language_specific, :elixir, {:for, nil, args}, :comprehension}, %{}}
-    end
+  # Transform rescue/catch clauses
+  defp transform_rescue_clauses(clauses) do
+    Enum.map(clauses, fn
+      {:->, meta, [[pattern], body]} ->
+        node_meta = [pattern: pattern] ++ build_meta(meta)
+        {:match_arm, node_meta, flatten_body(body)}
+    end)
   end
 
+  # Extract comprehension parts
   defp extract_comprehension_parts(args) do
-    # Separate generators from options
-    {generators, _rest} =
+    {generators, rest} =
       Enum.split_while(args, fn
         {:<-, _, _} -> true
         _ -> false
       end)
 
     opts =
-      List.last(args)
-      |> case do
-        opts when is_list(opts) -> opts
+      case List.last(rest) do
+        kw when is_list(kw) -> kw
         _ -> []
       end
 
     {generators, opts}
   end
 
-  defp extract_var_name({var, _, _}) when is_atom(var) do
-    {:ok, Atom.to_string(var)}
+  # Extract captured function name
+  defp extract_captured_function_name({{:., _, [module, func]}, _, []}) do
+    "#{extract_module_name(module)}.#{func}"
   end
 
-  defp extract_var_name(_), do: {:error, "Complex pattern not supported"}
-
-  # Enum Operations - M2.2 Extended Layer
-
-  defp transform_enum_map(collection, fun) do
-    with {:ok, collection_meta, _} <- transform(collection),
-         {:ok, fun_meta, _} <- transform(fun) do
-      {:ok, {:collection_op, :map, fun_meta, collection_meta}, %{}}
-    end
+  defp extract_captured_function_name({func, _, _}) when is_atom(func) do
+    Atom.to_string(func)
   end
 
-  defp transform_enum_filter(collection, fun) do
-    with {:ok, collection_meta, _} <- transform(collection),
-         {:ok, fun_meta, _} <- transform(fun) do
-      {:ok, {:collection_op, :filter, fun_meta, collection_meta}, %{}}
-    end
-  end
-
-  defp transform_enum_reduce(collection, initial, fun) do
-    with {:ok, collection_meta, _} <- transform(collection),
-         {:ok, initial_meta, _} <- transform(initial),
-         {:ok, fun_meta, _} <- transform(fun) do
-      {:ok, {:collection_op, :reduce, fun_meta, collection_meta, initial_meta}, %{}}
-    end
-  end
-
-  # with expressions - M2.3 Native Layer
-
-  defp transform_with(args) do
-    # with is complex and Elixir-specific - preserve as language_specific
-    {:ok, {:language_specific, :elixir, {:with, nil, args}, :with}, %{}}
-  end
-
-  # try/rescue/catch - M2.2 Extended Layer
-  defp transform_try(args) do
-    # try/rescue in Elixir: try do ... rescue ... end
-    # args is [[do: try_block, rescue: rescue_clauses]]
-    clauses = List.first(args, [])
-    try_block = Keyword.get(clauses, :do)
-    rescue_clauses = Keyword.get(clauses, :rescue, [])
-    catch_clauses = Keyword.get(clauses, :catch, [])
-    else_block = Keyword.get(clauses, :else)
-    after_block = Keyword.get(clauses, :after)
-
-    with {:ok, try_meta, _} <- transform(try_block),
-         {:ok, catch_list} <- transform_rescue_clauses(rescue_clauses ++ catch_clauses),
-         {:ok, else_meta, _} <- transform_or_nil(else_block) do
-      # Transform to exception_handling node
-      # Note: ignoring after_block for now as it doesn't fit MetaAST model
-      {:ok, {:exception_handling, try_meta, catch_list, else_meta}, %{after: after_block}}
-    end
-  end
-
-  defp transform_rescue_clauses(clauses) do
-    clauses
-    |> Enum.reduce_while({:ok, []}, fn clause, {:ok, acc} ->
-      case clause do
-        # Match on exception pattern: Exception -> body
-        # or: _ -> body (catch-all)
-        {:->, _, [[pattern], body]} ->
-          with {:ok, pattern_meta, _} <- transform_pattern(pattern),
-               {:ok, body_meta, _} <- transform(body) do
-            # MetaAST spec requires 3-tuple: {exception_pattern, var, body}
-            # In Elixir, the pattern IS the binding, so we use the pattern as both
-            # For _ pattern, use :_ atom
-            exception_type = extract_exception_type(pattern_meta)
-            {:cont, {:ok, [{exception_type, pattern_meta, body_meta} | acc]}}
-          else
-            error -> {:halt, error}
-          end
-
-        _ ->
-          {:halt, {:error, "Invalid rescue clause: #{inspect(clause)}"}}
-      end
-    end)
-    |> case do
-      {:ok, clauses} -> {:ok, Enum.reverse(clauses)}
-      error -> error
-    end
-  end
-
-  # Extract exception type from pattern
-  # _ -> :_, Variable name -> :error, specific exception -> exception name
-  defp extract_exception_type(:_), do: :_
-  defp extract_exception_type({:variable, name}), do: String.to_atom(name)
-  defp extract_exception_type(_), do: :error
-
-  # Helper to extract function name from signature
-  # Handle guarded functions: def foo(x) when guard -> body
-  # The signature is {:when, _, [{:foo, _, args}, guard]}
-  defp extract_function_name({:when, _, [{name, _, _args}, _guard]}) when is_atom(name) do
-    Atom.to_string(name)
-  end
-
-  defp extract_function_name({name, _, _}) when is_atom(name), do: Atom.to_string(name)
-  defp extract_function_name({name, _, _args}) when is_atom(name), do: Atom.to_string(name)
-  defp extract_function_name(nil), do: "anonymous"
-  defp extract_function_name(_), do: "unknown"
-
-  # Helper to extract function parameters from signature
-  defp extract_function_params({:when, _, [{_name, _, args}, _guard]}), do: params_to_meta(args)
-  defp extract_function_params({_name, _, args}) when is_list(args), do: params_to_meta(args)
-  defp extract_function_params({_name, _, nil}), do: []
-  defp extract_function_params(_), do: []
-
-  defp params_to_meta(nil), do: []
-  defp params_to_meta([]), do: []
-
-  defp params_to_meta(args) when is_list(args) do
-    Enum.map(args, fn
-      {name, _, _} when is_atom(name) -> {:param, Atom.to_string(name), nil, nil}
-      _ -> {:param, "_", nil, nil}
-    end)
-  end
-
-  # Helper to transform map key-value pairs
-  defp transform_map_pairs(pairs) do
-    pairs
-    |> Enum.reduce_while({:ok, []}, fn pair, {:ok, acc} ->
-      case pair do
-        {key, value} ->
-          with {:ok, key_meta, _} <- transform(key),
-               {:ok, value_meta, _} <- transform(value) do
-            {:cont, {:ok, [{key_meta, value_meta} | acc]}}
-          else
-            error -> {:halt, error}
-          end
-
-        unexpected ->
-          require Logger
-          Logger.notice("Unexpected map transform: " <> inspect(unexpected))
-          {:cont, {:ok, acc}}
-      end
-    end)
-    |> case do
-      {:ok, pairs} -> {:ok, Enum.reverse(pairs)}
-      error -> error
-    end
-  end
-
-  # Helper to add location information to MetaAST nodes
-  # Elixir AST metadata is a keyword list with :line key
-  defp add_location(ast, metadata) when is_list(metadata) do
-    case Keyword.get(metadata, :line) do
-      nil -> ast
-      line when is_integer(line) -> AST.with_location(ast, %{line: line, language: :elixir})
-      _ -> ast
-    end
-  end
-
-  defp add_location(ast, _), do: ast
-
-  # Helper to add location and context metadata to MetaAST nodes
-  defp add_location_with_context(ast, metadata, context)
-       when is_list(metadata) and is_map(context) do
-    line = Keyword.get(metadata, :line)
-
-    loc = if line, do: Map.put(context, :line, line), else: context
-
-    if map_size(loc) > 0 do
-      AST.with_location(ast, loc)
-    else
-      ast
-    end
-  end
-
-  defp add_location_with_context(ast, _metadata, context) when is_map(context) do
-    if map_size(context) > 0 do
-      AST.with_location(ast, context)
-    else
-      ast
-    end
-  end
-
-  defp add_location_with_context(ast, metadata, _context), do: add_location(ast, metadata)
-
-  # Function capture transformation
-  # Converts &(...) syntax to equivalent anonymous functions
-
-  # Simple argument reference: &1, &2, etc.
-  defp transform_function_capture(n, _meta) when is_integer(n) do
-    # &1 becomes fn arg_1 -> arg_1 end
-    param_name = "arg_#{n}"
-    param = {:param, param_name, nil, nil}
-    body = {:variable, param_name}
-    {:ok, {:lambda, [param], [], body}, %{capture_form: :argument_reference}}
-  end
-
-  # Named function capture: &Module.function/arity or &function/arity
-  defp transform_function_capture({:/, _, [function_ref, arity]}, _meta)
-       when is_integer(arity) do
-    # Extract function name
-    function_name =
-      case function_ref do
-        {{:., _, [module, func]}, _, []} ->
-          # Remote function: &Module.function/arity
-          module_name = module_to_string(module)
-          func_name = Atom.to_string(func)
-          "#{module_name}.#{func_name}"
-
-        {func, _, _} when is_atom(func) ->
-          # Local function: &function/arity
-          Atom.to_string(func)
-
-        _ ->
-          "unknown"
-      end
-
-    # Create lambda with N parameters that calls the function
-    params = for i <- 1..arity//1, do: {:param, "arg_#{i}", nil, nil}
-    args = for i <- 1..arity//1, do: {:variable, "arg_#{i}"}
-    body = {:function_call, function_name, args}
-
-    {:ok, {:lambda, params, [], body}, %{capture_form: :named_function}}
-  end
-
-  # Complex capture: &(&1 + 1), &(&1 + &2), etc.
-  defp transform_function_capture(body, _meta) do
-    # Find all argument captures in the body
-    arg_nums = find_capture_arguments(body)
-
-    if Enum.empty?(arg_nums) do
-      # No captures found - this might be an error or edge case
-      # Just transform the body as-is and wrap in a zero-arity lambda
-      with {:ok, body_meta, _} <- transform(body) do
-        {:ok, {:lambda, [], [], body_meta}, %{capture_form: :no_arguments}}
-      end
-    else
-      # Determine arity from maximum argument number
-      arity = Enum.max(arg_nums)
-
-      # Generate unique parameter names
-      params = for i <- 1..arity, do: {:param, "arg_#{i}", nil, nil}
-
-      # Transform body, replacing captures with parameter references
-      with {:ok, body_meta, _} <- transform_capture_body(body, arity) do
-        {:ok, {:lambda, params, [], body_meta}, %{capture_form: :expression, arity: arity}}
-      end
-    end
-  end
-
-  # Find all &N references in the capture body
-  defp find_capture_arguments(ast) do
-    find_capture_arguments(ast, MapSet.new())
-  end
-
-  defp find_capture_arguments({:&, _, [n]}, acc) when is_integer(n) do
-    MapSet.put(acc, n)
-  end
-
-  defp find_capture_arguments({:&, _, [_body]}, acc) do
-    # Nested capture - don't recurse into it
-    acc
-  end
-
-  defp find_capture_arguments(tuple, acc) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.reduce(acc, &find_capture_arguments/2)
-  end
-
-  defp find_capture_arguments(list, acc) when is_list(list) do
-    Enum.reduce(list, acc, &find_capture_arguments/2)
-  end
-
-  defp find_capture_arguments(_other, acc), do: acc
-
-  # Transform the capture body, replacing &N with parameter variables
-  defp transform_capture_body(ast, arity) do
-    transformed_ast = replace_capture_args(ast, arity)
-    transform(transformed_ast)
-  end
-
-  # Replace &N with variable references
-  defp replace_capture_args({:&, meta, [n]}, _arity) when is_integer(n) do
-    # Replace &1 with variable reference (use atom for variable name)
-    {String.to_atom("arg_#{n}"), meta, nil}
-  end
-
-  defp replace_capture_args({:&, _, [_body]} = nested_capture, _arity) do
-    # Nested capture - don't modify it, will be transformed later
-    nested_capture
-  end
-
-  defp replace_capture_args(tuple, arity) when is_tuple(tuple) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.map(&replace_capture_args(&1, arity))
-    |> List.to_tuple()
-  end
-
-  defp replace_capture_args(list, arity) when is_list(list) do
-    Enum.map(list, &replace_capture_args(&1, arity))
-  end
-
-  defp replace_capture_args(other, _arity), do: other
+  defp extract_captured_function_name(_), do: "unknown"
 end

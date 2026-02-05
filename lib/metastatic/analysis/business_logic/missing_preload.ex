@@ -84,6 +84,29 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
   end
 
   @impl true
+  # New 3-tuple format: {:collection_op, [op_type: :map], [fn, collection]}
+  def analyze({:collection_op, meta, [_fn | rest]} = node, _context) when is_list(meta) do
+    op_type = Keyword.get(meta, :op_type)
+    collection = List.last(rest)
+
+    if op_type == :map and from_database_query?(collection) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :performance,
+          severity: :warning,
+          message: "Mapping over database results without eager loading - potential N+1 queries",
+          node: node,
+          metadata: %{
+            suggestion: "Use preload/include/select_related to eager load associations"
+          }
+        )
+      ]
+    else
+      []
+    end
+  end
+
   # Handle location-aware nodes
   def analyze({:collection_op, :map, _fn, collection, _loc} = node, _context) do
     # Check if collection comes from DB query
@@ -125,6 +148,35 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
     end
   end
 
+  # New 3-tuple loop format: {:loop, [loop_type: :for], [iterator, collection, body]}
+  def analyze({:loop, meta, children} = node, _context) when is_list(meta) do
+    loop_type = Keyword.get(meta, :loop_type)
+
+    # collection is typically second child
+    collection =
+      case children do
+        [_iterator, collection | _] -> collection
+        _ -> nil
+      end
+
+    if loop_type == :for and collection != nil and from_database_query?(collection) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :performance,
+          severity: :warning,
+          message: "Looping over database results - ensure associations are preloaded",
+          node: node,
+          metadata: %{
+            suggestion: "Add eager loading to avoid N+1 queries"
+          }
+        )
+      ]
+    else
+      []
+    end
+  end
+
   def analyze({:loop, :for, _iterator, collection, _body} = node, _context) do
     # Check if iterating over DB results
     if from_database_query?(collection) do
@@ -147,6 +199,13 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
 
   def analyze(_node, _context), do: []
 
+  # New 3-tuple: {:function_call, [name: name], args}
+  defp from_database_query?({:function_call, meta, _args}) when is_list(meta) do
+    fn_name = Keyword.get(meta, :name, "")
+    fn_lower = String.downcase(to_string(fn_name))
+    String.contains?(fn_lower, @query_functions)
+  end
+
   # Handle location-aware nodes
   defp from_database_query?({:function_call, fn_name, _args, _loc}) when is_binary(fn_name) do
     fn_lower = String.downcase(fn_name)
@@ -156,6 +215,20 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
   defp from_database_query?({:function_call, fn_name, _args}) when is_binary(fn_name) do
     fn_lower = String.downcase(fn_name)
     String.contains?(fn_lower, @query_functions)
+  end
+
+  # New 3-tuple: {:variable, meta, name}
+  defp from_database_query?({:variable, _meta, name}) when is_binary(name) do
+    name_lower = String.downcase(name)
+
+    String.contains?(name_lower, [
+      "user",
+      "post",
+      "item",
+      "record",
+      "result",
+      "data"
+    ])
   end
 
   defp from_database_query?({:variable, name, _loc}) when is_binary(name) do

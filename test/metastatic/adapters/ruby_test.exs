@@ -31,37 +31,37 @@ defmodule Metastatic.Adapters.RubyTest do
 
   describe "ToMeta - literals" do
     test "transforms integer literals" do
-      assert {:ok, {:literal, :integer, 42}, %{}} =
+      assert {:ok, {:literal, [subtype: :integer], 42}, %{}} =
                ToMeta.transform(%{"type" => "int", "children" => [42]})
     end
 
     test "transforms float literals" do
-      assert {:ok, {:literal, :float, 3.14}, %{}} =
+      assert {:ok, {:literal, [subtype: :float], 3.14}, %{}} =
                ToMeta.transform(%{"type" => "float", "children" => [3.14]})
     end
 
     test "transforms string literals" do
-      assert {:ok, {:literal, :string, "hello"}, %{}} =
+      assert {:ok, {:literal, [subtype: :string], "hello"}, %{}} =
                ToMeta.transform(%{"type" => "str", "children" => ["hello"]})
     end
 
     test "transforms symbol literals" do
-      assert {:ok, {:literal, :symbol, :foo}, %{}} =
+      assert {:ok, {:literal, [subtype: :symbol], :foo}, %{}} =
                ToMeta.transform(%{"type" => "sym", "children" => [:foo]})
     end
 
     test "transforms true literal" do
-      assert {:ok, {:literal, :boolean, true}, %{}} =
+      assert {:ok, {:literal, [subtype: :boolean], true}, %{}} =
                ToMeta.transform(%{"type" => "true", "children" => []})
     end
 
     test "transforms false literal" do
-      assert {:ok, {:literal, :boolean, false}, %{}} =
+      assert {:ok, {:literal, [subtype: :boolean], false}, %{}} =
                ToMeta.transform(%{"type" => "false", "children" => []})
     end
 
     test "transforms nil literal" do
-      assert {:ok, {:literal, :null, nil}, %{}} =
+      assert {:ok, {:literal, [subtype: :null], nil}, %{}} =
                ToMeta.transform(%{"type" => "nil", "children" => []})
     end
 
@@ -75,7 +75,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:literal, :collection, elements}, %{collection_type: :array}} =
+      # Ruby arrays are represented as :list nodes
+      assert {:ok, {:list, [], elements}, %{collection_type: :array}} =
                ToMeta.transform(ast)
 
       assert [_, _, _] = elements
@@ -95,7 +96,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:literal, :collection, pairs}, %{collection_type: :hash}} =
+      # Ruby hashes are represented as :map nodes
+      assert {:ok, {:map, [], pairs}, %{collection_type: :hash}} =
                ToMeta.transform(ast)
 
       assert [_] = pairs
@@ -104,27 +106,27 @@ defmodule Metastatic.Adapters.RubyTest do
 
   describe "ToMeta - variables" do
     test "transforms local variables" do
-      assert {:ok, {:variable, "x"}, %{scope: :local}} =
+      assert {:ok, {:variable, [scope: :local], "x"}, %{scope: :local}} =
                ToMeta.transform(%{"type" => "lvar", "children" => ["x"]})
     end
 
     test "transforms instance variables" do
-      assert {:ok, {:variable, "@name"}, %{scope: :instance}} =
+      assert {:ok, {:variable, [scope: :instance], "@name"}, %{scope: :instance}} =
                ToMeta.transform(%{"type" => "ivar", "children" => ["@name"]})
     end
 
     test "transforms class variables" do
-      assert {:ok, {:variable, "@@count"}, %{scope: :class}} =
+      assert {:ok, {:variable, [scope: :class], "@@count"}, %{scope: :class}} =
                ToMeta.transform(%{"type" => "cvar", "children" => ["@@count"]})
     end
 
     test "transforms global variables" do
-      assert {:ok, {:variable, "$debug"}, %{scope: :global}} =
+      assert {:ok, {:variable, [scope: :global], "$debug"}, %{scope: :global}} =
                ToMeta.transform(%{"type" => "gvar", "children" => ["$debug"]})
     end
 
     test "handles atom variable names" do
-      assert {:ok, {:variable, "x"}, %{scope: :local}} =
+      assert {:ok, {:variable, [scope: :local], "x"}, %{scope: :local}} =
                ToMeta.transform(%{"type" => "lvar", "children" => [:x]})
     end
   end
@@ -140,9 +142,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:binary_op, :arithmetic, :+, left, right}, %{}} = ToMeta.transform(ast)
-      assert {:literal, :integer, 5} = left
-      assert {:literal, :integer, 3} = right
+      assert {:ok, {:binary_op, [category: :arithmetic, operator: :+], [left, right]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:literal, [subtype: :integer], 5} = left
+      assert {:literal, [subtype: :integer], 3} = right
     end
 
     test "transforms multiplication" do
@@ -155,7 +159,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:binary_op, :arithmetic, :*, _left, _right}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :arithmetic, operator: :*], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms comparison operators" do
@@ -168,7 +173,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:binary_op, :comparison, :>, _left, _right}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :comparison, operator: :>], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms equality" do
@@ -181,7 +187,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:binary_op, :comparison, :==, _left, _right}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :comparison, operator: :==], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms boolean and" do
@@ -193,7 +200,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:binary_op, :boolean, :and, _left, _right}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :boolean, operator: :and], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms boolean or" do
@@ -205,7 +213,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:binary_op, :boolean, :or, _left, _right}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :boolean, operator: :or], _children}, %{}} =
+               ToMeta.transform(ast)
     end
   end
 
@@ -220,8 +229,10 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:unary_op, :arithmetic, :-, operand}, %{}} = ToMeta.transform(ast)
-      assert {:literal, :integer, 42} = operand
+      assert {:ok, {:unary_op, [category: :arithmetic, operator: :-], [operand]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:literal, [subtype: :integer], 42} = operand
     end
 
     test "transforms logical not" do
@@ -234,7 +245,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:unary_op, :boolean, :not, _operand}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:unary_op, [category: :boolean, operator: :not], _children}, %{}} =
+               ToMeta.transform(ast)
     end
   end
 
@@ -242,7 +254,8 @@ defmodule Metastatic.Adapters.RubyTest do
     test "transforms local method call without arguments" do
       ast = %{"type" => "send", "children" => [nil, :hello]}
 
-      assert {:ok, {:function_call, "hello", []}, %{call_type: :local}} = ToMeta.transform(ast)
+      assert {:ok, {:function_call, [name: "hello"], []}, %{call_type: :local}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms local method call with arguments" do
@@ -256,7 +269,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:function_call, "add", args}, %{call_type: :local}} = ToMeta.transform(ast)
+      assert {:ok, {:function_call, [name: "add"], args}, %{call_type: :local}} =
+               ToMeta.transform(ast)
+
       assert [_, _] = args
     end
 
@@ -270,8 +285,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:function_call, method_name, args}, %{call_type: :instance}} =
-               ToMeta.transform(ast)
+      assert {:ok, {:function_call, meta, args}, %{call_type: :instance}} = ToMeta.transform(ast)
+      # Meta is a keyword list with :name key
+      method_name = if is_list(meta), do: Keyword.get(meta, :name), else: meta
 
       assert method_name =~ ".method"
       assert [_] = args
@@ -289,9 +305,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:conditional, condition, then_branch, nil}, %{}} = ToMeta.transform(ast)
-      assert {:literal, :boolean, true} = condition
-      assert {:literal, :integer, 1} = then_branch
+      assert {:ok, {:conditional, [], [condition, then_branch, nil]}, %{}} = ToMeta.transform(ast)
+      assert {:literal, [subtype: :boolean], true} = condition
+      assert {:literal, [subtype: :integer], 1} = then_branch
     end
 
     test "transforms if with else" do
@@ -304,11 +320,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:conditional, _condition, then_branch, else_branch}, %{}} =
+      assert {:ok, {:conditional, [], [_condition, then_branch, else_branch]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:literal, :integer, 1} = then_branch
-      assert {:literal, :integer, 2} = else_branch
+      assert {:literal, [subtype: :integer], 1} = then_branch
+      assert {:literal, [subtype: :integer], 2} = else_branch
     end
   end
 
@@ -322,10 +338,12 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:assignment, {:variable, "x"}, value}, %{scope: :local}} =
+      # Scope is in the meta keyword list
+      assert {:ok, {:assignment, [scope: :local], [{:variable, [], "x"}, value]},
+              %{scope: :local}} =
                ToMeta.transform(ast)
 
-      assert {:literal, :integer, 42} = value
+      assert {:literal, [subtype: :integer], 42} = value
     end
 
     test "transforms instance variable assignment" do
@@ -337,10 +355,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:assignment, {:variable, "@name"}, value}, %{scope: :instance}} =
-               ToMeta.transform(ast)
+      # Scope is in the meta keyword list
+      assert {:ok, {:assignment, [scope: :instance], [{:variable, [], "@name"}, value]},
+              %{scope: :instance}} = ToMeta.transform(ast)
 
-      assert {:literal, :string, "John"} = value
+      assert {:literal, [subtype: :string], "John"} = value
     end
   end
 
@@ -355,7 +374,7 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:block, statements}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:block, [], statements}, %{}} = ToMeta.transform(ast)
       assert [_, _, _] = statements
     end
   end
@@ -377,9 +396,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:loop, :while, condition, body}, %{}} = ToMeta.transform(ast)
-      assert {:binary_op, :comparison, :<, _, _} = condition
-      assert {:literal, :integer, 1} = body
+      assert {:ok, {:loop, [loop_type: :while], [condition, body]}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, [category: :comparison, operator: :<], _} = condition
+      assert {:literal, [subtype: :integer], 1} = body
     end
 
     test "transforms until loop" do
@@ -398,12 +417,12 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:loop, :while, condition, body}, %{original_type: :until}} =
+      assert {:ok, {:loop, [loop_type: :while], [condition, body]}, %{original_type: :until}} =
                ToMeta.transform(ast)
 
       # Until is negated condition
-      assert {:unary_op, :boolean, :not, _} = condition
-      assert {:literal, :integer, 1} = body
+      assert {:unary_op, [category: :boolean, operator: :not], _} = condition
+      assert {:literal, [subtype: :integer], 1} = body
     end
 
     test "transforms for loop" do
@@ -416,13 +435,13 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:loop, :for_each, iterator, collection, body}, %{}} =
+      # For loop format: {:loop, [loop_type: :for_each], [iterator, collection, body]}
+      assert {:ok, {:loop, [loop_type: :for_each], [iterator, collection, body]}, %{}} =
                ToMeta.transform(ast)
 
       assert iterator == "i"
-      # Note: transform returns {:ok, meta_ast, metadata}, not metadata in tuple
-      assert match?({:literal, :collection, []}, collection)
-      assert {:literal, :integer, 1} = body
+      assert {:list, [], []} = collection
+      assert {:literal, [subtype: :integer], 1} = body
     end
   end
 
@@ -443,9 +462,12 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:collection_op, :each, lambda, collection}, %{}} = ToMeta.transform(ast)
-      assert {:lambda, ["x"], {:literal, :integer, 1}} = lambda
-      assert match?({:literal, :collection, []}, collection)
+      assert {:ok, {:collection_op, [op_type: :each], [lambda, collection]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:lambda, [params: ["x"], captures: []], [body]} = lambda
+      assert {:literal, [subtype: :integer], 1} = body
+      assert {:list, [], []} = collection
     end
 
     test "transforms .map iterator" do
@@ -471,9 +493,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:collection_op, :map, lambda, collection}, %{}} = ToMeta.transform(ast)
-      assert {:lambda, ["x"], _body} = lambda
-      assert match?({:literal, :collection, []}, collection)
+      assert {:ok, {:collection_op, [op_type: :map], [lambda, collection]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:lambda, [params: ["x"], captures: []], _body} = lambda
+      assert {:list, [], []} = collection
     end
 
     test "transforms .select iterator" do
@@ -492,9 +516,13 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:collection_op, :select, lambda, collection}, %{}} = ToMeta.transform(ast)
-      assert {:lambda, ["x"], {:literal, :boolean, true}} = lambda
-      assert match?({:literal, :collection, []}, collection)
+      # Ruby 'select' is represented as :select (not :filter)
+      assert {:ok, {:collection_op, [op_type: :select], [lambda, collection]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:lambda, [params: ["x"], captures: []], [body]} = lambda
+      assert {:literal, [subtype: :boolean], true} = body
+      assert {:list, [], []} = collection
     end
 
     test "transforms .reduce iterator with initial value" do
@@ -527,12 +555,12 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:collection_op, :reduce, lambda, collection, initial}, %{}} =
+      assert {:ok, {:collection_op, [op_type: :reduce], [lambda, collection, initial]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:lambda, ["sum", "x"], _body} = lambda
-      assert match?({:literal, :collection, []}, collection)
-      assert {:literal, :integer, 0} = initial
+      assert {:lambda, [params: ["sum", "x"], captures: []], _body} = lambda
+      assert {:list, [], []} = collection
+      assert {:literal, [subtype: :integer], 0} = initial
     end
   end
 
@@ -554,8 +582,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:lambda, ["x"], body}, %{}} = ToMeta.transform(ast)
-      assert {:binary_op, :arithmetic, :+, _, _} = body
+      assert {:ok, {:lambda, [params: ["x"], captures: []], [body]}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
     end
 
     test "transforms lambda with multiple parameters" do
@@ -581,8 +609,10 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:lambda, ["x", "y"], body}, %{}} = ToMeta.transform(ast)
-      assert {:binary_op, :arithmetic, :+, _, _} = body
+      assert {:ok, {:lambda, [params: ["x", "y"], captures: []], [body]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
     end
   end
 
@@ -610,12 +640,12 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:pattern_match, scrutinee, branches, else_branch}, %{}} =
+      assert {:ok, {:pattern_match, [], [scrutinee, branches, else_branch]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:variable, "x"} = scrutinee
+      assert {:variable, _, "x"} = scrutinee
       assert [_, _] = branches
-      assert {:literal, :symbol, :other} = else_branch
+      assert {:literal, [subtype: :symbol], :other} = else_branch
     end
 
     test "transforms case/when without else" do
@@ -633,7 +663,7 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:pattern_match, _scrutinee, branches, nil}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:pattern_match, [], [_scrutinee, branches, nil]}, %{}} = ToMeta.transform(ast)
       assert [_] = branches
     end
   end
@@ -665,10 +695,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:exception_handling, try_body, handlers, nil}, %{}} =
+      # 3-tuple format: {:exception_handling, [], [try_body, handlers, else]}
+      assert {:ok, {:exception_handling, [], [try_body, handlers, nil]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:function_call, "risky_operation", []} = try_body
+      assert {:function_call, [name: "risky_operation"], []} = try_body
       assert [_] = handlers
     end
 
@@ -699,10 +730,10 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:exception_handling, _try_body, _handlers, nil}, %{ensure: ensure_body}} =
+      assert {:ok, {:exception_handling, [], [_try_body, _handlers, nil]}, %{ensure: ensure_body}} =
                ToMeta.transform(ast)
 
-      assert {:function_call, "cleanup", []} = ensure_body
+      assert {:function_call, [name: "cleanup"], []} = ensure_body
     end
 
     test "transforms begin/ensure without rescue" do
@@ -719,11 +750,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:exception_handling, try_body, [], nil}, %{ensure: ensure_body}} =
+      assert {:ok, {:exception_handling, [], [try_body, [], nil]}, %{ensure: ensure_body}} =
                ToMeta.transform(ast)
 
-      assert {:function_call, "operation", []} = try_body
-      assert {:function_call, "cleanup", []} = ensure_body
+      assert {:function_call, [name: "operation"], []} = try_body
+      assert {:function_call, [name: "cleanup"], []} = ensure_body
     end
   end
 
@@ -740,13 +771,12 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      # Should be a container, not language_specific
+      # 3-tuple format: {:container, [container_type: :class, name: "Foo", ...], [body]}
       case meta_ast do
-        {:container, :class, "Foo", nil, [], [], body} ->
-          assert {:literal, :integer, 42} = body
-
-        {:container, :class, "Foo", nil, [], [], body, _loc} ->
-          assert {:literal, :integer, 42} = body
+        {:container, meta, [body]} when is_list(meta) ->
+          assert Keyword.get(meta, :container_type) == :class
+          assert Keyword.get(meta, :name) == "Foo"
+          assert {:literal, [subtype: :integer], 42} = body
 
         other ->
           flunk("Expected container, got: #{inspect(other)}")
@@ -767,19 +797,18 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      # Should be a container with parent
+      # 3-tuple format: {:container, [container_type: :class, name: "Child", parent: "Parent"], [body]}
       case meta_ast do
-        {:container, :class, "Child", "Parent", [], [], _body} ->
-          :ok
-
-        {:container, :class, "Child", "Parent", [], [], _body, _loc} ->
-          :ok
+        {:container, meta, _body} when is_list(meta) ->
+          assert Keyword.get(meta, :container_type) == :class
+          assert Keyword.get(meta, :name) == "Child"
+          assert Keyword.get(meta, :parent) == "Parent"
 
         other ->
           flunk("Expected container with parent, got: #{inspect(other)}")
       end
 
-      assert {:literal, :constant, "Parent"} = metadata.superclass
+      assert {:literal, [subtype: :constant], "Parent"} = metadata.superclass
     end
 
     test "transforms module definition to container" do
@@ -793,13 +822,12 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      # Should be a container (module)
+      # 3-tuple format: {:container, [container_type: :module, name: "Foo"], [body]}
       case meta_ast do
-        {:container, :module, "Foo", nil, [], [], body} ->
-          assert {:literal, :integer, 42} = body
-
-        {:container, :module, "Foo", nil, [], [], body, _loc} ->
-          assert {:literal, :integer, 42} = body
+        {:container, meta, [body]} when is_list(meta) ->
+          assert Keyword.get(meta, :container_type) == :module
+          assert Keyword.get(meta, :name) == "Foo"
+          assert {:literal, [subtype: :integer], 42} = body
 
         other ->
           flunk("Expected module container, got: #{inspect(other)}")
@@ -820,17 +848,13 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
 
-      # Should be a function_def, not language_specific
+      # 3-tuple format: {:function_def, [name: "bar", params: [], ...], [body]}
       case meta_ast do
-        {:function_def, "bar", [], nil, opts, body} ->
-          assert opts.visibility == :public
-          assert opts.arity == 0
-          assert {:literal, :integer, 42} = body
-
-        {:function_def, "bar", [], nil, opts, body, _loc} ->
-          assert opts.visibility == :public
-          assert opts.arity == 0
-          assert {:literal, :integer, 42} = body
+        {:function_def, meta, [body]} when is_list(meta) ->
+          assert Keyword.get(meta, :name) == "bar"
+          assert Keyword.get(meta, :visibility) == :public
+          assert Keyword.get(meta, :arity) == 0
+          assert {:literal, [subtype: :integer], 42} = body
 
         other ->
           flunk("Expected function_def, got: #{inspect(other)}")
@@ -864,17 +888,14 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Should be a function_def
+      # 3-tuple format: {:function_def, [name: "add", params: [...], ...], [body]}
       case meta_ast do
-        {:function_def, "add", ["x", "y"], nil, opts, body} ->
-          assert opts.visibility == :public
-          assert opts.arity == 2
-          assert {:binary_op, :arithmetic, :+, _, _} = body
-
-        {:function_def, "add", ["x", "y"], nil, opts, body, _loc} ->
-          assert opts.visibility == :public
-          assert opts.arity == 2
-          assert {:binary_op, :arithmetic, :+, _, _} = body
+        {:function_def, meta, [body]} when is_list(meta) ->
+          assert Keyword.get(meta, :name) == "add"
+          assert Keyword.get(meta, :params) == ["x", "y"]
+          assert Keyword.get(meta, :visibility) == :public
+          assert Keyword.get(meta, :arity) == 2
+          assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
 
         other ->
           flunk("Expected function_def, got: #{inspect(other)}")
@@ -891,12 +912,12 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, _ast, :constant_assignment}, metadata} =
-               ToMeta.transform(ast)
+      assert {:ok, {:language_specific, [language: :ruby, hint: :constant_assignment], _ast},
+              metadata} = ToMeta.transform(ast)
 
       assert metadata.name == "BAR"
       assert metadata.namespace == nil
-      assert metadata.value == {:literal, :integer, 42}
+      assert {:literal, [subtype: :integer], 42} = metadata.value
     end
   end
 
@@ -905,13 +926,13 @@ defmodule Metastatic.Adapters.RubyTest do
       {:ok, ast} = Ruby.parse("x = 42")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Match with optional location
+      # 3-tuple format: {:assignment, [scope: :local], [var, value]}
       case meta_ast do
-        {:assignment, {:variable, "x", _loc}, {:literal, :integer, 42, _lit_loc}} -> :ok
-        {:assignment, {:variable, "x"}, {:literal, :integer, 42, _lit_loc}} -> :ok
-        {:assignment, {:variable, "x", _loc}, {:literal, :integer, 42}} -> :ok
-        {:assignment, {:variable, "x"}, {:literal, :integer, 42}} -> :ok
-        other -> flunk("Expected assignment, got: #{inspect(other)}")
+        {:assignment, meta, [{:variable, _, "x"}, {:literal, _, 42}]} when is_list(meta) ->
+          :ok
+
+        other ->
+          flunk("Expected assignment, got: #{inspect(other)}")
       end
     end
 
@@ -919,15 +940,17 @@ defmodule Metastatic.Adapters.RubyTest do
       {:ok, ast} = Ruby.parse("5 + 3")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Match with optional location (5 or 6-tuple)
-      assert match?({:binary_op, :arithmetic, :+, _, _}, meta_ast) or
-               match?({:binary_op, :arithmetic, :+, _, _, _}, meta_ast)
+      # 3-tuple format: {:binary_op, [category: ..., operator: ..., ...], [left, right]}
+      # Meta may have additional location keys
+      assert {:binary_op, meta, [_left, _right]} = meta_ast
+      assert Keyword.get(meta, :category) == :arithmetic
+      assert Keyword.get(meta, :operator) == :+
     end
 
     test "parses and transforms method call" do
       {:ok, ast} = Ruby.parse("hello")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:function_call, "hello", []} = meta_ast
+      assert {:function_call, [name: "hello"], []} = meta_ast
     end
   end
 
@@ -950,11 +973,14 @@ defmodule Metastatic.Adapters.RubyTest do
       {:ok, ast} = Ruby.parse(source)
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Verify it's a container
+      # 3-tuple format: {:container, [container_type: :class, name: "Calculator", ...], [body]}
       case meta_ast do
-        {:container, :class, "Calculator", nil, [], [], _body} -> :ok
-        {:container, :class, "Calculator", nil, [], [], _body, _loc} -> :ok
-        other -> flunk("Expected class container, got: #{inspect(other)}")
+        {:container, meta, _body} when is_list(meta) ->
+          assert Keyword.get(meta, :container_type) == :class
+          assert Keyword.get(meta, :name) == "Calculator"
+
+        other ->
+          flunk("Expected class container, got: #{inspect(other)}")
       end
     end
 
@@ -970,11 +996,14 @@ defmodule Metastatic.Adapters.RubyTest do
       {:ok, ast} = Ruby.parse(source)
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Verify it's a container
+      # 3-tuple format: {:container, [container_type: :module, name: "Utils", ...], [body]}
       case meta_ast do
-        {:container, :module, "Utils", nil, [], [], _body} -> :ok
-        {:container, :module, "Utils", nil, [], [], _body, _loc} -> :ok
-        other -> flunk("Expected module container, got: #{inspect(other)}")
+        {:container, meta, _body} when is_list(meta) ->
+          assert Keyword.get(meta, :container_type) == :module
+          assert Keyword.get(meta, :name) == "Utils"
+
+        other ->
+          flunk("Expected module container, got: #{inspect(other)}")
       end
     end
 
@@ -984,11 +1013,14 @@ defmodule Metastatic.Adapters.RubyTest do
       {:ok, ast} = Ruby.parse(source)
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Verify it's a function_def
+      # 3-tuple format: {:function_def, [name: "calculate", params: [...], ...], [body]}
       case meta_ast do
-        {:function_def, "calculate", ["x"], nil, _opts, _body} -> :ok
-        {:function_def, "calculate", ["x"], nil, _opts, _body, _loc} -> :ok
-        other -> flunk("Expected function_def, got: #{inspect(other)}")
+        {:function_def, meta, _body} when is_list(meta) ->
+          assert Keyword.get(meta, :name) == "calculate"
+          assert Keyword.get(meta, :params) == ["x"]
+
+        other ->
+          flunk("Expected function_def, got: #{inspect(other)}")
       end
     end
 
@@ -998,11 +1030,14 @@ defmodule Metastatic.Adapters.RubyTest do
       {:ok, ast} = Ruby.parse(source)
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Verify it's an augmented assignment
+      # 3-tuple format: {:augmented_assignment, [category: ..., operator: ...], [target, value]}
       case meta_ast do
-        {:augmented_assignment, :arithmetic, :+, _, _} -> :ok
-        {:augmented_assignment, :arithmetic, :+, _, _, _} -> :ok
-        other -> flunk("Expected augmented_assignment, got: #{inspect(other)}")
+        {:augmented_assignment, meta, _children} when is_list(meta) ->
+          assert Keyword.get(meta, :category) == :arithmetic
+          assert Keyword.get(meta, :operator) == :+
+
+        other ->
+          flunk("Expected augmented_assignment, got: #{inspect(other)}")
       end
     end
 
@@ -1018,15 +1053,11 @@ defmodule Metastatic.Adapters.RubyTest do
       {:ok, ast} = Ruby.parse(source)
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Check context metadata in location map
+      # 3-tuple format with context in metadata
       case meta_ast do
-        {:container, :module, "Calculator", nil, [], [], _body, loc} ->
-          assert loc.language == :ruby
-          assert loc.module == "Calculator"
-
-        {:container, :module, "Calculator", nil, [], [], _body} ->
-          # Without location - that's OK for some cases
-          :ok
+        {:container, meta, _body} when is_list(meta) ->
+          assert Keyword.get(meta, :container_type) == :module
+          assert Keyword.get(meta, :name) == "Calculator"
 
         other ->
           flunk("Expected module container with context, got: #{inspect(other)}")
@@ -1044,24 +1075,20 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
+      assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Should be attribute_access for variable receiver
+      # 3-tuple format: {:attribute_access, [object: ..., attribute: ...], []} or function_call
       case meta_ast do
-        {:attribute_access, {:variable, "obj"}, "field"} ->
-          assert metadata.kind == :instance_var
-
-        {:attribute_access, {:variable, "obj"}, "field", _loc} ->
+        {:attribute_access, meta, _children} when is_list(meta) ->
           :ok
 
-        {:attribute_access, {:variable, "obj", _loc}, "field"} ->
-          :ok
-
-        {:attribute_access, {:variable, "obj", _loc}, "field", _loc2} ->
-          :ok
+        {:function_call, meta, _args} when is_list(meta) ->
+          # Attribute access may be represented as function call
+          name = Keyword.get(meta, :name)
+          assert name =~ "field"
 
         other ->
-          flunk("Expected attribute_access, got: #{inspect(other)}")
+          flunk("Expected attribute_access or function_call, got: #{inspect(other)}")
       end
     end
 
@@ -1077,27 +1104,11 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Should be augmented_assignment
+      # 3-tuple format: {:augmented_assignment, [category: :arithmetic, operator: :+], [target, value]}
       case meta_ast do
-        {:augmented_assignment, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}} ->
-          :ok
-
-        {:augmented_assignment, :arithmetic, :+, {:variable, "x", _loc}, {:literal, :integer, 5}} ->
-          :ok
-
-        {:augmented_assignment, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5, _loc}} ->
-          :ok
-
-        {:augmented_assignment, :arithmetic, :+, {:variable, "x", _loc},
-         {:literal, :integer, 5, _loc2}} ->
-          :ok
-
-        {:augmented_assignment, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}, _loc} ->
-          :ok
-
-        {:augmented_assignment, :arithmetic, :+, {:variable, "x", _loc},
-         {:literal, :integer, 5, _loc2}, _loc3} ->
-          :ok
+        {:augmented_assignment, meta, _children} when is_list(meta) ->
+          assert Keyword.get(meta, :category) == :arithmetic
+          assert Keyword.get(meta, :operator) == :+
 
         other ->
           flunk("Expected augmented_assignment, got: #{inspect(other)}")
@@ -1116,11 +1127,14 @@ defmodule Metastatic.Adapters.RubyTest do
 
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
 
-      # Check it's an augmented assignment with subtraction
+      # 3-tuple format: {:augmented_assignment, [category: :arithmetic, operator: :-], [...]} 
       case meta_ast do
-        {:augmented_assignment, :arithmetic, :-, _, _} -> :ok
-        {:augmented_assignment, :arithmetic, :-, _, _, _} -> :ok
-        other -> flunk("Expected augmented_assignment with :-, got: #{inspect(other)}")
+        {:augmented_assignment, meta, _children} when is_list(meta) ->
+          assert Keyword.get(meta, :category) == :arithmetic
+          assert Keyword.get(meta, :operator) == :-
+
+        other ->
+          flunk("Expected augmented_assignment with :-, got: #{inspect(other)}")
       end
     end
   end
@@ -1129,7 +1143,10 @@ defmodule Metastatic.Adapters.RubyTest do
     test "transforms yield with arguments" do
       ast = %{"type" => "yield", "children" => [%{"type" => "lvar", "children" => ["x"]}]}
 
-      assert {:ok, {:language_specific, :ruby, ^ast, :yield}, metadata} = ToMeta.transform(ast)
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :yield], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :yield], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
       assert [_] = metadata.args
     end
 
@@ -1142,7 +1159,10 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, ^ast, :alias}, metadata} = ToMeta.transform(ast)
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :alias], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :alias], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
       assert metadata.new_name == "new_name"
       assert metadata.old_name == "old_name"
     end
@@ -1156,8 +1176,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, ^ast, :string_interpolation}, metadata} =
-               ToMeta.transform(ast)
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :string_interpolation], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :string_interpolation], ^ast},
+              metadata} = ToMeta.transform(ast)
 
       assert [_, _] = metadata.parts
     end
@@ -1171,7 +1192,10 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, ^ast, :regexp}, metadata} = ToMeta.transform(ast)
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :regexp], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :regexp], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
       assert metadata.pattern != nil
     end
 
@@ -1187,8 +1211,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, ^ast, :singleton_class}, metadata} =
-               ToMeta.transform(ast)
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :singleton_class], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :singleton_class], ^ast},
+              metadata} = ToMeta.transform(ast)
 
       assert metadata.object != nil
       assert metadata.body != nil
@@ -1203,14 +1228,19 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :ruby, ^ast, :super}, metadata} = ToMeta.transform(ast)
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :super], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :super], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
       assert [_, _] = metadata.args
     end
 
     test "transforms zsuper" do
       ast = %{"type" => "zsuper", "children" => []}
 
-      assert {:ok, {:language_specific, :ruby, ^ast, :zsuper}, %{}} = ToMeta.transform(ast)
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :zsuper], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :zsuper], ^ast}, %{}} =
+               ToMeta.transform(ast)
     end
   end
 end

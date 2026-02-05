@@ -5,9 +5,34 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
 
   doctest Metastatic.Analysis.Duplication.Fingerprint
 
+  # Helper functions for 3-tuple AST construction
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+
+  defp binary_op(category, operator, left, right) do
+    {:binary_op, [category: category, operator: operator], [left, right]}
+  end
+
+  defp conditional(cond_expr, then_branch, else_branch) do
+    {:conditional, [], [cond_expr, then_branch, else_branch]}
+  end
+
+  defp function_call(name, args), do: {:function_call, [name: name], args}
+  defp block(stmts), do: {:block, [], stmts}
+  defp assignment(target, value), do: {:assignment, [], [target, value]}
+  defp early_return(value), do: {:early_return, [], [value]}
+  defp loop(loop_type, children), do: {:loop, [loop_type: loop_type], children}
+  defp lambda(params, body), do: {:lambda, [params: params, captures: []], [body]}
+  defp collection_op(op_type, func, coll), do: {:collection_op, [op_type: op_type], [func, coll]}
+  defp tuple_node(elems), do: {:tuple, [], elems}
+
+  defp language_specific(lang, hint) do
+    {:language_specific, [language: lang, hint: hint], []}
+  end
+
   describe "exact/1" do
     test "generates non-empty fingerprint" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       fp = Fingerprint.exact(ast)
 
       assert is_binary(fp)
@@ -15,7 +40,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "identical ASTs produce identical fingerprints" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       fp1 = Fingerprint.exact(ast)
       fp2 = Fingerprint.exact(ast)
 
@@ -23,8 +48,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "different ASTs produce different fingerprints" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :integer, 43}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:integer, 43)
       fp1 = Fingerprint.exact(ast1)
       fp2 = Fingerprint.exact(ast2)
 
@@ -32,8 +57,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "different variable names produce different fingerprints" do
-      ast1 = {:variable, "x"}
-      ast2 = {:variable, "y"}
+      ast1 = variable("x")
+      ast2 = variable("y")
       fp1 = Fingerprint.exact(ast1)
       fp2 = Fingerprint.exact(ast2)
 
@@ -41,8 +66,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "different literal values produce different fingerprints" do
-      ast1 = {:literal, :string, "hello"}
-      ast2 = {:literal, :string, "world"}
+      ast1 = literal(:string, "hello")
+      ast2 = literal(:string, "world")
       fp1 = Fingerprint.exact(ast1)
       fp2 = Fingerprint.exact(ast2)
 
@@ -50,7 +75,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "produces consistent results" do
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       fingerprints = Enum.map(1..10, fn _ -> Fingerprint.exact(ast) end)
 
       assert [_] = Enum.uniq(fingerprints)
@@ -59,7 +84,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
 
   describe "normalized/1" do
     test "generates non-empty fingerprint" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       fp = Fingerprint.normalized(ast)
 
       assert is_binary(fp)
@@ -67,7 +92,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "identical ASTs produce identical normalized fingerprints" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       fp1 = Fingerprint.normalized(ast)
       fp2 = Fingerprint.normalized(ast)
 
@@ -75,8 +100,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "different variable names produce same normalized fingerprint" do
-      ast1 = {:variable, "x"}
-      ast2 = {:variable, "y"}
+      ast1 = variable("x")
+      ast2 = variable("y")
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -84,8 +109,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "different literal values produce same normalized fingerprint" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :integer, 100}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:integer, 100)
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -93,8 +118,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "different literal types produce different normalized fingerprints" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :string, "42"}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:string, "42")
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -102,8 +127,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "binary operations with different variables produce same normalized fingerprint" do
-      ast1 = {:binary_op, :arithmetic, :+, {:variable, "a"}, {:literal, :integer, 1}}
-      ast2 = {:binary_op, :arithmetic, :+, {:variable, "b"}, {:literal, :integer, 2}}
+      ast1 = binary_op(:arithmetic, :+, variable("a"), literal(:integer, 1))
+      ast2 = binary_op(:arithmetic, :+, variable("b"), literal(:integer, 2))
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -111,8 +136,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "binary operations with different operators produce different normalized fingerprints" do
-      ast1 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
-      ast2 = {:binary_op, :arithmetic, :-, {:variable, "x"}, {:literal, :integer, 5}}
+      ast1 = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
+      ast2 = binary_op(:arithmetic, :-, variable("x"), literal(:integer, 5))
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -120,8 +145,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "function calls with different names produce same normalized fingerprint" do
-      ast1 = {:function_call, "foo", [{:variable, "x"}]}
-      ast2 = {:function_call, "bar", [{:variable, "y"}]}
+      ast1 = function_call("foo", [variable("x")])
+      ast2 = function_call("bar", [variable("y")])
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -129,8 +154,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "conditionals with different values produce same normalized fingerprint" do
-      ast1 = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-      ast2 = {:conditional, {:variable, "y"}, {:literal, :integer, 10}, {:literal, :integer, 20}}
+      ast1 = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
+      ast2 = conditional(variable("y"), literal(:integer, 10), literal(:integer, 20))
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -138,12 +163,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "blocks with different statement values produce same normalized fingerprint" do
-      ast1 =
-        {:block, [{:assignment, {:variable, "x"}, {:literal, :integer, 5}}, {:variable, "x"}]}
-
-      ast2 =
-        {:block, [{:assignment, {:variable, "y"}, {:literal, :integer, 10}}, {:variable, "y"}]}
-
+      ast1 = block([assignment(variable("x"), literal(:integer, 5)), variable("x")])
+      ast2 = block([assignment(variable("y"), literal(:integer, 10)), variable("y")])
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -151,8 +172,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "loops with different iterator names produce same normalized fingerprint" do
-      ast1 = {:loop, :for, {:variable, "i"}, {:variable, "list"}, {:variable, "i"}}
-      ast2 = {:loop, :for, {:variable, "j"}, {:variable, "items"}, {:variable, "j"}}
+      ast1 = loop(:for, [variable("i"), variable("list"), variable("i")])
+      ast2 = loop(:for, [variable("j"), variable("items"), variable("j")])
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -162,7 +183,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
 
   describe "tokens/1" do
     test "extracts tokens from literal" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       tokens = Fingerprint.tokens(ast)
 
       assert :literal in tokens
@@ -170,14 +191,14 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "extracts tokens from variable" do
-      ast = {:variable, "x"}
+      ast = variable("x")
       tokens = Fingerprint.tokens(ast)
 
       assert :variable in tokens
     end
 
     test "extracts tokens from binary operation" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       tokens = Fingerprint.tokens(ast)
 
       assert :binary_op in tokens
@@ -189,7 +210,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "extracts tokens from function call" do
-      ast = {:function_call, "print", [{:literal, :string, "hello"}]}
+      ast = function_call("print", [literal(:string, "hello")])
       tokens = Fingerprint.tokens(ast)
 
       assert :function_call in tokens
@@ -198,7 +219,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "extracts tokens from conditional" do
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       tokens = Fingerprint.tokens(ast)
 
       assert :conditional in tokens
@@ -207,7 +228,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "extracts tokens from block" do
-      ast = {:block, [{:variable, "x"}, {:variable, "y"}]}
+      ast = block([variable("x"), variable("y")])
       tokens = Fingerprint.tokens(ast)
 
       assert :block in tokens
@@ -215,7 +236,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "extracts tokens from loop" do
-      ast = {:loop, :while, {:variable, "x"}, {:variable, "y"}}
+      ast = loop(:while, [variable("x"), variable("y")])
       tokens = Fingerprint.tokens(ast)
 
       assert :loop in tokens
@@ -224,7 +245,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "extracts tokens from lambda" do
-      ast = {:lambda, ["x"], [], {:variable, "x"}}
+      ast = lambda(["x"], variable("x"))
       tokens = Fingerprint.tokens(ast)
 
       assert :lambda in tokens
@@ -232,7 +253,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "extracts tokens from collection operation" do
-      ast = {:collection_op, :map, {:lambda, [], [], {:variable, "x"}}, {:variable, "list"}}
+      ast = collection_op(:map, lambda([], variable("x")), variable("list"))
       tokens = Fingerprint.tokens(ast)
 
       assert :collection_op in tokens
@@ -241,7 +262,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "tokens list maintains structure" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
+      ast = binary_op(:arithmetic, :+, variable("x"), variable("y"))
       tokens = Fingerprint.tokens(ast)
 
       # Tokens should be in order
@@ -265,7 +286,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "works with real fingerprints" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       fp1 = Fingerprint.exact(ast)
       fp2 = Fingerprint.exact(ast)
 
@@ -275,32 +296,29 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
 
   describe "edge cases" do
     test "handles wildcard variable" do
-      ast = {:variable, "_"}
+      ast = variable("_")
       fp = Fingerprint.exact(ast)
 
       assert is_binary(fp)
     end
 
     test "handles empty block" do
-      ast = {:block, []}
+      ast = block([])
       fp = Fingerprint.normalized(ast)
 
       assert is_binary(fp)
     end
 
     test "handles nil else branch" do
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, nil}
+      ast = conditional(variable("x"), literal(:integer, 1), nil)
       fp = Fingerprint.normalized(ast)
 
       assert is_binary(fp)
     end
 
     test "normalized fingerprint ignores nil vs present else branch structure" do
-      ast1 = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, nil}
-
-      ast2 =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-
+      ast1 = conditional(variable("x"), literal(:integer, 1), nil)
+      ast2 = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -309,15 +327,15 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "handles language_specific nodes" do
-      ast = {:language_specific, :python, %{code: "async def foo(): pass"}, :async_function}
+      ast = language_specific(:python, :async_function)
       fp = Fingerprint.normalized(ast)
 
       assert is_binary(fp)
     end
 
     test "normalized ignores language_specific data but preserves hint" do
-      ast1 = {:language_specific, :python, %{code: "async def foo(): pass"}, :async_function}
-      ast2 = {:language_specific, :python, %{code: "async def bar(): return 1"}, :async_function}
+      ast1 = language_specific(:python, :async_function)
+      ast2 = language_specific(:python, :async_function)
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
 
@@ -326,10 +344,17 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
 
     test "handles deeply nested structures" do
       ast =
-        {:binary_op, :arithmetic, :+,
-         {:binary_op, :arithmetic, :*,
-          {:binary_op, :arithmetic, :/, {:variable, "a"}, {:variable, "b"}}, {:variable, "c"}},
-         {:literal, :integer, 1}}
+        binary_op(
+          :arithmetic,
+          :+,
+          binary_op(
+            :arithmetic,
+            :*,
+            binary_op(:arithmetic, :/, variable("a"), variable("b")),
+            variable("c")
+          ),
+          literal(:integer, 1)
+        )
 
       fp = Fingerprint.normalized(ast)
 
@@ -337,7 +362,7 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "handles tuple elements" do
-      ast = {:tuple, [{:variable, "x"}, {:literal, :integer, 42}, {:variable, "y"}]}
+      ast = tuple_node([variable("x"), literal(:integer, 42), variable("y")])
       fp = Fingerprint.normalized(ast)
 
       assert is_binary(fp)
@@ -348,21 +373,20 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     test "normalized fingerprints for renamed function implementations" do
       # Python-style: def add(a, b): return a + b
       ast1 =
-        {:block,
-         [
-           {:assignment, {:variable, "result"},
-            {:binary_op, :arithmetic, :+, {:variable, "a"}, {:variable, "b"}}},
-           {:early_return, {:variable, "result"}}
-         ]}
+        block([
+          assignment(
+            variable("result"),
+            binary_op(:arithmetic, :+, variable("a"), variable("b"))
+          ),
+          early_return(variable("result"))
+        ])
 
       # Same function with different variable names
       ast2 =
-        {:block,
-         [
-           {:assignment, {:variable, "sum"},
-            {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}},
-           {:early_return, {:variable, "sum"}}
-         ]}
+        block([
+          assignment(variable("sum"), binary_op(:arithmetic, :+, variable("x"), variable("y"))),
+          early_return(variable("sum"))
+        ])
 
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
@@ -373,11 +397,14 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     test "different control flow produces different normalized fingerprints" do
       # if x: return 1 else: return 2
       ast1 =
-        {:conditional, {:variable, "x"}, {:early_return, {:literal, :integer, 1}},
-         {:early_return, {:literal, :integer, 2}}}
+        conditional(
+          variable("x"),
+          early_return(literal(:integer, 1)),
+          early_return(literal(:integer, 2))
+        )
 
       # while x: return 1
-      ast2 = {:loop, :while, {:variable, "x"}, {:early_return, {:literal, :integer, 1}}}
+      ast2 = loop(:while, [variable("x"), early_return(literal(:integer, 1))])
 
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)
@@ -386,11 +413,8 @@ defmodule Metastatic.Analysis.Duplication.FingerprintTest do
     end
 
     test "map operations with different iterators produce same normalized fingerprint" do
-      ast1 =
-        {:collection_op, :map, {:lambda, ["x"], [], {:variable, "x"}}, {:variable, "items"}}
-
-      ast2 =
-        {:collection_op, :map, {:lambda, ["y"], [], {:variable, "y"}}, {:variable, "data"}}
+      ast1 = collection_op(:map, lambda(["x"], variable("x")), variable("items"))
+      ast2 = collection_op(:map, lambda(["y"], variable("y")), variable("data"))
 
       fp1 = Fingerprint.normalized(ast1)
       fp2 = Fingerprint.normalized(ast2)

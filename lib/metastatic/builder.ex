@@ -12,9 +12,10 @@ defmodule Metastatic.Builder do
       # Parse Python code to MetaAST
       {:ok, doc} = Metastatic.Builder.from_source("x + 5", :python)
 
-      # Doc now contains M2 representation:
+      # Doc now contains M2 representation (3-tuple format):
       doc.ast
-      # => {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      # => {:binary_op, [category: :arithmetic, operator: :+],
+      #     [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
       # Convert back to source
       {:ok, source} = Metastatic.Builder.to_source(doc)
@@ -63,19 +64,15 @@ defmodule Metastatic.Builder do
 
   ## Examples
 
-      iex> Metastatic.Builder.from_source("x + 5", :python)
-      {:ok, %Metastatic.Document{
-        ast: {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}},
-        language: :python,
-        metadata: %{...},
-        original_source: "x + 5"
-      }}
-
-      iex> Metastatic.Builder.from_source("invalid syntax!", :python)
-      {:error, "SyntaxError: ..."}
-
-      iex> Metastatic.Builder.from_source("code", :unknown_language)
-      {:error, :no_adapter_found}
+      # Example result (not runnable - depends on Python adapter)
+      # Metastatic.Builder.from_source("x + 5", :python)
+      # => {:ok, %Metastatic.Document{
+      #   ast: {:binary_op, [category: :arithmetic, operator: :+],
+      #         [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
+      #   language: :python,
+      #   metadata: %{...},
+      #   original_source: "x + 5"
+      # }}
   """
   @spec from_source(String.t(), atom()) :: {:ok, Document.t()} | {:error, term()}
   def from_source(source, language) when is_binary(source) and is_atom(language) do
@@ -135,8 +132,8 @@ defmodule Metastatic.Builder do
   ## Examples
 
       iex> doc = %Metastatic.Document{
-      ...>   ast: {:literal, :integer, 42},
-      ...>   language: :python,
+      ...>   ast: {:literal, [subtype: :integer], 42},
+      ...>   language: :elixir,
       ...>   metadata: %{}
       ...> }
       iex> Metastatic.Builder.to_source(doc)

@@ -25,7 +25,7 @@ defmodule Metastatic.Analysis.Taint do
       alias Metastatic.{Document, Analysis.Taint}
 
       # Analyze for taint flows
-      ast = {:function_call, "eval", [{:function_call, "input", []}]}
+      ast = {:function_call, [name: "eval"], [{:function_call, [name: "input"], []}]}
       doc = Document.new(ast, :python)
       {:ok, result} = Taint.analyze(doc)
 
@@ -34,14 +34,14 @@ defmodule Metastatic.Analysis.Taint do
   ## Examples
 
       # No taint flows
-      iex> ast = {:binary_op, :arithmetic, :+, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Taint.analyze(doc)
       iex> result.has_taint_flows?
       false
 
       # Tainted data to sink
-      iex> ast = {:function_call, "eval", [{:function_call, "input", []}]}
+      iex> ast = {:function_call, [name: "eval"], [{:function_call, [name: "input"], []}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.Taint.analyze(doc)
       iex> result.has_taint_flows?
@@ -86,7 +86,7 @@ defmodule Metastatic.Analysis.Taint do
 
     ## Examples
 
-        iex> ast = {:literal, :integer, 42}
+        iex> ast = {:literal, [subtype: :integer], 42}
         iex> doc = Metastatic.Document.new(ast, :elixir)
         iex> {:ok, result} = Metastatic.Analysis.Taint.analyze(doc)
         iex> result.has_taint_flows?
@@ -109,19 +109,22 @@ defmodule Metastatic.Analysis.Taint do
 
   # Private implementation
 
+  # 3-tuple format
   defp find_taint_sources(ast, language) do
     source_funcs = Map.get(@taint_sources, language, [])
 
     walk_ast(ast, [], fn node, acc ->
       case node do
-        {:function_call, name, _args} ->
+        {:function_call, meta, _args} when is_list(meta) ->
+          name = Keyword.get(meta, :name, "")
+
           if name in source_funcs do
             [name | acc]
           else
             acc
           end
 
-        {:variable, "argv"} ->
+        {:variable, _meta, "argv"} ->
           ["argv" | acc]
 
         _ ->
@@ -135,7 +138,9 @@ defmodule Metastatic.Analysis.Taint do
 
     walk_ast(ast, [], fn node, acc ->
       case node do
-        {:function_call, name, _args} ->
+        {:function_call, meta, _args} when is_list(meta) ->
+          name = Keyword.get(meta, :name, "")
+
           case Enum.find(sink_patterns, fn {n, _} -> n == name end) do
             {func, risk} -> [{func, risk} | acc]
             nil -> acc
@@ -149,25 +154,38 @@ defmodule Metastatic.Analysis.Taint do
 
   # Simplified taint flow detection
   # Checks if any sink has a taint source in its arguments
+  # 3-tuple format
   defp detect_taint_flows(ast, sources, sinks) do
     if Enum.empty?(sources) or Enum.empty?(sinks) do
       []
     else
       walk_ast(ast, [], fn node, acc ->
-        with {:function_call, name, args} <- node,
-             {sink_name, risk} <- Enum.find(sinks, fn {sink_name, _} -> sink_name == name end),
-             true <- has_taint_source?(args, sources) do
-          flow = %{
-            source: Enum.join(sources, ", "),
-            sink: sink_name,
-            risk: risk,
-            path: [sink_name],
-            recommendation: get_recommendation(risk)
-          }
+        case node do
+          {:function_call, meta, args} when is_list(meta) ->
+            name = Keyword.get(meta, :name, "")
 
-          [flow | acc]
-        else
-          _ -> acc
+            case Enum.find(sinks, fn {sink_name, _} -> sink_name == name end) do
+              {sink_name, risk} when is_list(args) ->
+                if has_taint_source?(args, sources) do
+                  flow = %{
+                    source: Enum.join(sources, ", "),
+                    sink: sink_name,
+                    risk: risk,
+                    path: [sink_name],
+                    recommendation: get_recommendation(risk)
+                  }
+
+                  [flow | acc]
+                else
+                  acc
+                end
+
+              _ ->
+                acc
+            end
+
+          _ ->
+            acc
         end
       end)
     end
@@ -179,16 +197,17 @@ defmodule Metastatic.Analysis.Taint do
 
   defp check_taint_in_ast(ast, sources) do
     case ast do
-      {:function_call, name, _} ->
+      {:function_call, meta, _args} when is_list(meta) ->
+        name = Keyword.get(meta, :name, "")
         name in sources
 
-      {:variable, name} ->
+      {:variable, _meta, name} ->
         name in sources or name == "argv"
 
-      {:binary_op, _, _, left, right} ->
+      {:binary_op, _meta, [left, right]} ->
         check_taint_in_ast(left, sources) or check_taint_in_ast(right, sources)
 
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         Enum.any?(statements, &check_taint_in_ast(&1, sources))
 
       _ ->
@@ -200,29 +219,26 @@ defmodule Metastatic.Analysis.Taint do
     acc = func.(ast, acc)
 
     case ast do
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         Enum.reduce(statements, acc, fn stmt, a -> walk_ast(stmt, a, func) end)
 
-      {:conditional, cond, then_br, else_br} ->
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
         acc
-        |> walk_ast(cond, func)
+        |> walk_ast(cond_expr, func)
         |> walk_ast(then_br, func)
         |> walk_ast(else_br, func)
 
-      {:binary_op, _, _, left, right} ->
+      {:binary_op, _meta, [left, right]} ->
         acc |> walk_ast(left, func) |> walk_ast(right, func)
 
-      {:function_call, _name, args} when is_list(args) ->
+      {:function_call, _meta, args} when is_list(args) ->
         Enum.reduce(args, acc, fn arg, a -> walk_ast(arg, a, func) end)
 
-      {:assignment, target, value} ->
+      {:assignment, _meta, [target, value]} ->
         acc |> walk_ast(target, func) |> walk_ast(value, func)
 
-      {:loop, :while, cond, body} ->
-        acc |> walk_ast(cond, func) |> walk_ast(body, func)
-
-      {:loop, _, _iter, coll, body} ->
-        acc |> walk_ast(coll, func) |> walk_ast(body, func)
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        Enum.reduce(children, acc, fn child, a -> walk_ast(child, a, func) end)
 
       nil ->
         acc

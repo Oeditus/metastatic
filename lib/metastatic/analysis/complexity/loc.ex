@@ -27,7 +27,7 @@ defmodule Metastatic.Analysis.Complexity.LoC do
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> metrics = Metastatic.Analysis.Complexity.LoC.calculate(ast)
       iex> metrics.logical
       0
@@ -51,12 +51,12 @@ defmodule Metastatic.Analysis.Complexity.LoC do
 
   ## Examples
 
-      iex> ast = {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> metrics = Metastatic.Analysis.Complexity.LoC.calculate(ast)
       iex> metrics.logical
       1
 
-      iex> ast = {:block, [{:variable, "x"}, {:variable, "y"}]}
+      iex> ast = {:block, [], [{:variable, [], "x"}, {:variable, [], "y"}]}
       iex> metrics = Metastatic.Analysis.Complexity.LoC.calculate(ast)
       iex> metrics.logical
       0
@@ -84,99 +84,97 @@ defmodule Metastatic.Analysis.Complexity.LoC do
     walk(ast, 0)
   end
 
-  # Statements count as logical lines
+  # Statements count as logical lines (3-tuple format)
 
-  defp walk({:assignment, target, value}, count) do
+  defp walk({:assignment, _meta, [target, value]}, count) do
     count = count + 1
     count = walk_expr(target, count)
     walk_expr(value, count)
   end
 
-  defp walk({:inline_match, pattern, value}, count) do
+  defp walk({:inline_match, _meta, [pattern, value]}, count) do
     count = count + 1
     count = walk_expr(pattern, count)
     walk_expr(value, count)
   end
 
-  defp walk({:function_call, _name, args}, count) do
+  defp walk({:function_call, _meta, args}, count) when is_list(args) do
     count = count + 1
     Enum.reduce(args, count, fn arg, c -> walk_expr(arg, c) end)
   end
 
-  defp walk({:early_return, value}, count) do
+  defp walk({:early_return, _meta, [value]}, count) do
     count = count + 1
     walk_expr(value, count)
   end
 
-  defp walk({:conditional, cond, then_br, else_br}, count) do
+  defp walk({:conditional, _meta, [cond_expr, then_br, else_br]}, count) do
     count = count + 1
-    count = walk_expr(cond, count)
+    count = walk_expr(cond_expr, count)
     count = walk(then_br, count)
     walk(else_br, count)
   end
 
-  defp walk({:loop, :while, cond, body}, count) do
+  defp walk({:loop, meta, children}, count) when is_list(meta) and is_list(children) do
     count = count + 1
-    count = walk_expr(cond, count)
-    walk(body, count)
+    Enum.reduce(children, count, fn child, c -> walk(child, c) end)
   end
 
-  defp walk({:loop, _, iter, coll, body}, count) do
-    count = count + 1
-    count = walk_expr(iter, count)
-    count = walk_expr(coll, count)
-    walk(body, count)
-  end
-
-  defp walk({:exception_handling, try_block, catches, else_block}, count) do
+  defp walk({:exception_handling, _meta, [try_block, catches, else_block]}, count) do
     count = count + 1
     count = walk(try_block, count)
 
+    catches_list = if is_list(catches), do: catches, else: []
+
     count =
-      Enum.reduce(catches, count, fn {_type, var, catch_body}, c ->
-        c = walk_expr(var, c)
-        walk(catch_body, c)
+      Enum.reduce(catches_list, count, fn catch_clause, c ->
+        walk(catch_clause, c)
       end)
 
     walk(else_block, count)
   end
 
-  defp walk({:pattern_match, value, branches}, count) do
+  defp walk({:pattern_match, _meta, [value, branches | _]}, count) do
     count = count + 1
     count = walk_expr(value, count)
 
-    Enum.reduce(branches, count, fn
-      {:match_arm, pattern, guard, body}, c ->
+    branches_list = if is_list(branches), do: branches, else: []
+
+    Enum.reduce(branches_list, count, fn
+      {:match_arm, _, [pattern, guard, body]}, c ->
         c = walk_expr(pattern, c)
         c = if guard, do: walk_expr(guard, c), else: c
         walk(body, c)
 
-      {pattern, branch}, c ->
+      {:pair, _, [pattern, branch]}, c ->
         c = walk_expr(pattern, c)
         walk(branch, c)
+
+      other, c ->
+        walk(other, c)
     end)
   end
 
-  defp walk({:match_arm, pattern, guard, body}, count) do
+  defp walk({:match_arm, _meta, [pattern, guard, body]}, count) do
     count = walk_expr(pattern, count)
     count = if guard, do: walk_expr(guard, count), else: count
     walk(body, count)
   end
 
-  defp walk({:lambda, _params, body}, count) do
+  defp walk({:lambda, _meta, [body]}, count) do
     # Lambda definition is a statement
     count = count + 1
     walk(body, count)
   end
 
-  defp walk({:block, stmts}, count) when is_list(stmts) do
+  defp walk({:block, _meta, stmts}, count) when is_list(stmts) do
     Enum.reduce(stmts, count, fn stmt, c -> walk(stmt, c) end)
   end
 
-  # M2.2s: Structural/Organizational Types
+  # M2.2s: Structural/Organizational Types (3-tuple format)
 
-  # Container: walk body (7-tuple format)
-  defp walk({:container, _type, _name, _parent, _type_params, _implements, body}, count) do
+  # Container (3-tuple)
+  defp walk({:container, meta, [body]}, count) when is_list(meta) do
     count = count + 1
 
     if is_list(body) do
@@ -186,14 +184,15 @@ defmodule Metastatic.Analysis.Complexity.LoC do
     end
   end
 
-  # Function definition: walk body (6-tuple format)
-  defp walk({:function_def, _name, params, _ret_type, opts, body}, count) do
+  # Function definition (3-tuple)
+  defp walk({:function_def, meta, [body]}, count) when is_list(meta) do
     count = count + 1
+    params = Keyword.get(meta, :params, [])
 
     # Walk parameters
     count =
       Enum.reduce(params, count, fn
-        {:param, _name, pattern, default}, c ->
+        {:param, _, [_name, pattern, default]}, c ->
           c = if pattern, do: walk_expr(pattern, c), else: c
           if default, do: walk_expr(default, c), else: c
 
@@ -203,95 +202,81 @@ defmodule Metastatic.Analysis.Complexity.LoC do
 
     # Walk guards if present
     count =
-      if is_map(opts) do
-        case Map.get(opts, :guards) do
-          nil -> count
-          guard -> walk_expr(guard, count)
-        end
-      else
-        count
+      case Keyword.get(meta, :guards) do
+        nil -> count
+        guard -> walk_expr(guard, count)
       end
 
     # Walk body
     walk(body, count)
   end
 
-  defp walk({:attribute_access, obj, _attr}, count) do
+  defp walk({:attribute_access, _meta, [obj, _attr]}, count) do
     # Attribute access is not a statement, walk as expression
     walk_expr(obj, count)
   end
 
-  defp walk({:augmented_assignment, _op, _target, value}, count) do
+  defp walk({:augmented_assignment, _meta, [_target, value]}, count) do
     count = count + 1
     walk_expr(value, count)
   end
 
-  defp walk({:property, _name, getter, setter, _metadata}, count) do
+  defp walk({:property, _meta, [getter, setter]}, count) do
     count = count + 1
     count = if getter, do: walk(getter, count), else: count
     if setter, do: walk(setter, count), else: count
   end
 
-  defp walk({:collection_op, _, func, coll}, count) do
-    count = walk_expr(func, count)
-    walk_expr(coll, count)
+  defp walk({:collection_op, _meta, children}, count) when is_list(children) do
+    Enum.reduce(children, count, fn child, c -> walk_expr(child, c) end)
   end
 
-  defp walk({:collection_op, _, func, coll, init}, count) do
-    count = walk_expr(func, count)
-    count = walk_expr(coll, count)
-    walk_expr(init, count)
-  end
-
-  defp walk({:async_operation, _type, body}, count) do
+  defp walk({:async_operation, _meta, [body]}, count) do
     count = count + 1
     walk(body, count)
   end
 
-  # Language-specific: traverse embedded body if present
-  defp walk({:language_specific, _, _, _, metadata}, count) when is_map(metadata) do
+  # Language-specific (3-tuple)
+  defp walk({:language_specific, meta, native_ast}, count) when is_list(meta) do
     count = count + 1
 
-    case Map.get(metadata, :body) do
-      nil -> count
-      body -> walk(body, count)
+    case native_ast do
+      %{body: body} when not is_nil(body) -> walk(body, count)
+      _ -> count
     end
   end
-
-  defp walk({:language_specific, _, _, _}, count), do: count + 1
-  defp walk({:language_specific, _, _}, count), do: count + 1
 
   # Expressions don't count
   defp walk(expr, count), do: walk_expr(expr, count)
 
-  # walk_expr: traverse expressions without counting them as lines
+  # walk_expr: traverse expressions without counting them as lines (3-tuple format)
 
-  defp walk_expr({:binary_op, _, _, left, right}, count) do
+  defp walk_expr({:binary_op, _meta, [left, right]}, count) do
     count = walk_expr(left, count)
     walk_expr(right, count)
   end
 
-  defp walk_expr({:unary_op, _, operand}, count) do
+  defp walk_expr({:unary_op, _meta, [operand]}, count) do
     walk_expr(operand, count)
   end
 
-  defp walk_expr({:tuple, elems}, count) when is_list(elems) do
+  defp walk_expr({:list, _meta, elems}, count) when is_list(elems) do
     Enum.reduce(elems, count, fn elem, c -> walk_expr(elem, c) end)
   end
 
-  defp walk_expr({:list, elems}, count) when is_list(elems) do
-    Enum.reduce(elems, count, fn elem, c -> walk_expr(elem, c) end)
-  end
+  defp walk_expr({:map, _meta, pairs}, count) when is_list(pairs) do
+    Enum.reduce(pairs, count, fn
+      {:pair, _, [key, value]}, c ->
+        c = walk_expr(key, c)
+        walk_expr(value, c)
 
-  defp walk_expr({:map, pairs}, count) when is_list(pairs) do
-    Enum.reduce(pairs, count, fn {key, value}, c ->
-      c = walk_expr(key, c)
-      walk_expr(value, c)
+      other, c ->
+        walk_expr(other, c)
     end)
   end
 
   defp walk_expr({:literal, _, _}, count), do: count
-  defp walk_expr({:variable, _}, count), do: count
+  defp walk_expr({:variable, _, _}, count), do: count
   defp walk_expr(nil, count), do: count
   defp walk_expr(_, count), do: count
 end

@@ -7,24 +7,34 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
 
   describe "calculate/1 - simple constructs" do
     test "literals have no cognitive complexity" do
-      ast = {:literal, :integer, 42}
+      ast = {:literal, [subtype: :integer], 42}
       assert Cognitive.calculate(ast) == 0
     end
 
     test "variables have no cognitive complexity" do
-      ast = {:variable, "x"}
+      ast = {:variable, [], "x"}
       assert Cognitive.calculate(ast) == 0
     end
 
     test "arithmetic operations have no cognitive complexity" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast =
+        {:binary_op, [category: :arithmetic, operator: :+],
+         [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+
       assert Cognitive.calculate(ast) == 0
     end
   end
 
   describe "calculate/1 - conditionals with nesting" do
     test "single conditional has complexity 1" do
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast =
+        {:conditional, [],
+         [
+           {:variable, [], "x"},
+           {:literal, [subtype: :integer], 1},
+           {:literal, [subtype: :integer], 2}
+         ]}
+
       assert Cognitive.calculate(ast) == 1
     end
 
@@ -32,9 +42,17 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
       # if x:
       #   if y:  <- +2 (1 base + 1 nesting)
       ast =
-        {:conditional, {:variable, "x"},
-         {:conditional, {:variable, "y"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-         {:literal, :integer, 3}}
+        {:conditional, [],
+         [
+           {:variable, [], "x"},
+           {:conditional, [],
+            [
+              {:variable, [], "y"},
+              {:literal, [subtype: :integer], 1},
+              {:literal, [subtype: :integer], 2}
+            ]},
+           {:literal, [subtype: :integer], 3}
+         ]}
 
       # Outer: +1, Inner: +2 (base 1 + nesting 1) = 3
       assert Cognitive.calculate(ast) == 3
@@ -45,10 +63,22 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
       #   if y:
       #     if z:
       ast =
-        {:conditional, {:variable, "x"},
-         {:conditional, {:variable, "y"},
-          {:conditional, {:variable, "z"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-          {:literal, :integer, 3}}, {:literal, :integer, 4}}
+        {:conditional, [],
+         [
+           {:variable, [], "x"},
+           {:conditional, [],
+            [
+              {:variable, [], "y"},
+              {:conditional, [],
+               [
+                 {:variable, [], "z"},
+                 {:literal, [subtype: :integer], 1},
+                 {:literal, [subtype: :integer], 2}
+               ]},
+              {:literal, [subtype: :integer], 3}
+            ]},
+           {:literal, [subtype: :integer], 4}
+         ]}
 
       # Level 0: +1, Level 1: +2, Level 2: +3 = 6
       assert Cognitive.calculate(ast) == 6
@@ -57,7 +87,10 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
 
   describe "calculate/1 - loops with nesting" do
     test "single loop has complexity 1" do
-      ast = {:loop, :while, {:variable, "condition"}, {:literal, :integer, 1}}
+      ast =
+        {:loop, [loop_type: :while],
+         [{:variable, [], "condition"}, {:literal, [subtype: :integer], 1}]}
+
       assert Cognitive.calculate(ast) == 1
     end
 
@@ -65,8 +98,16 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
       # while condition:
       #   if x:
       ast =
-        {:loop, :while, {:variable, "condition"},
-         {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}}
+        {:loop, [loop_type: :while],
+         [
+           {:variable, [], "condition"},
+           {:conditional, [],
+            [
+              {:variable, [], "x"},
+              {:literal, [subtype: :integer], 1},
+              {:literal, [subtype: :integer], 2}
+            ]}
+         ]}
 
       # Loop: +1, Conditional (nested): +2 = 3
       assert Cognitive.calculate(ast) == 3
@@ -76,8 +117,12 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
       # while outer:
       #   while inner:
       ast =
-        {:loop, :while, {:variable, "outer"},
-         {:loop, :while, {:variable, "inner"}, {:literal, :integer, 1}}}
+        {:loop, [loop_type: :while],
+         [
+           {:variable, [], "outer"},
+           {:loop, [loop_type: :while],
+            [{:variable, [], "inner"}, {:literal, [subtype: :integer], 1}]}
+         ]}
 
       # Outer: +1, Inner: +2 = 3
       assert Cognitive.calculate(ast) == 3
@@ -86,19 +131,29 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
 
   describe "calculate/1 - boolean operators" do
     test "and operator adds complexity without nesting penalty" do
-      ast = {:binary_op, :boolean, :and, {:variable, "x"}, {:variable, "y"}}
+      ast =
+        {:binary_op, [category: :boolean, operator: :and],
+         [{:variable, [], "x"}, {:variable, [], "y"}]}
+
       assert Cognitive.calculate(ast) == 1
     end
 
     test "or operator adds complexity without nesting penalty" do
-      ast = {:binary_op, :boolean, :or, {:variable, "x"}, {:variable, "y"}}
+      ast =
+        {:binary_op, [category: :boolean, operator: :or],
+         [{:variable, [], "x"}, {:variable, [], "y"}]}
+
       assert Cognitive.calculate(ast) == 1
     end
 
     test "multiple boolean operators add complexity each" do
       ast =
-        {:binary_op, :boolean, :and,
-         {:binary_op, :boolean, :or, {:variable, "x"}, {:variable, "y"}}, {:variable, "z"}}
+        {:binary_op, [category: :boolean, operator: :and],
+         [
+           {:binary_op, [category: :boolean, operator: :or],
+            [{:variable, [], "x"}, {:variable, [], "y"}]},
+           {:variable, [], "z"}
+         ]}
 
       # or: +1, and: +1 = 2
       assert Cognitive.calculate(ast) == 2
@@ -106,9 +161,18 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
 
     test "boolean operators in nested conditional don't get nesting penalty" do
       ast =
-        {:conditional, {:variable, "a"},
-         {:conditional, {:binary_op, :boolean, :and, {:variable, "x"}, {:variable, "y"}},
-          {:literal, :integer, 1}, {:literal, :integer, 2}}, {:literal, :integer, 3}}
+        {:conditional, [],
+         [
+           {:variable, [], "a"},
+           {:conditional, [],
+            [
+              {:binary_op, [category: :boolean, operator: :and],
+               [{:variable, [], "x"}, {:variable, [], "y"}]},
+              {:literal, [subtype: :integer], 1},
+              {:literal, [subtype: :integer], 2}
+            ]},
+           {:literal, [subtype: :integer], 3}
+         ]}
 
       # Outer conditional: +1
       # Inner conditional: +2 (1 + 1 nesting)
@@ -121,20 +185,32 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
   describe "calculate/1 - exception handling" do
     test "try/catch has complexity 1" do
       ast =
-        {:exception_handling, {:literal, :integer, 1},
-         [{:catch, {:variable, "error"}, {:literal, :integer, 2}}], nil}
+        {:exception_handling, [],
+         [
+           {:literal, [subtype: :integer], 1},
+           [{:catch, {:variable, [], "error"}, {:literal, [subtype: :integer], 2}}],
+           nil
+         ]}
 
       assert Cognitive.calculate(ast) == 1
     end
 
     test "nested exception handling adds penalty" do
       ast =
-        {:exception_handling, {:literal, :integer, 1},
+        {:exception_handling, [],
          [
-           {:catch, {:variable, "error"},
-            {:exception_handling, {:literal, :integer, 2},
-             [{:catch, {:variable, "inner_error"}, {:literal, :integer, 3}}], nil}}
-         ], nil}
+           {:literal, [subtype: :integer], 1},
+           [
+             {:catch, {:variable, [], "error"},
+              {:exception_handling, [],
+               [
+                 {:literal, [subtype: :integer], 2},
+                 [{:catch, {:variable, [], "inner_error"}, {:literal, [subtype: :integer], 3}}],
+                 nil
+               ]}}
+           ],
+           nil
+         ]}
 
       # Outer: +1, Inner: +2 = 3
       assert Cognitive.calculate(ast) == 3
@@ -144,10 +220,15 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
   describe "calculate/1 - pattern matching" do
     test "pattern match branches each add complexity with nesting" do
       ast =
-        {:pattern_match, {:variable, "value"},
+        {:pattern_match, [],
          [
-           {{:literal, :integer, 1}, {:literal, :string, "one"}},
-           {{:literal, :integer, 2}, {:literal, :string, "two"}}
+           {:variable, [], "value"},
+           [
+             {:pair, [],
+              [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}]},
+             {:pair, [],
+              [{:literal, [subtype: :integer], 2}, {:literal, [subtype: :string], "two"}]}
+           ]
          ]}
 
       # Two branches, each +1 = 2
@@ -156,14 +237,28 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
 
     test "nested pattern match adds nesting penalties" do
       ast =
-        {:pattern_match, {:variable, "outer"},
+        {:pattern_match, [],
          [
-           {{:literal, :integer, 1},
-            {:pattern_match, {:variable, "inner"},
-             [
-               {{:literal, :integer, 10}, {:literal, :string, "ten"}},
-               {{:literal, :integer, 20}, {:literal, :string, "twenty"}}
-             ]}}
+           {:variable, [], "outer"},
+           [
+             {:pair, [],
+              [
+                {:literal, [subtype: :integer], 1},
+                {:pattern_match, [],
+                 [
+                   {:variable, [], "inner"},
+                   [
+                     {:pair, [],
+                      [{:literal, [subtype: :integer], 10}, {:literal, [subtype: :string], "ten"}]},
+                     {:pair, [],
+                      [
+                        {:literal, [subtype: :integer], 20},
+                        {:literal, [subtype: :string], "twenty"}
+                      ]}
+                   ]
+                 ]}
+              ]}
+           ]
          ]}
 
       # Outer branch: +1
@@ -178,7 +273,13 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
     test "simple code has similar cognitive and cyclomatic complexity" do
       alias Metastatic.Analysis.Complexity.Cyclomatic
 
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast =
+        {:conditional, [],
+         [
+           {:variable, [], "x"},
+           {:literal, [subtype: :integer], 1},
+           {:literal, [subtype: :integer], 2}
+         ]}
 
       cognitive = Cognitive.calculate(ast)
       cyclomatic = Cyclomatic.calculate(ast)
@@ -193,10 +294,22 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
 
       # Deeply nested: if x: if y: if z:
       ast =
-        {:conditional, {:variable, "x"},
-         {:conditional, {:variable, "y"},
-          {:conditional, {:variable, "z"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-          {:literal, :integer, 3}}, {:literal, :integer, 4}}
+        {:conditional, [],
+         [
+           {:variable, [], "x"},
+           {:conditional, [],
+            [
+              {:variable, [], "y"},
+              {:conditional, [],
+               [
+                 {:variable, [], "z"},
+                 {:literal, [subtype: :integer], 1},
+                 {:literal, [subtype: :integer], 2}
+               ]},
+              {:literal, [subtype: :integer], 3}
+            ]},
+           {:literal, [subtype: :integer], 4}
+         ]}
 
       cognitive = Cognitive.calculate(ast)
       cyclomatic = Cyclomatic.calculate(ast)
@@ -212,8 +325,15 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
   describe "calculate/1 - lambdas and collections" do
     test "lambda increases nesting for body" do
       ast =
-        {:lambda, [{:variable, "x"}],
-         {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}}
+        {:lambda, [params: ["x"], captures: []],
+         [
+           {:conditional, [],
+            [
+              {:variable, [], "x"},
+              {:literal, [subtype: :integer], 1},
+              {:literal, [subtype: :integer], 2}
+            ]}
+         ]}
 
       # Conditional inside lambda: +2 (1 + 1 nesting from lambda)
       assert Cognitive.calculate(ast) == 2
@@ -221,10 +341,19 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
 
     test "collection operation with nested conditional" do
       ast =
-        {:collection_op, :map,
-         {:lambda, [{:variable, "x"}],
-          {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}},
-         {:variable, "list"}}
+        {:collection_op, [op_type: :map],
+         [
+           {:lambda, [params: ["x"], captures: []],
+            [
+              {:conditional, [],
+               [
+                 {:variable, [], "x"},
+                 {:literal, [subtype: :integer], 1},
+                 {:literal, [subtype: :integer], 2}
+               ]}
+            ]},
+           {:variable, [], "list"}
+         ]}
 
       # Lambda adds nesting, conditional: +2
       assert Cognitive.calculate(ast) == 2

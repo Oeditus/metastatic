@@ -15,58 +15,73 @@ defmodule Metastatic.Analysis.Purity.Effects do
 
   Returns a list of detected effects.
 
+  ## 3-Tuple Format
+
+  All MetaAST nodes use the uniform 3-tuple structure:
+  `{type_atom, keyword_meta, children_or_value}`
+
   ## Examples
 
-      iex> Metastatic.Analysis.Purity.Effects.detect({:function_call, "print", []})
+      iex> Metastatic.Analysis.Purity.Effects.detect({:function_call, [name: "print"], []})
       [:io]
 
-      iex> Metastatic.Analysis.Purity.Effects.detect({:literal, :integer, 42})
+      iex> Metastatic.Analysis.Purity.Effects.detect({:literal, [subtype: :integer], 42})
       []
   """
   @spec detect(Metastatic.AST.meta_ast()) :: [effect()]
   def detect(ast)
 
-  # I/O operations
-  def detect({:function_call, name, _args}) when is_binary(name) do
-    classify_function_call(name)
+  # I/O operations (3-tuple format)
+  def detect({:function_call, meta, _args}) when is_list(meta) do
+    name = Keyword.get(meta, :name)
+
+    if is_binary(name) do
+      classify_function_call(name)
+    else
+      []
+    end
   end
 
-  # Pure core constructs
-  def detect({:literal, _, _}), do: []
-  def detect({:variable, _}), do: []
-  def detect({:binary_op, _, _, _, _}), do: []
-  def detect({:unary_op, _, _}), do: []
+  # Pure core constructs (3-tuple format)
+  def detect({:literal, _meta, _value}), do: []
+  def detect({:variable, _meta, _name}), do: []
+  def detect({:binary_op, _meta, _children}), do: []
+  def detect({:unary_op, _meta, _children}), do: []
 
   # Control flow (pure if contents are pure)
-  def detect({:conditional, _, _, _}), do: []
-  def detect({:block, _}), do: []
+  def detect({:conditional, _meta, _children}), do: []
+  def detect({:block, _meta, _children}), do: []
 
   # Loops (check for mutations inside)
-  def detect({:loop, _, _, _}), do: []
-  def detect({:loop, _, _, _, _}), do: []
+  def detect({:loop, _meta, _children}), do: []
 
   # Assignments can indicate mutation
-  def detect({:assignment, _, _}), do: [:mutation]
+  def detect({:assignment, _meta, _children}), do: [:mutation]
 
   # Pattern matching is pure (BEAM languages)
-  def detect({:inline_match, _, _}), do: []
+  def detect({:inline_match, _meta, _children}), do: []
 
   # Lambda/anonymous functions are pure
-  def detect({:lambda, _, _}), do: []
+  def detect({:lambda, _meta, _children}), do: []
 
   # Collection operations are pure if no side effects in function arg
-  def detect({:collection_op, _, _, _}), do: []
-  def detect({:collection_op, _, _, _, _}), do: []
+  def detect({:collection_op, _meta, _children}), do: []
 
   # Exception handling is a side effect
-  def detect({:exception_handling, _, _, _}), do: [:exception]
+  def detect({:exception_handling, _meta, _children}), do: [:exception]
 
   # Early returns are control flow (pure)
-  def detect({:early_return, _}), do: []
+  def detect({:early_return, _meta, _children}), do: []
 
   # Language-specific nodes might have effects
-  def detect({:language_specific, _, _}), do: []
-  def detect({:language_specific, _, _, _}), do: []
+  def detect({:language_specific, _meta, _native_ast}), do: []
+
+  # Pair (for map entries)
+  def detect({:pair, _meta, _children}), do: []
+
+  # List and Map collections are pure
+  def detect({:list, _meta, _children}), do: []
+  def detect({:map, _meta, _children}), do: []
 
   # Unknown nodes
   def detect(_), do: []

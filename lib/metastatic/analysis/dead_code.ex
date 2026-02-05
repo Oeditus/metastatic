@@ -18,9 +18,9 @@ defmodule Metastatic.Analysis.DeadCode do
       alias Metastatic.{Document, Analysis.DeadCode}
 
       # Analyze for dead code
-      ast = {:block, [
-        {:early_return, {:literal, :integer, 42}},
-        {:function_call, "print", [{:literal, :string, "unreachable"}]}
+      ast = {:block, [], [
+        {:early_return, [], [{:literal, [subtype: :integer], 42}]},
+        {:function_call, [name: "print"], [{:literal, [subtype: :string], "unreachable"}]}
       ]}
       doc = Document.new(ast, :python)
       {:ok, result} = DeadCode.analyze(doc)
@@ -32,16 +32,16 @@ defmodule Metastatic.Analysis.DeadCode do
   ## Examples
 
       # No dead code
-      iex> ast = {:binary_op, :arithmetic, :+, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.DeadCode.analyze(doc)
       iex> result.has_dead_code?
       false
 
       # Unreachable after return
-      iex> ast = {:block, [
-      ...>   {:early_return, {:literal, :integer, 1}},
-      ...>   {:literal, :integer, 2}
+      iex> ast = {:block, [], [
+      ...>   {:early_return, [], [{:literal, [subtype: :integer], 1}]},
+      ...>   {:literal, [subtype: :integer], 2}
       ...> ]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.DeadCode.analyze(doc)
@@ -68,7 +68,7 @@ defmodule Metastatic.Analysis.DeadCode do
 
     ## Examples
 
-        iex> ast = {:literal, :integer, 42}
+        iex> ast = {:literal, [subtype: :integer], 42}
         iex> doc = Metastatic.Document.new(ast, :elixir)
         iex> {:ok, result} = Metastatic.Analysis.DeadCode.analyze(doc)
         iex> result.has_dead_code?
@@ -88,27 +88,26 @@ defmodule Metastatic.Analysis.DeadCode do
 
   # Private implementation
 
-  # Detect code unreachable after early_return nodes
+  # Detect code unreachable after early_return nodes (3-tuple format)
   defp detect_unreachable_after_return(locations, ast, path) do
     case ast do
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         check_block_for_unreachable(locations, statements, path)
 
-      {:conditional, _cond, then_branch, else_branch} ->
+      {:conditional, _meta, [_cond, then_branch, else_branch]} ->
         locations
         |> detect_unreachable_after_return(then_branch, [:then | path])
         |> detect_unreachable_after_return(else_branch, [:else | path])
 
-      {:loop, :while, _cond, body} ->
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        # Body is typically last child
+        body = List.last(children)
         detect_unreachable_after_return(locations, body, [:loop_body | path])
 
-      {:loop, _, _iter, _coll, body} ->
-        detect_unreachable_after_return(locations, body, [:loop_body | path])
-
-      {:lambda, _params, body} ->
+      {:lambda, _meta, [body]} ->
         detect_unreachable_after_return(locations, body, [:lambda_body | path])
 
-      {:exception_handling, try_block, catches, else_block} ->
+      {:exception_handling, _meta, [try_block, catches, else_block]} ->
         locations
         |> detect_unreachable_after_return(try_block, [:try | path])
         |> detect_unreachable_in_catches(catches, path)
@@ -135,7 +134,7 @@ defmodule Metastatic.Analysis.DeadCode do
 
             {[new_loc | locs], true}
 
-          match?({:early_return, _}, stmt) ->
+          match?({:early_return, _, _}, stmt) ->
             # Found return, subsequent statements are unreachable
             {detect_unreachable_after_return(locs, stmt, path), true}
 
@@ -161,7 +160,11 @@ defmodule Metastatic.Analysis.DeadCode do
     walk_for_conditionals(ast, locations)
   end
 
-  defp walk_for_conditionals({:conditional, condition, then_branch, else_branch}, locations) do
+  # 3-tuple format
+  defp walk_for_conditionals(
+         {:conditional, _meta, [condition, then_branch, else_branch]},
+         locations
+       ) do
     locations =
       case evaluate_constant_condition(condition) do
         {:constant, true} when not is_nil(else_branch) ->
@@ -206,25 +209,27 @@ defmodule Metastatic.Analysis.DeadCode do
     end
   end
 
-  defp walk_for_conditionals({:block, statements}, locations) when is_list(statements) do
+  defp walk_for_conditionals({:block, _meta, statements}, locations) when is_list(statements) do
     Enum.reduce(statements, locations, fn stmt, locs ->
       walk_for_conditionals(stmt, locs)
     end)
   end
 
-  defp walk_for_conditionals({:loop, :while, _cond, body}, locations) do
+  defp walk_for_conditionals({:loop, meta, children}, locations)
+       when is_list(meta) and is_list(children) do
+    Enum.reduce(children, locations, fn child, locs ->
+      walk_for_conditionals(child, locs)
+    end)
+  end
+
+  defp walk_for_conditionals({:lambda, _meta, [body]}, locations) do
     walk_for_conditionals(body, locations)
   end
 
-  defp walk_for_conditionals({:loop, _, _iter, _coll, body}, locations) do
-    walk_for_conditionals(body, locations)
-  end
-
-  defp walk_for_conditionals({:lambda, _params, body}, locations) do
-    walk_for_conditionals(body, locations)
-  end
-
-  defp walk_for_conditionals({:exception_handling, try_block, catches, else_block}, locations) do
+  defp walk_for_conditionals(
+         {:exception_handling, _meta, [try_block, catches, else_block]},
+         locations
+       ) do
     locations = walk_for_conditionals(try_block, locations)
 
     locations =
@@ -239,27 +244,27 @@ defmodule Metastatic.Analysis.DeadCode do
     end
   end
 
-  defp walk_for_conditionals({:binary_op, _, _, left, right}, locations) do
+  defp walk_for_conditionals({:binary_op, _meta, [left, right]}, locations) do
     locations = walk_for_conditionals(left, locations)
     walk_for_conditionals(right, locations)
   end
 
-  defp walk_for_conditionals({:unary_op, _, _op, operand}, locations) do
+  defp walk_for_conditionals({:unary_op, _meta, [operand]}, locations) do
     walk_for_conditionals(operand, locations)
   end
 
-  defp walk_for_conditionals({:function_call, _name, args}, locations) when is_list(args) do
+  defp walk_for_conditionals({:function_call, _meta, args}, locations) when is_list(args) do
     Enum.reduce(args, locations, fn arg, locs ->
       walk_for_conditionals(arg, locs)
     end)
   end
 
-  defp walk_for_conditionals({:assignment, target, value}, locations) do
+  defp walk_for_conditionals({:assignment, _meta, [target, value]}, locations) do
     locations = walk_for_conditionals(target, locations)
     walk_for_conditionals(value, locations)
   end
 
-  defp walk_for_conditionals({:inline_match, pattern, value}, locations) do
+  defp walk_for_conditionals({:inline_match, _meta, [pattern, value]}, locations) do
     locations = walk_for_conditionals(pattern, locations)
     walk_for_conditionals(value, locations)
   end
@@ -267,18 +272,20 @@ defmodule Metastatic.Analysis.DeadCode do
   defp walk_for_conditionals(nil, locations), do: locations
   defp walk_for_conditionals(_, locations), do: locations
 
-  # Evaluate if a condition is a constant true/false
-  defp evaluate_constant_condition({:literal, :boolean, value}) when is_boolean(value) do
-    {:constant, value}
+  # Evaluate if a condition is a constant true/false (3-tuple format)
+  defp evaluate_constant_condition({:literal, meta, value}) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype)
+
+    case {subtype, value} do
+      {:boolean, bool} when is_boolean(bool) -> {:constant, bool}
+      {:integer, 0} -> {:constant, false}
+      {:integer, n} when n != 0 -> {:constant, true}
+      {:null, _} -> {:constant, false}
+      {:string, ""} -> {:constant, false}
+      {:string, _} -> {:constant, true}
+      _ -> :not_constant
+    end
   end
-
-  defp evaluate_constant_condition({:literal, :integer, 0}), do: {:constant, false}
-  defp evaluate_constant_condition({:literal, :integer, n}) when n != 0, do: {:constant, true}
-
-  defp evaluate_constant_condition({:literal, :null, _}), do: {:constant, false}
-
-  defp evaluate_constant_condition({:literal, :string, ""}), do: {:constant, false}
-  defp evaluate_constant_condition({:literal, :string, _}), do: {:constant, true}
 
   defp evaluate_constant_condition(_), do: :not_constant
 

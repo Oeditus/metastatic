@@ -6,19 +6,20 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
-**Current Status:** Phase 2 Complete - Structural Layer Implemented + M1 Metadata Preservation (v0.2.0-dev)  
-- Core MetaAST foundation implemented with 1431 passing tests (100% coverage)
+**Current Status:** Phase 9 Complete - Uniform 3-Tuple MetaAST Format (v0.3.0-dev)  
+- Core MetaAST foundation implemented with 1422 passing tests (235 doctests + 1187 tests, 100% coverage)
+- **New Uniform 3-Tuple Format**: All MetaAST nodes use `{type_atom, keyword_meta, children_or_value}`
 - M2.2s Structural/Organizational Layer: container, function_def, attribute_access, augmented_assignment, property
 - M1 Metadata Preservation: Full context threading (module, function, arity, visibility) for Ragex integration
-- Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented
-- All 9 analysis tools support structural types
-- Business Logic Analyzers: 20 language-agnostic analyzers operational with M1 context
+- Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented with 3-tuple output
+- All 9 analysis tools support structural types and new 3-tuple format
+- Business Logic Analyzers: 20 language-agnostic analyzers updated for 3-tuple format
 
 ## Essential Commands
 
 ### Testing
 ```bash
-# Run all tests (1431 tests: 202 doctests + 1229 tests, all passing)
+# Run all tests (1422 tests: 235 doctests + 1187 tests, all passing)
 mix test
 
 # Run specific test file
@@ -179,7 +180,7 @@ AST.node_arity(node)       # => 2
 AST.node_visibility(node)  # => :public
 ```
 
-**Example - Elixir Adapter:**
+**Example - Elixir Adapter (New 3-Tuple Format):**
 ```elixir
 # Source
 defmodule MyApp.UserController do
@@ -189,11 +190,14 @@ defmodule MyApp.UserController do
   end
 end
 
-# MetaAST with context
-{:container, :module, "MyApp.UserController", nil, [], [], 
-  {:function_def, "create", [...], nil, %{visibility: :public}, body,
-    %{function: "create", arity: 2, visibility: :public, language: :elixir, line: 2}},
-  %{module: "MyApp.UserController", language: :elixir, line: 1}}
+# MetaAST with uniform 3-tuple format
+{:container, 
+  [container_type: :module, name: "MyApp.UserController", module: "MyApp.UserController", 
+   language: :elixir, line: 1],
+  [{:function_def, 
+    [name: "create", params: [...], visibility: :public, arity: 2, 
+     function: "create", language: :elixir, line: 2],
+    [body_statements...]}]}
 ```
 
 **Integration with Analysis:**
@@ -204,6 +208,22 @@ end
 
 ### Type System Key Decisions
 
+**Uniform 3-Tuple Format (NEW):**
+All MetaAST nodes now use a uniform structure: `{type_atom, keyword_meta, children_or_value}`
+- `type_atom` - Node type (e.g., `:literal`, `:binary_op`, `:function_def`)
+- `keyword_meta` - Keyword list with metadata (line, subtype, operator, etc.)
+- `children_or_value` - Value for leaf nodes, list of children for composite nodes
+
+**Examples:**
+```elixir
+{:literal, [subtype: :integer], 42}
+{:variable, [line: 1], "x"}
+{:binary_op, [category: :arithmetic, operator: :+], [left, right]}
+{:function_call, [name: "Repo.all"], [args...]}
+{:collection_op, [op_type: :map], [lambda, collection]}
+{:function_def, [name: "create", params: [...], visibility: :public], [body...]}
+```
+
 **Critical naming:**
 - The main type is `meta_ast()` (NOT `node()` - that conflicts with Elixir built-ins)
 - Always use `meta_ast()` in type specs
@@ -213,13 +233,10 @@ end
 - `:comparison` - `>`, `<`, `==`, `!=`, etc.
 - `:boolean` - `and`, `or`, etc.
 
-**Loop type variations:**
-- `:while` loops: `{:loop, :while, condition, body}` (4-tuple)
-- `:for`/`:for_each` loops: `{:loop, :for, iterator, collection, body}` (5-tuple)
-
-**Collection operations:**
-- Map/filter: `{:collection_op, :map, fn, collection}` (4-tuple)
-- Reduce: `{:collection_op, :reduce, fn, collection, initial}` (5-tuple)
+**Metadata in keyword lists:**
+- Loop type: `{:loop, [loop_type: :while], [condition, body]}`
+- Collection ops: `{:collection_op, [op_type: :map], [lambda, collection]}`
+- Exception handling: `{:exception_handling, [], [try_block, match_arm1, ...]}`
 
 **Wildcard pattern:**
 - Pattern matching supports `:_` as catch-all
@@ -227,20 +244,22 @@ end
 ## Development Workflow
 
 ### Phase Context
-Phase 2 (Structural Layer) is **complete**. Current state:
+Phase 9 (Uniform 3-Tuple Format) is **complete**. Current state:
+- All MetaAST nodes migrated to uniform 3-tuple format: `{type_atom, keyword_meta, children_or_value}`
 - Core MetaAST types (M2.1 Core + M2.2 Extended + M2.2s Structural) fully implemented and tested
-- All 5 language adapters operational: Python, Elixir, Ruby, Erlang, Haskell
+- All 5 language adapters operational with 3-tuple output: Python, Elixir, Ruby, Erlang, Haskell
 - Full structural support: containers, function definitions, properties
-- All 9 analysis tools work with structural types
-- 20 business logic analyzers implemented (language-agnostic)
+- All 9 analysis tools updated for 3-tuple format
+- 20 business logic analyzers updated for 3-tuple format
 
 ### Working with MetaAST
 
 ```elixir
 alias Metastatic.{AST, Document, Validator, Builder}
 
-# Create MetaAST manually (current capability)
-ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+# Create MetaAST manually using new 3-tuple format
+ast = {:binary_op, [category: :arithmetic, operator: :+], 
+  [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
 # Validate conformance
 AST.conforms?(ast)  # => true
@@ -324,8 +343,9 @@ mix docs
 
 Example - all three represent the same M2 concept:
 ```
-M2 (meta-level):
-  {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+M2 (meta-level, new 3-tuple format):
+  {:binary_op, [category: :arithmetic, operator: :+], 
+    [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
 M1 instances (language-specific):
   Python:     BinOp(op=Add(), left=Name('x'), right=Num(5))

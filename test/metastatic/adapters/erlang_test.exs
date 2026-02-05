@@ -45,86 +45,104 @@ defmodule Metastatic.Adapters.ErlangTest do
 
   describe "ToMeta - literals" do
     test "transforms integer literals" do
-      assert {:ok, {:literal, :integer, 42}, %{}} = ToMeta.transform({:integer, 1, 42})
+      assert {:ok, {:literal, [subtype: :integer], 42}, %{}} = ToMeta.transform({:integer, 1, 42})
     end
 
     test "transforms float literals" do
-      assert {:ok, {:literal, :float, 3.14}, %{}} = ToMeta.transform({:float, 1, 3.14})
+      assert {:ok, {:literal, [subtype: :float], 3.14}, %{}} = ToMeta.transform({:float, 1, 3.14})
     end
 
     test "transforms string literals" do
-      assert {:ok, {:literal, :string, "hello"}, %{}} = ToMeta.transform({:string, 1, ~c"hello"})
+      assert {:ok, {:literal, [subtype: :string], "hello"}, %{}} =
+               ToMeta.transform({:string, 1, ~c"hello"})
     end
 
     test "transforms boolean literals" do
-      assert {:ok, {:literal, :boolean, true}, %{}} = ToMeta.transform({:atom, 1, true})
-      assert {:ok, {:literal, :boolean, false}, %{}} = ToMeta.transform({:atom, 1, false})
+      assert {:ok, {:literal, [subtype: :boolean], true}, %{}} =
+               ToMeta.transform({:atom, 1, true})
+
+      assert {:ok, {:literal, [subtype: :boolean], false}, %{}} =
+               ToMeta.transform({:atom, 1, false})
     end
 
     test "transforms nil" do
-      assert {:ok, {:literal, :null, nil}, %{}} = ToMeta.transform({:atom, 1, nil})
+      assert {:ok, {:literal, [subtype: :null], nil}, %{}} = ToMeta.transform({:atom, 1, nil})
     end
 
     test "transforms undefined" do
-      assert {:ok, {:literal, :null, nil}, %{erlang_atom: :undefined}} =
+      assert {:ok, {:literal, [subtype: :null], nil}, %{erlang_atom: :undefined}} =
                ToMeta.transform({:atom, 1, :undefined})
     end
 
     test "transforms atoms as symbols" do
-      assert {:ok, {:literal, :symbol, :atom}, %{}} = ToMeta.transform({:atom, 1, :atom})
+      assert {:ok, {:literal, [subtype: :symbol], :atom}, %{}} =
+               ToMeta.transform({:atom, 1, :atom})
     end
   end
 
   describe "ToMeta - variables" do
     test "transforms variable references" do
-      assert {:ok, {:variable, "X"}, %{line: 1}} = ToMeta.transform({:var, 1, :X})
+      assert {:ok, {:variable, [], "X"}, %{line: 1}} = ToMeta.transform({:var, 1, :X})
     end
   end
 
   describe "ToMeta - binary operators" do
     test "transforms arithmetic addition" do
       ast = {:op, 1, :+, {:var, 1, :X}, {:integer, 1, 5}}
-      assert {:ok, {:binary_op, :arithmetic, :+, left, right}, %{}} = ToMeta.transform(ast)
-      assert {:variable, "X"} = left
-      assert {:literal, :integer, 5} = right
+
+      assert {:ok, {:binary_op, [category: :arithmetic, operator: :+], [left, right]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:variable, [], "X"} = left
+      assert {:literal, [subtype: :integer], 5} = right
     end
 
     test "transforms comparison operators" do
       ast = {:op, 1, :==, {:integer, 1, 1}, {:integer, 1, 2}}
-      assert {:ok, {:binary_op, :comparison, :==, _, _}, %{}} = ToMeta.transform(ast)
+
+      assert {:ok, {:binary_op, [category: :comparison, operator: :==], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "normalizes Erlang-specific comparison operators" do
       ast = {:op, 1, :"/=", {:integer, 1, 1}, {:integer, 1, 2}}
-      assert {:ok, {:binary_op, :comparison, :!=, _, _}, %{}} = ToMeta.transform(ast)
+
+      assert {:ok, {:binary_op, [category: :comparison, operator: :!=], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms boolean operators" do
       ast = {:op, 1, :andalso, {:atom, 1, true}, {:atom, 1, false}}
 
-      assert {:ok, {:binary_op, :boolean, :and, _, _}, %{erlang_op: :andalso}} =
-               ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :boolean, operator: :and], _children},
+              %{erlang_op: :andalso}} = ToMeta.transform(ast)
     end
   end
 
   describe "ToMeta - unary operators" do
     test "transforms logical not" do
       ast = {:op, 1, :not, {:atom, 1, true}}
-      assert {:ok, {:unary_op, :boolean, :not, operand}, %{}} = ToMeta.transform(ast)
-      assert {:literal, :boolean, true} = operand
+
+      assert {:ok, {:unary_op, [category: :boolean, operator: :not], [operand]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:literal, [subtype: :boolean], true} = operand
     end
 
     test "transforms negation" do
       ast = {:op, 1, :-, {:integer, 1, 42}}
-      assert {:ok, {:unary_op, :arithmetic, :-, operand}, %{}} = ToMeta.transform(ast)
-      assert {:literal, :integer, 42} = operand
+
+      assert {:ok, {:unary_op, [category: :arithmetic, operator: :-], [operand]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:literal, [subtype: :integer], 42} = operand
     end
   end
 
   describe "ToMeta - function calls" do
     test "transforms local function calls" do
       ast = {:call, 1, {:atom, 1, :foo}, [{:integer, 1, 1}, {:integer, 1, 2}]}
-      assert {:ok, {:function_call, "foo", args}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:function_call, [name: "foo"], args}, %{}} = ToMeta.transform(ast)
       assert [_, _] = args
     end
 
@@ -133,7 +151,7 @@ defmodule Metastatic.Adapters.ErlangTest do
         {:call, 1, {:remote, 1, {:atom, 1, :lists}, {:atom, 1, :map}},
          [{:atom, 1, :fun}, {nil, 1}]}
 
-      assert {:ok, {:function_call, "lists.map", _args}, %{call_type: :remote}} =
+      assert {:ok, {:function_call, [name: "lists.map"], _args}, %{call_type: :remote}} =
                ToMeta.transform(ast)
     end
   end
@@ -142,9 +160,9 @@ defmodule Metastatic.Adapters.ErlangTest do
     test "transforms simple match: X = 5" do
       ast = {:match, 1, {:var, 1, :X}, {:integer, 1, 5}}
 
-      assert {:ok, {:inline_match, pattern, value}, metadata} = ToMeta.transform(ast)
-      assert {:variable, "X"} = pattern
-      assert {:literal, :integer, 5} = value
+      assert {:ok, {:inline_match, [], [pattern, value]}, metadata} = ToMeta.transform(ast)
+      assert {:variable, [], "X"} = pattern
+      assert {:literal, [subtype: :integer], 5} = value
       assert %{line: 1} = metadata
     end
 
@@ -154,13 +172,15 @@ defmodule Metastatic.Adapters.ErlangTest do
       value = {:tuple, 1, [{:integer, 1, 1}, {:integer, 1, 2}]}
       ast = {:match, 1, pattern, value}
 
-      assert {:ok, {:inline_match, pattern_meta, value_meta}, _metadata} = ToMeta.transform(ast)
-      assert {:tuple, [var_x, var_y]} = pattern_meta
-      assert {:variable, "X"} = var_x
-      assert {:variable, "Y"} = var_y
-      assert {:tuple, [lit1, lit2]} = value_meta
-      assert {:literal, :integer, 1} = lit1
-      assert {:literal, :integer, 2} = lit2
+      assert {:ok, {:inline_match, [], [pattern_meta, value_meta]}, _metadata} =
+               ToMeta.transform(ast)
+
+      assert {:tuple, [], [var_x, var_y]} = pattern_meta
+      assert {:variable, [], "X"} = var_x
+      assert {:variable, [], "Y"} = var_y
+      assert {:tuple, [], [lit1, lit2]} = value_meta
+      assert {:literal, [subtype: :integer], 1} = lit1
+      assert {:literal, [subtype: :integer], 2} = lit2
     end
 
     test "transforms list cons pattern: [H | T] = List" do
@@ -169,59 +189,72 @@ defmodule Metastatic.Adapters.ErlangTest do
       value = {:var, 1, :List}
       ast = {:match, 1, pattern, value}
 
-      assert {:ok, {:inline_match, pattern_meta, value_meta}, _metadata} = ToMeta.transform(ast)
-      assert {:cons_pattern, {:variable, "H"}, {:variable, "T"}} = pattern_meta
-      assert {:variable, "List"} = value_meta
+      assert {:ok, {:inline_match, [], [pattern_meta, value_meta]}, _metadata} =
+               ToMeta.transform(ast)
+
+      assert {:cons_pattern, [], [head, tail]} = pattern_meta
+      assert {:variable, [], "H"} = head
+      assert {:variable, [], "T"} = tail
+      assert {:variable, [], "List"} = value_meta
     end
 
     test "transforms wildcard pattern: _ = Value" do
       # _ = Value
       ast = {:match, 1, {:var, 1, :_}, {:var, 1, :Value}}
 
-      assert {:ok, {:inline_match, pattern, value}, _metadata} = ToMeta.transform(ast)
+      assert {:ok, {:inline_match, [], [pattern, value]}, _metadata} = ToMeta.transform(ast)
       assert :_ = pattern
-      assert {:variable, "Value"} = value
+      assert {:variable, [], "Value"} = value
     end
   end
 
   describe "FromMeta - literals" do
     test "transforms integer literals back" do
-      assert {:ok, {:integer, 0, 42}} = FromMeta.transform({:literal, :integer, 42}, %{})
+      assert {:ok, {:integer, 0, 42}} =
+               FromMeta.transform({:literal, [subtype: :integer], 42}, %{})
     end
 
     test "transforms string literals back" do
       assert {:ok, {:string, 0, ~c"hello"}} =
-               FromMeta.transform({:literal, :string, "hello"}, %{})
+               FromMeta.transform({:literal, [subtype: :string], "hello"}, %{})
     end
 
     test "transforms boolean literals back" do
-      assert {:ok, {:atom, 0, true}} = FromMeta.transform({:literal, :boolean, true}, %{})
+      assert {:ok, {:atom, 0, true}} =
+               FromMeta.transform({:literal, [subtype: :boolean], true}, %{})
     end
   end
 
   describe "FromMeta - variables" do
     test "transforms variables back" do
-      assert {:ok, {:var, 0, :X}} = FromMeta.transform({:variable, "X"}, %{})
+      assert {:ok, {:var, 0, :X}} = FromMeta.transform({:variable, [], "X"}, %{})
     end
   end
 
   describe "FromMeta - binary operators" do
     test "transforms arithmetic operators back" do
-      meta_ast = {:binary_op, :arithmetic, :+, {:variable, "X"}, {:literal, :integer, 5}}
+      meta_ast =
+        {:binary_op, [category: :arithmetic, operator: :+],
+         [{:variable, [], "X"}, {:literal, [subtype: :integer], 5}]}
 
       assert {:ok, {:op, 0, :+, {:var, 0, :X}, {:integer, 0, 5}}} =
                FromMeta.transform(meta_ast, %{})
     end
 
     test "denormalizes comparison operators" do
-      meta_ast = {:binary_op, :comparison, :!=, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      meta_ast =
+        {:binary_op, [category: :comparison, operator: :!=],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+
       assert {:ok, {:op, 0, :"/=", _, _}} = FromMeta.transform(meta_ast, %{})
     end
   end
 
   describe "FromMeta - function calls" do
     test "transforms local function calls back" do
-      meta_ast = {:function_call, "foo", [{:literal, :integer, 1}, {:literal, :integer, 2}]}
+      meta_ast =
+        {:function_call, [name: "foo"],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
 
       assert {:ok, {:call, 0, {:atom, 0, :foo}, [{:integer, 0, 1}, {:integer, 0, 2}]}} =
                FromMeta.transform(meta_ast, %{})
@@ -230,7 +263,8 @@ defmodule Metastatic.Adapters.ErlangTest do
 
   describe "FromMeta - inline_match (pattern matching)" do
     test "transforms simple match back: X = 5" do
-      meta_ast = {:inline_match, {:variable, "X"}, {:literal, :integer, 5}}
+      meta_ast =
+        {:inline_match, [], [{:variable, [], "X"}, {:literal, [subtype: :integer], 5}]}
 
       assert {:ok, {:match, 0, {:var, 0, :X}, {:integer, 0, 5}}} =
                FromMeta.transform(meta_ast, %{})
@@ -238,8 +272,11 @@ defmodule Metastatic.Adapters.ErlangTest do
 
     test "transforms tuple destructuring back: {X, Y} = {1, 2}" do
       meta_ast =
-        {:inline_match, {:tuple, [{:variable, "X"}, {:variable, "Y"}]},
-         {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
+        {:inline_match, [],
+         [
+           {:tuple, [], [{:variable, [], "X"}, {:variable, [], "Y"}]},
+           {:tuple, [], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+         ]}
 
       assert {:ok, {:match, 0, pattern, value}} = FromMeta.transform(meta_ast, %{})
       assert {:tuple, 0, [{:var, 0, :X}, {:var, 0, :Y}]} = pattern
@@ -248,21 +285,27 @@ defmodule Metastatic.Adapters.ErlangTest do
 
     test "transforms cons pattern back: [H | T] = List" do
       meta_ast =
-        {:inline_match, {:cons_pattern, {:variable, "H"}, {:variable, "T"}}, {:variable, "List"}}
+        {:inline_match, [],
+         [
+           {:cons_pattern, [], [{:variable, [], "H"}, {:variable, [], "T"}]},
+           {:variable, [], "List"}
+         ]}
 
       assert {:ok, {:match, 0, {:cons, 0, {:var, 0, :H}, {:var, 0, :T}}, {:var, 0, :List}}} =
                FromMeta.transform(meta_ast, %{})
     end
 
     test "transforms wildcard pattern back: _ = Value" do
-      meta_ast = {:inline_match, :_, {:variable, "Value"}}
+      meta_ast = {:inline_match, [], [:_, {:variable, [], "Value"}]}
 
       assert {:ok, {:match, 0, {:var, 0, :_}, {:var, 0, :Value}}} =
                FromMeta.transform(meta_ast, %{})
     end
 
     test "preserves line numbers in round-trip" do
-      meta_ast = {:inline_match, {:variable, "X"}, {:literal, :integer, 5}}
+      meta_ast =
+        {:inline_match, [], [{:variable, [], "X"}, {:literal, [subtype: :integer], 5}]}
+
       metadata = %{line: 42}
 
       assert {:ok, {:match, 42, _, _}} = FromMeta.transform(meta_ast, metadata)
@@ -314,72 +357,16 @@ defmodule Metastatic.Adapters.ErlangTest do
 
       # Both should produce semantically equivalent MetaAST (ignoring variable name case)
       # Elixir uses lowercase 'x', Erlang uses uppercase 'X' - this is expected
-      # Handle optional location metadata
+      # New 3-tuple format: {:binary_op, meta, [left, right]}
       assert match?(
-               {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}},
+               {:binary_op, _, [{:variable, _, _}, {:literal, _, 5}]},
                elixir_meta
-             ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}},
-                 elixir_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}},
-                 elixir_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}},
-                 elixir_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}, _},
-                 elixir_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}, _},
-                 elixir_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}, _},
-                 elixir_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}, _},
-                 elixir_meta
-               )
+             )
 
       assert match?(
-               {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}},
+               {:binary_op, _, [{:variable, _, _}, {:literal, _, 5}]},
                erlang_meta
-             ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}},
-                 erlang_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}},
-                 erlang_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}},
-                 erlang_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5}, _},
-                 erlang_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5}, _},
-                 erlang_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _}, {:literal, :integer, 5, _}, _},
-                 erlang_meta
-               ) or
-               match?(
-                 {:binary_op, :arithmetic, :+, {:variable, _, _}, {:literal, :integer, 5, _}, _},
-                 erlang_meta
-               )
+             )
     end
   end
 end

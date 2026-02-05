@@ -5,6 +5,11 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
   This module implements the reification function ρ_Haskell that converts
   meta-level representations back to Haskell-specific AST structures.
 
+  ## 3-Tuple Format
+
+  All MetaAST nodes use the uniform 3-tuple structure:
+  `{type_atom, keyword_meta, children_or_value}`
+
   ## Status
 
   Basic M2.1 Core Layer support implemented.
@@ -18,41 +23,24 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
   """
   @spec transform(term(), map()) :: {:ok, term()} | {:error, String.t()}
 
-  # M2.1 Core Layer - Literals
+  # M2.1 Core Layer - Literals (3-tuple format)
 
-  def transform({:literal, :integer, value}, _metadata) do
-    {:ok,
-     %{
-       "type" => "literal",
-       "value" => %{"literalType" => "int", "value" => value}
-     }}
+  def transform({:literal, meta, value}, _metadata) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype, :unknown)
+    transform_literal(subtype, value)
   end
 
-  def transform({:literal, :float, value}, _metadata) do
-    {:ok,
-     %{
-       "type" => "literal",
-       "value" => %{"literalType" => "float", "value" => value}
-     }}
-  end
+  # M2.1 Core Layer - Variables (3-tuple format)
 
-  def transform({:literal, :string, value}, _metadata) do
-    {:ok,
-     %{
-       "type" => "literal",
-       "value" => %{"literalType" => "string", "value" => value}
-     }}
-  end
-
-  # M2.1 Core Layer - Variables
-
-  def transform({:variable, name}, _metadata) do
+  def transform({:variable, _meta, name}, _metadata) do
     {:ok, %{"type" => "var", "name" => name}}
   end
 
-  # M2.1 Core Layer - Binary Operations
+  # M2.1 Core Layer - Binary Operations (3-tuple format)
 
-  def transform({:binary_op, _category, op, left, right}, _metadata) do
+  def transform({:binary_op, meta, [left, right]}, _metadata) when is_list(meta) do
+    op = Keyword.get(meta, :operator)
+
     with {:ok, left_ast} <- transform(left, %{}),
          {:ok, right_ast} <- transform(right, %{}) do
       {:ok,
@@ -65,9 +53,10 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  # M2.1 Core Layer - Lambda
+  # M2.1 Core Layer - Lambda (3-tuple format)
 
-  def transform({:lambda, params, body}, _metadata) do
+  def transform({:lambda, meta, [body]}, _metadata) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
     patterns = Enum.map(params, fn param -> %{"type" => "var_pat", "name" => param} end)
 
     with {:ok, body_ast} <- transform(body, %{}) do
@@ -80,9 +69,9 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  # M2.1 Core Layer - Conditionals
+  # M2.1 Core Layer - Conditionals (3-tuple format)
 
-  def transform({:conditional, condition, then_branch, else_branch}, _metadata) do
+  def transform({:conditional, _meta, [condition, then_branch, else_branch]}, _metadata) do
     with {:ok, cond_ast} <- transform(condition, %{}),
          {:ok, then_ast} <- transform(then_branch, %{}),
          {:ok, else_ast} <- transform(else_branch, %{}) do
@@ -96,39 +85,43 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  # M2.1 Core Layer - Function Calls
+  # M2.1 Core Layer - Function Calls (3-tuple format)
 
-  def transform({:function_call, name, args}, _metadata) do
+  def transform({:function_call, meta, args}, _metadata) when is_list(meta) do
+    name = Keyword.get(meta, :name)
     transform_function_call(name, args)
   end
 
-  # M2.1 Core Layer - Collections
+  # M2.1 Core Layer - Lists (3-tuple format)
 
-  def transform({:literal, :collection, elements, metadata}, _ignore) do
-    transform_collection(elements, metadata)
+  def transform({:list, meta, elements}, _metadata) when is_list(meta) do
+    collection_type = Keyword.get(meta, :collection_type, :list)
+    transform_collection(elements, collection_type)
   end
 
-  def transform({:literal, :collection, elements}, metadata) when is_map(metadata) do
-    transform_collection(elements, metadata)
+  # M2.1 Core Layer - Blocks (3-tuple format)
+
+  def transform({:block, meta, statements}, _metadata) when is_list(meta) do
+    construct = Keyword.get(meta, :construct)
+    transform_block(statements, construct)
   end
 
-  def transform({:literal, :constructor, name}, _metadata) do
-    {:ok, %{"type" => "con", "name" => name}}
+  # M2.1 Core Layer - Assignment (3-tuple format)
+
+  def transform({:assignment, _meta, [{:variable, _, name}, value]}, _metadata) do
+    with {:ok, value_ast} <- transform(value, %{}) do
+      {:ok,
+       %{
+         "type" => "pat_bind",
+         "pattern" => %{"type" => "var_pat", "name" => name},
+         "rhs" => value_ast
+       }}
+    end
   end
 
-  # M2.1 Core Layer - Blocks (let bindings)
+  # M2.2 Extended Layer - Pattern Matching (3-tuple format)
 
-  def transform({:block, statements, metadata}, _ignore) do
-    transform_block(statements, metadata)
-  end
-
-  def transform({:block, statements}, metadata) when is_map(metadata) do
-    transform_block(statements, metadata)
-  end
-
-  # M2.2 Extended Layer - Pattern Matching
-
-  def transform({:pattern_match, scrutinee, branches, _else_branch}, _metadata) do
+  def transform({:pattern_match, _meta, [scrutinee, branches, _else_branch]}, _metadata) do
     with {:ok, scrutinee_ast} <- transform(scrutinee, %{}),
          {:ok, branches_ast} <- transform_case_branches(branches) do
       {:ok,
@@ -140,15 +133,25 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  # M2.3 Native Layer - Passthrough
+  # M2.3 Native Layer - Passthrough (3-tuple format)
 
-  def transform({:language_specific, :haskell, original_ast, _construct_type}, _metadata) do
-    {:ok, original_ast}
+  def transform({:language_specific, meta, original_ast}, _metadata) when is_list(meta) do
+    language = Keyword.get(meta, :language)
+
+    if language == :haskell do
+      {:ok, original_ast}
+    else
+      {:error, "Cannot reify language_specific node for #{language} to Haskell"}
+    end
   end
 
   # Nil handling
 
   def transform(nil, _metadata), do: {:ok, nil}
+
+  # Wildcard pattern
+
+  def transform(:_, _metadata), do: {:ok, %{"type" => "wildcard"}}
 
   # Catch-all
 
@@ -157,6 +160,46 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
   end
 
   # Helper Functions
+
+  defp transform_literal(:integer, value) do
+    {:ok,
+     %{
+       "type" => "literal",
+       "value" => %{"literalType" => "int", "value" => value}
+     }}
+  end
+
+  defp transform_literal(:float, value) do
+    {:ok,
+     %{
+       "type" => "literal",
+       "value" => %{"literalType" => "float", "value" => value}
+     }}
+  end
+
+  defp transform_literal(:string, value) do
+    {:ok,
+     %{
+       "type" => "literal",
+       "value" => %{"literalType" => "string", "value" => value}
+     }}
+  end
+
+  defp transform_literal(:char, value) do
+    {:ok,
+     %{
+       "type" => "literal",
+       "value" => %{"literalType" => "char", "value" => value}
+     }}
+  end
+
+  defp transform_literal(:constructor, name) do
+    {:ok, %{"type" => "con", "name" => name}}
+  end
+
+  defp transform_literal(type, value) do
+    {:error, "Unsupported literal type: #{inspect(type)} with value #{inspect(value)}"}
+  end
 
   defp transform_list(items) when is_list(items) do
     items
@@ -211,20 +254,24 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
 
   defp transform_let_bindings(assignments) do
     assignments
-    |> Enum.reduce_while({:ok, []}, fn {:assignment, {:variable, name}, value}, {:ok, acc} ->
-      case transform(value, %{}) do
-        {:ok, value_ast} ->
-          binding = %{
-            "type" => "pat_bind",
-            "pattern" => %{"type" => "var_pat", "name" => name},
-            "rhs" => value_ast
-          }
+    |> Enum.reduce_while({:ok, []}, fn
+      {:assignment, _meta, [{:variable, _, name}, value]}, {:ok, acc} ->
+        case transform(value, %{}) do
+          {:ok, value_ast} ->
+            binding = %{
+              "type" => "pat_bind",
+              "pattern" => %{"type" => "var_pat", "name" => name},
+              "rhs" => value_ast
+            }
 
-          {:cont, {:ok, [binding | acc]}}
+            {:cont, {:ok, [binding | acc]}}
 
-        {:error, _} = err ->
-          {:halt, err}
-      end
+          {:error, _} = err ->
+            {:halt, err}
+        end
+
+      other, {:ok, _acc} ->
+        {:halt, {:error, "Expected assignment in let bindings, got: #{inspect(other)}"}}
     end)
     |> case do
       {:ok, bindings} -> {:ok, Enum.reverse(bindings)}
@@ -242,10 +289,10 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  defp transform_case_branches(branches) do
+  defp transform_case_branches(branches) when is_list(branches) do
     branches
-    |> Enum.reduce_while({:ok, []}, fn {pattern, body}, {:ok, acc} ->
-      case transform_case_branch(pattern, body) do
+    |> Enum.reduce_while({:ok, []}, fn branch, {:ok, acc} ->
+      case transform_case_branch(branch) do
         {:ok, branch_ast} -> {:cont, {:ok, [branch_ast | acc]}}
         {:error, _} = err -> {:halt, err}
       end
@@ -256,56 +303,68 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  defp transform_case_branch(pattern, body) do
+  # 3-tuple pair format: {:pair, [], [pattern, body]}
+  defp transform_case_branch({:pair, _meta, [pattern, body]}) do
     with {:ok, pattern_ast} <- transform_pattern(pattern),
          {:ok, body_ast} <- transform(body, %{}) do
       {:ok, %{"pattern" => pattern_ast, "rhs" => body_ast}}
     end
   end
 
-  defp transform_pattern({:variable, name}) do
+  defp transform_case_branch(other) do
+    {:error, "Expected pair in case branch, got: #{inspect(other)}"}
+  end
+
+  defp transform_pattern({:variable, _meta, name}) do
     {:ok, %{"type" => "var_pat", "name" => name}}
   end
 
-  defp transform_pattern({:literal, type, value}) when type in [:integer, :string, :char] do
-    literal_ast = %{
-      "literalType" => Atom.to_string(type),
-      "value" => value
-    }
+  defp transform_pattern({:literal, meta, value}) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype)
 
-    {:ok, %{"type" => "lit_pat", "literal" => literal_ast}}
+    if subtype in [:integer, :string, :char] do
+      literal_ast = %{
+        "literalType" => Atom.to_string(subtype),
+        "value" => value
+      }
+
+      {:ok, %{"type" => "lit_pat", "literal" => literal_ast}}
+    else
+      {:error, "Unsupported literal type in pattern: #{subtype}"}
+    end
   end
 
   defp transform_pattern(:_) do
     {:ok, %{"type" => "wildcard"}}
   end
 
-  defp transform_pattern(_), do: {:error, "Unsupported pattern for reification"}
+  defp transform_pattern(other),
+    do: {:error, "Unsupported pattern for reification: #{inspect(other)}"}
 
-  defp transform_collection(elements, %{collection_type: :list}) do
+  defp transform_collection(elements, :list) do
     with {:ok, elements_ast} <- transform_list(elements) do
       {:ok, %{"type" => "list", "elements" => elements_ast}}
     end
   end
 
-  defp transform_collection(elements, %{collection_type: :tuple}) do
+  defp transform_collection(elements, :tuple) do
     with {:ok, elements_ast} <- transform_list(elements) do
       {:ok, %{"type" => "tuple", "elements" => elements_ast}}
     end
   end
 
-  defp transform_collection(elements, _metadata) do
+  defp transform_collection(elements, _collection_type) do
     # Default to list
     with {:ok, elements_ast} <- transform_list(elements) do
       {:ok, %{"type" => "list", "elements" => elements_ast}}
     end
   end
 
-  defp transform_block(statements, %{construct: :let}) do
+  defp transform_block(statements, :let) do
     transform_let_block(statements)
   end
 
-  defp transform_block(statements, _metadata) do
+  defp transform_block(statements, _construct) do
     # Generic block - transform as begin block
     with {:ok, statements_ast} <- transform_list(statements) do
       case statements_ast do

@@ -14,9 +14,9 @@ defmodule Metastatic.Analysis.StateManagement do
   ## Examples
 
       # Stateless container
-      ast = {:container, :class, "Math", %{}, [
-        {:function_def, :public, "add", ["x", "y"], %{},
-         {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+      ast = {:container, [container_type: :class, name: "Math"], [
+        {:function_def, [name: "add", params: ["x", "y"], visibility: :public], [
+         {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}]}
       ]}
 
       doc = Document.new(ast, :python)
@@ -24,10 +24,10 @@ defmodule Metastatic.Analysis.StateManagement do
       result.pattern  # => :stateless
 
       # Controlled mutation
-      ast = {:container, :class, "Counter", %{}, [
-        {:function_def, :public, "increment", [], %{},
-         {:augmented_assignment, :+,
-          {:attribute_access, {:variable, "self"}, "count"}, {:literal, :integer, 1}}}
+      ast = {:container, [container_type: :class, name: "Counter"], [
+        {:function_def, [name: "increment", params: [], visibility: :public], [
+         {:augmented_assignment, [operator: :+], [
+          {:attribute_access, [], [{:variable, [], "self"}, "count"]}, {:literal, [subtype: :integer], 1}]}]}
       ]}
 
       {:ok, result} = StateManagement.analyze(doc)
@@ -42,7 +42,7 @@ defmodule Metastatic.Analysis.StateManagement do
 
     ## Examples
 
-        iex> ast = {:container, :class, "Empty", %{}, []}
+        iex> ast = {:container, [container_type: :class, name: "Empty"], [[]]}
         iex> doc = Metastatic.Document.new(ast, :python)
         iex> {:ok, result} = Metastatic.Analysis.StateManagement.analyze(doc)
         iex> result.pattern
@@ -55,16 +55,19 @@ defmodule Metastatic.Analysis.StateManagement do
          do: {:ok, analyze_container(container_type, container_name, members)}
   end
 
-  # Private implementation
+  # Private implementation (3-tuple format)
 
-  defp extract_container({:container, type, name, _metadata, members}) do
-    {:ok, type, name, members}
+  defp extract_container({:container, meta, [members]}) when is_list(meta) do
+    type = Keyword.get(meta, :container_type, :class)
+    name = Keyword.get(meta, :name, "anonymous")
+    members_list = if is_list(members), do: members, else: [members]
+    {:ok, type, name, members_list}
   end
 
   defp extract_container(_), do: {:error, "AST does not contain a container"}
 
   defp analyze_container(container_type, container_name, members) do
-    methods = Enum.filter(members, &match?({:function_def, _, _, _, _, _}, &1))
+    methods = Enum.filter(members, &match?({:function_def, _, _}, &1))
 
     # Collect all state variables
     all_state = collect_all_state(members)
@@ -113,9 +116,10 @@ defmodule Metastatic.Analysis.StateManagement do
     |> Enum.uniq()
   end
 
-  defp extract_state_vars({:function_def, _, _, _, _, body}), do: extract_state_from_ast(body)
+  # 3-tuple format
+  defp extract_state_vars({:function_def, _meta, [body]}), do: extract_state_from_ast(body)
 
-  defp extract_state_vars({:property, _, getter, setter, _}),
+  defp extract_state_vars({:property, _meta, [getter, setter]}),
     do: extract_state_from_ast(getter) ++ extract_state_from_ast(setter)
 
   defp extract_state_vars(_), do: []
@@ -124,27 +128,28 @@ defmodule Metastatic.Analysis.StateManagement do
 
   defp extract_state_from_ast(ast) do
     case ast do
-      {:attribute_access, {:variable, var}, attr} when var in ["self", "this", "@"] ->
+      # 3-tuple format
+      {:attribute_access, _meta, [{:variable, _, var}, attr]} when var in ["self", "this", "@"] ->
         [attr]
 
-      {:assignment, target, value} ->
+      {:assignment, _meta, [target, value]} ->
         extract_state_from_ast(target) ++ extract_state_from_ast(value)
 
-      {:augmented_assignment, _op, target, value} ->
+      {:augmented_assignment, _meta, [target, value]} ->
         extract_state_from_ast(target) ++ extract_state_from_ast(value)
 
-      {:binary_op, _, _, left, right} ->
+      {:binary_op, _meta, [left, right]} ->
         extract_state_from_ast(left) ++ extract_state_from_ast(right)
 
-      {:conditional, cond, then_br, else_br} ->
-        extract_state_from_ast(cond) ++
+      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
+        extract_state_from_ast(cond_expr) ++
           extract_state_from_ast(then_br) ++
           extract_state_from_ast(else_br)
 
-      {:block, stmts} when is_list(stmts) ->
+      {:block, _meta, stmts} when is_list(stmts) ->
         Enum.flat_map(stmts, &extract_state_from_ast/1)
 
-      {:function_call, _, args} ->
+      {:function_call, _meta, args} when is_list(args) ->
         Enum.flat_map(args, &extract_state_from_ast/1)
 
       _ ->
@@ -152,13 +157,14 @@ defmodule Metastatic.Analysis.StateManagement do
     end
   end
 
-  # Categorize state as initialized or uninitialized
+  # Categorize state as initialized or uninitialized (3-tuple format)
   defp categorize_initialization(members, all_state) do
     # Look for initialization methods (constructor, __init__, initialize, etc.)
     init_methods =
       members
       |> Enum.filter(fn
-        {:function_def, _, name, _, _, _} ->
+        {:function_def, meta, _} when is_list(meta) ->
+          name = Keyword.get(meta, :name, "")
           name in ["__init__", "initialize", "constructor", "init"]
 
         _ ->
@@ -168,7 +174,7 @@ defmodule Metastatic.Analysis.StateManagement do
     # Extract state initialized in these methods
     initialized =
       init_methods
-      |> Enum.flat_map(fn {:function_def, _, _, _, _, body} ->
+      |> Enum.flat_map(fn {:function_def, _meta, [body]} ->
         find_initialized_state(body)
       end)
       |> Enum.uniq()
@@ -180,11 +186,11 @@ defmodule Metastatic.Analysis.StateManagement do
 
   defp find_initialized_state(ast) do
     case ast do
-      {:assignment, {:attribute_access, {:variable, var}, attr}, _}
+      {:assignment, _meta, [{:attribute_access, _, [{:variable, _, var}, attr]}, _value]}
       when var in ["self", "this", "@"] ->
         [attr]
 
-      {:block, stmts} when is_list(stmts) ->
+      {:block, _meta, stmts} when is_list(stmts) ->
         Enum.flat_map(stmts, &find_initialized_state/1)
 
       _ ->
@@ -192,35 +198,34 @@ defmodule Metastatic.Analysis.StateManagement do
     end
   end
 
-  # Collect all mutations in methods
+  # Collect all mutations in methods (3-tuple format)
   defp collect_mutations(methods) do
     methods
-    |> Enum.flat_map(fn {:function_def, _vis, name, _, _, body} ->
+    |> Enum.flat_map(fn {:function_def, meta, [body]} ->
+      name = Keyword.get(meta, :name, "anonymous")
       find_mutations(body, name)
     end)
   end
 
   defp find_mutations(ast, location) do
     case ast do
-      {:assignment, {:attribute_access, {:variable, var}, attr}, _}
+      {:assignment, _meta, [{:attribute_access, _, [{:variable, _, var}, attr]}, _value]}
       when var in ["self", "this", "@"] ->
         [Result.mutation(location, attr, :assignment)]
 
-      {:augmented_assignment, _op, {:attribute_access, {:variable, var}, attr}, _}
+      {:augmented_assignment, _ameta,
+       [{:attribute_access, _, [{:variable, _, var}, attr]}, _value]}
       when var in ["self", "this", "@"] ->
         [Result.mutation(location, attr, :augmented_assignment)]
 
-      {:block, stmts} when is_list(stmts) ->
+      {:block, _meta, stmts} when is_list(stmts) ->
         Enum.flat_map(stmts, &find_mutations(&1, location))
 
-      {:conditional, _cond, then_br, else_br} ->
+      {:conditional, _meta, [_cond, then_br, else_br]} ->
         find_mutations(then_br, location) ++ find_mutations(else_br, location)
 
-      {:loop, :while, _condition, body} ->
-        find_mutations(body, location)
-
-      {:loop, _, _iter, _coll, body} ->
-        find_mutations(body, location)
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        Enum.flat_map(children, &find_mutations(&1, location))
 
       _ ->
         []

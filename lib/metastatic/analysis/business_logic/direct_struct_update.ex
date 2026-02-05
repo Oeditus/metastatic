@@ -23,7 +23,7 @@ defmodule Metastatic.Analysis.BusinessLogic.DirectStructUpdate do
   end
 
   @impl true
-  def analyze({:map, _fields} = node, _context) do
+  def analyze({:map, _meta, _fields} = node, _context) do
     # Map update - could be struct update bypassing validation
     # This is a simplified detection; real implementation would check context
     [

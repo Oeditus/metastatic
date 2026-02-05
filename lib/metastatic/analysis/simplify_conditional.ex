@@ -49,114 +49,129 @@ defmodule Metastatic.Analysis.SimplifyConditional do
   end
 
   @impl Analyzer
-  def analyze(
-        {:conditional, condition, {:literal, :boolean, true}, {:literal, :boolean, false}},
-        _context
-      ) do
-    # Pattern: if condition then true else false => condition
-    [
-      Analyzer.issue(
-        analyzer: __MODULE__,
-        category: :refactoring,
-        severity: :refactoring_opportunity,
-        message: "This conditional can be simplified to just the condition",
-        node: {:conditional, condition, {:literal, :boolean, true}, {:literal, :boolean, false}},
-        location: %{line: nil, column: nil, path: nil},
-        suggestion:
-          Analyzer.suggestion(
-            type: :replace,
-            replacement: condition,
-            message: "Replace with: #{format_node(condition)}"
-          ),
-        metadata: %{pattern: :true_false, simplified: condition}
-      )
-    ]
-  end
+  def analyze({:conditional, _meta, [condition, then_branch, else_branch]} = node, _context) do
+    # Check for simplifiable patterns
+    case {then_branch, else_branch} do
+      # Pattern: if condition then true else false => condition
+      {{:literal, then_meta, true}, {:literal, else_meta, false}} ->
+        if is_boolean_literal?(then_meta) and is_boolean_literal?(else_meta) do
+          [
+            Analyzer.issue(
+              analyzer: __MODULE__,
+              category: :refactoring,
+              severity: :refactoring_opportunity,
+              message: "This conditional can be simplified to just the condition",
+              node: node,
+              location: %{line: nil, column: nil, path: nil},
+              suggestion:
+                Analyzer.suggestion(
+                  type: :replace,
+                  replacement: condition,
+                  message: "Replace with: #{format_node(condition)}"
+                ),
+              metadata: %{pattern: :true_false, simplified: condition}
+            )
+          ]
+        else
+          []
+        end
 
-  def analyze(
-        {:conditional, condition, {:literal, :boolean, false}, {:literal, :boolean, true}},
-        _context
-      ) do
-    # Pattern: if condition then false else true => not condition
-    negated = {:unary_op, :boolean, :not, condition}
+      # Pattern: if condition then false else true => not condition
+      {{:literal, then_meta, false}, {:literal, else_meta, true}} ->
+        if is_boolean_literal?(then_meta) and is_boolean_literal?(else_meta) do
+          negated = {:unary_op, [category: :boolean, operator: :not], [condition]}
 
-    [
-      Analyzer.issue(
-        analyzer: __MODULE__,
-        category: :refactoring,
-        severity: :refactoring_opportunity,
-        message: "This conditional can be simplified to the negation of the condition",
-        node: {:conditional, condition, {:literal, :boolean, false}, {:literal, :boolean, true}},
-        location: %{line: nil, column: nil, path: nil},
-        suggestion:
-          Analyzer.suggestion(
-            type: :replace,
-            replacement: negated,
-            message: "Replace with: not #{format_node(condition)}"
-          ),
-        metadata: %{pattern: :false_true, simplified: negated}
-      )
-    ]
-  end
+          [
+            Analyzer.issue(
+              analyzer: __MODULE__,
+              category: :refactoring,
+              severity: :refactoring_opportunity,
+              message: "This conditional can be simplified to the negation of the condition",
+              node: node,
+              location: %{line: nil, column: nil, path: nil},
+              suggestion:
+                Analyzer.suggestion(
+                  type: :replace,
+                  replacement: negated,
+                  message: "Replace with: not #{format_node(condition)}"
+                ),
+              metadata: %{pattern: :false_true, simplified: negated}
+            )
+          ]
+        else
+          []
+        end
 
-  def analyze(
-        {:conditional, condition, cond_duplicate, {:literal, :boolean, false}},
-        _context
-      )
-      when condition == cond_duplicate do
-    # Pattern: if condition then condition else false => condition
-    [
-      Analyzer.issue(
-        analyzer: __MODULE__,
-        category: :refactoring,
-        severity: :refactoring_opportunity,
-        message: "This conditional returns its condition in the then branch and false in else",
-        node: {:conditional, condition, cond_duplicate, {:literal, :boolean, false}},
-        location: %{line: nil, column: nil, path: nil},
-        suggestion:
-          Analyzer.suggestion(
-            type: :replace,
-            replacement: condition,
-            message: "Replace with: #{format_node(condition)}"
-          ),
-        metadata: %{pattern: :condition_false, simplified: condition}
-      )
-    ]
-  end
+      # Pattern: if condition then condition else false => condition
+      {cond_duplicate, {:literal, else_meta, false}} when condition == cond_duplicate ->
+        if is_boolean_literal?(else_meta) do
+          [
+            Analyzer.issue(
+              analyzer: __MODULE__,
+              category: :refactoring,
+              severity: :refactoring_opportunity,
+              message:
+                "This conditional returns its condition in the then branch and false in else",
+              node: node,
+              location: %{line: nil, column: nil, path: nil},
+              suggestion:
+                Analyzer.suggestion(
+                  type: :replace,
+                  replacement: condition,
+                  message: "Replace with: #{format_node(condition)}"
+                ),
+              metadata: %{pattern: :condition_false, simplified: condition}
+            )
+          ]
+        else
+          []
+        end
 
-  def analyze(
-        {:conditional, condition, {:literal, :boolean, true}, cond_duplicate},
-        _context
-      )
-      when condition == cond_duplicate do
-    # Pattern: if condition then true else condition => condition
-    [
-      Analyzer.issue(
-        analyzer: __MODULE__,
-        category: :refactoring,
-        severity: :refactoring_opportunity,
-        message: "This conditional returns true in then branch and its condition in else",
-        node: {:conditional, condition, {:literal, :boolean, true}, cond_duplicate},
-        location: %{line: nil, column: nil, path: nil},
-        suggestion:
-          Analyzer.suggestion(
-            type: :replace,
-            replacement: condition,
-            message: "Replace with: #{format_node(condition)}"
-          ),
-        metadata: %{pattern: :true_condition, simplified: condition}
-      )
-    ]
+      # Pattern: if condition then true else condition => condition
+      {{:literal, then_meta, true}, cond_duplicate} when condition == cond_duplicate ->
+        if is_boolean_literal?(then_meta) do
+          [
+            Analyzer.issue(
+              analyzer: __MODULE__,
+              category: :refactoring,
+              severity: :refactoring_opportunity,
+              message: "This conditional returns true in then branch and its condition in else",
+              node: node,
+              location: %{line: nil, column: nil, path: nil},
+              suggestion:
+                Analyzer.suggestion(
+                  type: :replace,
+                  replacement: condition,
+                  message: "Replace with: #{format_node(condition)}"
+                ),
+              metadata: %{pattern: :true_condition, simplified: condition}
+            )
+          ]
+        else
+          []
+        end
+
+      _ ->
+        []
+    end
   end
 
   def analyze(_node, _context), do: []
 
+  defp is_boolean_literal?(meta) when is_list(meta) do
+    Keyword.get(meta, :subtype) == :boolean
+  end
+
+  defp is_boolean_literal?(_), do: false
+
   # ----- Private Helpers -----
 
-  defp format_node({:variable, name}), do: name
+  defp format_node({:variable, _meta, name}), do: name
 
-  defp format_node({:literal, type, value}) do
-    case type do
+  defp format_node({:literal, meta, value}) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype)
+
+    case subtype do
       :integer -> to_string(value)
       :float -> to_string(value)
       :string -> ~s("#{value}")
@@ -166,15 +181,18 @@ defmodule Metastatic.Analysis.SimplifyConditional do
     end
   end
 
-  defp format_node({:binary_op, _, op, left, right}) do
+  defp format_node({:binary_op, meta, [left, right]}) when is_list(meta) do
+    op = Keyword.get(meta, :operator)
     "#{format_node(left)} #{op} #{format_node(right)}"
   end
 
-  defp format_node({:unary_op, _, op, operand}) do
+  defp format_node({:unary_op, meta, [operand]}) when is_list(meta) do
+    op = Keyword.get(meta, :operator)
     "#{op} #{format_node(operand)}"
   end
 
-  defp format_node({:function_call, name, args}) do
+  defp format_node({:function_call, meta, args}) when is_list(meta) do
+    name = Keyword.get(meta, :name)
     args_str = Enum.map_join(args, ", ", &format_node/1)
     "#{name}(#{args_str})"
   end

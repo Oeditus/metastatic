@@ -31,10 +31,18 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
   alias Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction
   alias Metastatic.Analysis.BusinessLogic.UnmanagedTask
 
+  # Helper functions for building 3-tuple MetaAST nodes
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+  defp block(stmts), do: {:block, [], stmts}
+  defp conditional(cond, then_b, else_b), do: {:conditional, [], [cond, then_b, else_b]}
+  defp function_call(name, args), do: {:function_call, [name: name], args}
+  defp map_node(pairs), do: {:map, [], pairs}
+  defp pair_node(key, value), do: {:pair, [], [key, value]}
+
   describe "BlockingInPlug" do
     test "detects blocking HTTP call in middleware" do
-      ast =
-        {:function_call, "HTTPoison.get", [{:literal, :string, "https://api.example.com/verify"}]}
+      ast = function_call("HTTPoison.get", [literal(:string, "https://api.example.com/verify")])
 
       context = %{
         function_name: "call_plug",
@@ -52,7 +60,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "detects blocking database query in plug" do
-      ast = {:function_call, "Repo.get", [{:variable, "User"}, {:variable, "id"}]}
+      ast = function_call("Repo.get", [variable("User"), variable("id")])
 
       context = %{
         function_name: "authenticate_plug",
@@ -67,7 +75,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "does not flag blocking operations outside middleware context" do
-      ast = {:function_call, "HTTPoison.get", [{:literal, :string, "http://example.com"}]}
+      ast = function_call("HTTPoison.get", [literal(:string, "http://example.com")])
       context = %{function_name: "fetch_data", module_name: "MyService", config: %{}}
 
       assert [] = BlockingInPlug.analyze(ast, context)
@@ -78,9 +86,15 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     test "detects deeply nested conditionals exceeding threshold" do
       # 3 levels of nesting: outermost, middle, innermost
       ast =
-        {:conditional, {:variable, "condition1"},
-         {:conditional, {:variable, "condition2"},
-          {:conditional, {:variable, "condition3"}, {:literal, :atom, :ok}, nil}, nil}, nil}
+        conditional(
+          variable("condition1"),
+          conditional(
+            variable("condition2"),
+            conditional(variable("condition3"), literal(:symbol, :ok), nil),
+            nil
+          ),
+          nil
+        )
 
       context = %{config: %{}, max_nesting: 2}
 
@@ -95,12 +109,17 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
 
     test "respects configurable max_nesting threshold" do
       ast =
-        {:conditional, {:variable, "check1"},
-         {:block,
-          [
-            {:conditional, {:variable, "check2"},
-             {:block, [{:conditional, {:variable, "check3"}, {:literal, :atom, :ok}, nil}]}, nil}
-          ]}, nil}
+        conditional(
+          variable("check1"),
+          block([
+            conditional(
+              variable("check2"),
+              block([conditional(variable("check3"), literal(:symbol, :ok), nil)]),
+              nil
+            )
+          ]),
+          nil
+        )
 
       # Allow up to 3 levels
       context = %{config: %{max_nesting: 3}, max_nesting: 3}
@@ -109,7 +128,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "does not flag shallow nesting" do
-      ast = {:conditional, {:variable, "x"}, {:literal, :atom, :ok}, {:literal, :atom, :error}}
+      ast = conditional(variable("x"), literal(:symbol, :ok), literal(:symbol, :error))
 
       context = %{config: %{}, max_nesting: 2}
 
@@ -120,11 +139,10 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
   describe "DirectStructUpdate" do
     test "detects direct map/struct updates" do
       ast =
-        {:map,
-         [
-           {{:literal, :atom, :name}, {:literal, :string, "John"}},
-           {{:literal, :atom, :age}, {:literal, :integer, 30}}
-         ]}
+        map_node([
+          pair_node(literal(:symbol, :name), literal(:string, "John")),
+          pair_node(literal(:symbol, :age), literal(:integer, 30))
+        ])
 
       context = %{}
 
@@ -137,7 +155,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "suggests using changesets" do
-      ast = {:map, [{{:literal, :atom, :email}, {:literal, :string, "user@example.com"}}]}
+      ast = map_node([pair_node(literal(:symbol, :email), literal(:string, "user@example.com"))])
 
       issues = DirectStructUpdate.analyze(ast, %{})
 
@@ -148,7 +166,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
 
   describe "HardcodedValue" do
     test "detects hardcoded production URLs" do
-      ast = {:literal, :string, "https://api.production.example.com/v1"}
+      ast = literal(:string, "https://api.production.example.com/v1")
 
       context = %{exclude_localhost: true, exclude_local_ips: true}
 
@@ -162,7 +180,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "detects hardcoded production IP addresses" do
-      ast = {:literal, :string, "203.0.113.42"}
+      ast = literal(:string, "203.0.113.42")
 
       context = %{exclude_localhost: true, exclude_local_ips: true}
 
@@ -174,7 +192,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "excludes localhost URLs when configured" do
-      ast = {:literal, :string, "http://localhost:4000"}
+      ast = literal(:string, "http://localhost:4000")
 
       context = %{exclude_localhost: true, exclude_local_ips: true}
 
@@ -182,7 +200,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "excludes private IP ranges when configured" do
-      ast = {:literal, :string, "192.168.1.100"}
+      ast = literal(:string, "192.168.1.100")
 
       context = %{exclude_localhost: true, exclude_local_ips: true}
 
@@ -190,7 +208,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "detects IPs in 172.16-31 private range" do
-      ast = {:literal, :string, "172.20.10.5"}
+      ast = literal(:string, "172.20.10.5")
       context = %{exclude_localhost: true, exclude_local_ips: true}
 
       # Should be excluded as it's in private range
@@ -198,7 +216,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "flags external URLs even with https" do
-      ast = {:literal, :string, "https://external-api.service.com/endpoint"}
+      ast = literal(:string, "https://external-api.service.com/endpoint")
       context = %{exclude_localhost: true, exclude_local_ips: true}
 
       issues = HardcodedValue.analyze(ast, context)
@@ -266,7 +284,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
 
   describe "InlineJavascript" do
     test "detects script tags in string literals" do
-      ast = {:literal, :string, "<script>alert('XSS')</script>"}
+      ast = literal(:string, "<script>alert('XSS')</script>")
 
       issues = InlineJavascript.analyze(ast, %{})
 
@@ -279,8 +297,10 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
 
     test "detects dangerouslySetInnerHTML usage" do
       ast =
-        {:function_call, "dangerouslySetInnerHTML",
-         [{:map, [{{:literal, :atom, :__html}, {:variable, "content"}}]}]}
+        function_call(
+          "dangerouslySetInnerHTML",
+          [map_node([pair_node(literal(:symbol, :__html), variable("content"))])]
+        )
 
       issues = InlineJavascript.analyze(ast, %{})
 
@@ -290,7 +310,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "detects onclick handlers in strings" do
-      ast = {:literal, :string, "<div onclick='handleClick()'>Click me</div>"}
+      ast = literal(:string, "<div onclick='handleClick()'>Click me</div>")
 
       issues = InlineJavascript.analyze(ast, %{})
 
@@ -299,7 +319,7 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
     end
 
     test "detects javascript: protocol in URLs" do
-      ast = {:literal, :string, "javascript:void(0)"}
+      ast = literal(:string, "javascript:void(0)")
 
       issues = InlineJavascript.analyze(ast, %{})
 

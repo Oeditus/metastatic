@@ -22,9 +22,9 @@ defmodule Metastatic.Analysis.UnusedVariables do
       alias Metastatic.{Document, Analysis.UnusedVariables}
 
       # Analyze for unused variables
-      ast = {:block, [
-        {:assignment, {:variable, "x"}, {:literal, :integer, 42}},
-        {:literal, :integer, 5}
+      ast = {:block, [], [
+        {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]},
+        {:literal, [subtype: :integer], 5}
       ]}
       doc = Document.new(ast, :python)
       {:ok, result} = UnusedVariables.analyze(doc)
@@ -51,16 +51,16 @@ defmodule Metastatic.Analysis.UnusedVariables do
   ## Examples
 
       # No unused variables
-      iex> ast = {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.UnusedVariables.analyze(doc)
       iex> result.has_unused?
       false
 
       # Unused local variable
-      iex> ast = {:block, [
-      ...>   {:assignment, {:variable, "x"}, {:literal, :integer, 1}},
-      ...>   {:literal, :integer, 2}
+      iex> ast = {:block, [], [
+      ...>   {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 1}]},
+      ...>   {:literal, [subtype: :integer], 2}
       ...> ]}
       iex> doc = Metastatic.Document.new(ast, :python)
       iex> {:ok, result} = Metastatic.Analysis.UnusedVariables.analyze(doc)
@@ -89,7 +89,7 @@ defmodule Metastatic.Analysis.UnusedVariables do
 
     ## Examples
 
-        iex> ast = {:literal, :integer, 42}
+        iex> ast = {:literal, [subtype: :integer], 42}
         iex> doc = Metastatic.Document.new(ast, :elixir)
         iex> {:ok, result} = Metastatic.Analysis.UnusedVariables.analyze(doc)
         iex> result.has_unused?
@@ -133,70 +133,79 @@ defmodule Metastatic.Analysis.UnusedVariables do
     {:ok, Result.new(unused)}
   end
 
+  # 3-tuple format
   defp build_symbol_table(ast, ctx) do
     case ast do
-      {:block, statements} when is_list(statements) ->
+      {:block, _meta, statements} when is_list(statements) ->
         # New scope for block
         ctx = push_scope(ctx)
         ctx = Enum.reduce(statements, ctx, &build_symbol_table/2)
         pop_scope(ctx)
 
-      {:assignment, target, value} ->
+      {:assignment, _meta, [target, value]} ->
         ctx = track_writes(target, ctx.category, ctx)
         build_symbol_table(value, ctx)
 
-      {:inline_match, pattern, value} ->
+      {:inline_match, _meta, [pattern, value]} ->
         ctx = track_writes(pattern, :pattern, ctx)
         build_symbol_table(value, ctx)
 
-      {:variable, name} ->
+      {:variable, _meta, name} ->
         track_read(name, ctx)
 
-      {:lambda, params, body} when is_list(params) ->
+      {:lambda, meta, [body]} when is_list(meta) ->
+        params = Keyword.get(meta, :params, [])
         ctx = push_scope(ctx)
         # Track parameters as writes
         ctx = Enum.reduce(params, ctx, fn param, c -> track_writes(param, :parameter, c) end)
         ctx = build_symbol_table(body, ctx)
         pop_scope(ctx)
 
-      {:loop, :while, cond, body} ->
-        ctx = build_symbol_table(cond, ctx)
-        ctx = push_scope(ctx)
-        ctx = build_symbol_table(body, ctx)
-        pop_scope(ctx)
+      {:loop, meta, children} when is_list(meta) and is_list(children) ->
+        loop_type = Keyword.get(meta, :loop_type, :for)
 
-      {:loop, _, iterator, collection, body} ->
-        ctx = build_symbol_table(collection, ctx)
-        ctx = push_scope(ctx)
-        ctx = track_writes(iterator, :iterator, ctx)
-        ctx = build_symbol_table(body, ctx)
-        pop_scope(ctx)
+        case {loop_type, children} do
+          {:while, [cond_expr, body]} ->
+            ctx = build_symbol_table(cond_expr, ctx)
+            ctx = push_scope(ctx)
+            ctx = build_symbol_table(body, ctx)
+            pop_scope(ctx)
 
-      {:conditional, cond, then_branch, else_branch} ->
-        ctx = build_symbol_table(cond, ctx)
+          {:for, [iterator, collection, body]} ->
+            ctx = build_symbol_table(collection, ctx)
+            ctx = push_scope(ctx)
+            ctx = track_writes(iterator, :iterator, ctx)
+            ctx = build_symbol_table(body, ctx)
+            pop_scope(ctx)
+
+          {_, [body]} ->
+            ctx = push_scope(ctx)
+            ctx = build_symbol_table(body, ctx)
+            pop_scope(ctx)
+
+          _ ->
+            Enum.reduce(children, ctx, &build_symbol_table/2)
+        end
+
+      {:conditional, _meta, [cond_expr, then_branch, else_branch]} ->
+        ctx = build_symbol_table(cond_expr, ctx)
         ctx = build_symbol_table(then_branch, ctx)
         if is_nil(else_branch), do: ctx, else: build_symbol_table(else_branch, ctx)
 
-      {:binary_op, _, _, left, right} ->
+      {:binary_op, _meta, [left, right]} ->
         ctx = build_symbol_table(left, ctx)
         build_symbol_table(right, ctx)
 
-      {:unary_op, _, _, operand} ->
+      {:unary_op, _meta, [operand]} ->
         build_symbol_table(operand, ctx)
 
-      {:function_call, _name, args} when is_list(args) ->
+      {:function_call, _meta, args} when is_list(args) ->
         Enum.reduce(args, ctx, &build_symbol_table/2)
 
-      {:collection_op, _, func, coll} ->
-        ctx = build_symbol_table(func, ctx)
-        build_symbol_table(coll, ctx)
+      {:collection_op, _meta, children} when is_list(children) ->
+        Enum.reduce(children, ctx, &build_symbol_table/2)
 
-      {:collection_op, _, func, coll, init} ->
-        ctx = build_symbol_table(func, ctx)
-        ctx = build_symbol_table(coll, ctx)
-        build_symbol_table(init, ctx)
-
-      {:exception_handling, try_block, catches, else_block} ->
+      {:exception_handling, _meta, [try_block, catches, else_block]} ->
         ctx = build_symbol_table(try_block, ctx)
 
         ctx =
@@ -208,13 +217,10 @@ defmodule Metastatic.Analysis.UnusedVariables do
 
         if is_nil(else_block), do: ctx, else: build_symbol_table(else_block, ctx)
 
-      {:early_return, value} ->
+      {:early_return, _meta, [value]} ->
         build_symbol_table(value, ctx)
 
-      {:tuple, elems} when is_list(elems) ->
-        Enum.reduce(elems, ctx, &build_symbol_table/2)
-
-      {:list, elems} when is_list(elems) ->
+      {:list, _meta, elems} when is_list(elems) ->
         Enum.reduce(elems, ctx, &build_symbol_table/2)
 
       _ ->
@@ -222,17 +228,13 @@ defmodule Metastatic.Analysis.UnusedVariables do
     end
   end
 
-  # Track variable writes (assignments, patterns, parameters)
-  defp track_writes({:variable, name}, category, ctx) do
+  # Track variable writes (assignments, patterns, parameters) - 3-tuple format
+  defp track_writes({:variable, _meta, name}, category, ctx) do
     var = %{name: name, category: category, was_read: false}
     update_current_scope(ctx, fn scope -> [var | scope] end)
   end
 
-  defp track_writes({:tuple, elems}, category, ctx) when is_list(elems) do
-    Enum.reduce(elems, ctx, fn elem, c -> track_writes(elem, category, c) end)
-  end
-
-  defp track_writes({:list, elems}, category, ctx) when is_list(elems) do
+  defp track_writes({:list, _meta, elems}, category, ctx) when is_list(elems) do
     Enum.reduce(elems, ctx, fn elem, c -> track_writes(elem, category, c) end)
   end
 

@@ -5,9 +5,26 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   doctest Metastatic.Analysis.Duplication
 
+  # Helper functions for 3-tuple AST construction
+  defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
+  defp variable(name), do: {:variable, [], name}
+
+  defp binary_op(category, operator, left, right) do
+    {:binary_op, [category: category, operator: operator], [left, right]}
+  end
+
+  defp conditional(cond_expr, then_branch, else_branch) do
+    {:conditional, [], [cond_expr, then_branch, else_branch]}
+  end
+
+  defp function_call(name, args), do: {:function_call, [name: name], args}
+  defp block(stmts), do: {:block, [], stmts}
+  defp assignment(target, value), do: {:assignment, [], [target, value]}
+  defp early_return(value), do: {:early_return, [], [value]}
+
   describe "detect/2 - Type I exact clones" do
     test "detects identical literals" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :python)
 
@@ -19,7 +36,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects identical variables" do
-      ast = {:variable, "x"}
+      ast = variable("x")
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :elixir)
 
@@ -30,7 +47,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects identical binary operations" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :python)
 
@@ -43,9 +60,12 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
     test "detects identical complex expressions" do
       ast =
-        {:binary_op, :arithmetic, :+,
-         {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}},
-         {:literal, :integer, 5}}
+        binary_op(
+          :arithmetic,
+          :+,
+          binary_op(:arithmetic, :*, variable("x"), literal(:integer, 2)),
+          literal(:integer, 5)
+        )
 
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :elixir)
@@ -57,8 +77,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects identical conditionals" do
-      ast =
-        {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
 
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :python)
@@ -70,7 +89,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects identical function calls" do
-      ast = {:function_call, "print", [{:literal, :string, "hello"}]}
+      ast = function_call("print", [literal(:string, "hello")])
       doc1 = Document.new(ast, :python)
       doc2 = Document.new(ast, :elixir)
 
@@ -82,11 +101,10 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
     test "detects identical blocks" do
       ast =
-        {:block,
-         [
-           {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-           {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}
-         ]}
+        block([
+          assignment(variable("x"), literal(:integer, 5)),
+          binary_op(:arithmetic, :+, variable("x"), literal(:integer, 1))
+        ])
 
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :elixir)
@@ -100,8 +118,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   describe "detect/2 - non-duplicates" do
     test "different literal types are not duplicates" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :string, "42"}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:string, "42")
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -113,8 +131,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "different operations are not duplicates" do
-      ast1 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
-      ast2 = {:binary_op, :arithmetic, :-, {:variable, "x"}, {:literal, :integer, 5}}
+      ast1 = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
+      ast2 = binary_op(:arithmetic, :-, variable("x"), literal(:integer, 5))
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -124,8 +142,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "different types are not duplicates" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:variable, "x"}
+      ast1 = literal(:integer, 42)
+      ast2 = variable("x")
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -137,7 +155,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   describe "detect/2 - result metadata" do
     test "includes locations from both documents" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
 
       doc1 =
         Document.new(
@@ -161,7 +179,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "includes exact fingerprint" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :python)
 
@@ -172,7 +190,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "includes metrics" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :elixir)
 
@@ -185,8 +203,12 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
     test "counts variables correctly" do
       ast =
-        {:binary_op, :arithmetic, :+, {:variable, "x"},
-         {:binary_op, :arithmetic, :*, {:variable, "y"}, {:literal, :integer, 2}}}
+        binary_op(
+          :arithmetic,
+          :+,
+          variable("x"),
+          binary_op(:arithmetic, :*, variable("y"), literal(:integer, 2))
+        )
 
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :elixir)
@@ -199,7 +221,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   describe "detect!/2" do
     test "returns result directly" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc1 = Document.new(ast, :elixir)
       doc2 = Document.new(ast, :elixir)
 
@@ -212,22 +234,22 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   describe "similarity/2" do
     test "returns 1.0 for identical ASTs" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :integer, 42}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:integer, 42)
 
       assert Duplication.similarity(ast1, ast2) == 1.0
     end
 
     test "returns low score for different AST types" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :string, "hello"}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:string, "hello")
 
       score = Duplication.similarity(ast1, ast2)
       assert score > 0.0 and score < 0.5
     end
 
     test "returns 1.0 for complex identical ASTs" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
 
       assert Duplication.similarity(ast, ast) == 1.0
     end
@@ -235,7 +257,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   describe "fingerprint/1" do
     test "generates non-empty fingerprint" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       fingerprint = Duplication.fingerprint(ast)
 
       assert is_binary(fingerprint)
@@ -243,7 +265,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "identical ASTs produce identical fingerprints" do
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       fp1 = Duplication.fingerprint(ast)
       fp2 = Duplication.fingerprint(ast)
 
@@ -251,8 +273,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "different ASTs produce different fingerprints" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :integer, 43}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:integer, 43)
       fp1 = Duplication.fingerprint(ast1)
       fp2 = Duplication.fingerprint(ast2)
 
@@ -260,7 +282,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "produces consistent fingerprints" do
-      ast = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       fingerprints = Enum.map(1..10, fn _ -> Duplication.fingerprint(ast) end)
 
       assert Enum.uniq(fingerprints) |> length() == 1
@@ -270,7 +292,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
   describe "cross-language detection" do
     test "detects clones across Python and Elixir" do
       # Same AST, different languages
-      ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      ast = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
       doc1 = Document.new(ast, :python)
       doc2 = Document.new(ast, :elixir)
 
@@ -281,7 +303,7 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "location includes language information" do
-      ast = {:literal, :integer, 42}
+      ast = literal(:integer, 42)
       doc1 = Document.new(ast, :python)
       doc2 = Document.new(ast, :elixir)
 
@@ -294,8 +316,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   describe "detect/2 - Type II renamed clones" do
     test "detects renamed variables as Type II" do
-      ast1 = {:variable, "x"}
-      ast2 = {:variable, "y"}
+      ast1 = variable("x")
+      ast2 = variable("y")
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -307,8 +329,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects different literal values as Type II" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :integer, 100}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:integer, 100)
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -319,8 +341,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects renamed binary operations as Type II" do
-      ast1 = {:binary_op, :arithmetic, :+, {:variable, "a"}, {:literal, :integer, 1}}
-      ast2 = {:binary_op, :arithmetic, :+, {:variable, "b"}, {:literal, :integer, 2}}
+      ast1 = binary_op(:arithmetic, :+, variable("a"), literal(:integer, 1))
+      ast2 = binary_op(:arithmetic, :+, variable("b"), literal(:integer, 2))
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :python)
 
@@ -331,8 +353,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects renamed function calls as Type II" do
-      ast1 = {:function_call, "foo", [{:variable, "x"}]}
-      ast2 = {:function_call, "bar", [{:variable, "y"}]}
+      ast1 = function_call("foo", [variable("x")])
+      ast2 = function_call("bar", [variable("y")])
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -343,8 +365,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "detects renamed conditionals as Type II" do
-      ast1 = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
-      ast2 = {:conditional, {:variable, "y"}, {:literal, :integer, 10}, {:literal, :integer, 20}}
+      ast1 = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
+      ast2 = conditional(variable("y"), literal(:integer, 10), literal(:integer, 20))
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -357,20 +379,22 @@ defmodule Metastatic.Analysis.DuplicationTest do
     test "detects complex renamed expressions as Type II" do
       # Function implementation with different variable names
       ast1 =
-        {:block,
-         [
-           {:assignment, {:variable, "result"},
-            {:binary_op, :arithmetic, :+, {:variable, "a"}, {:variable, "b"}}},
-           {:early_return, {:variable, "result"}}
-         ]}
+        block([
+          assignment(
+            variable("result"),
+            binary_op(:arithmetic, :+, variable("a"), variable("b"))
+          ),
+          early_return(variable("result"))
+        ])
 
       ast2 =
-        {:block,
-         [
-           {:assignment, {:variable, "sum"},
-            {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}},
-           {:early_return, {:variable, "sum"}}
-         ]}
+        block([
+          assignment(
+            variable("sum"),
+            binary_op(:arithmetic, :+, variable("x"), variable("y"))
+          ),
+          early_return(variable("sum"))
+        ])
 
       doc1 = Document.new(ast1, :python)
       doc2 = Document.new(ast2, :elixir)
@@ -382,8 +406,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "Type II includes normalized fingerprint" do
-      ast1 = {:variable, "x"}
-      ast2 = {:variable, "y"}
+      ast1 = variable("x")
+      ast2 = variable("y")
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -394,8 +418,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "different operators are not Type II clones" do
-      ast1 = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
-      ast2 = {:binary_op, :arithmetic, :-, {:variable, "x"}, {:literal, :integer, 5}}
+      ast1 = binary_op(:arithmetic, :+, variable("x"), literal(:integer, 5))
+      ast2 = binary_op(:arithmetic, :-, variable("x"), literal(:integer, 5))
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -405,8 +429,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "different literal types are not Type II clones" do
-      ast1 = {:literal, :integer, 42}
-      ast2 = {:literal, :string, "42"}
+      ast1 = literal(:integer, 42)
+      ast2 = literal(:string, "42")
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -418,8 +442,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
 
   describe "edge cases" do
     test "handles wildcard patterns" do
-      ast1 = {:variable, "_"}
-      ast2 = {:variable, "_"}
+      ast1 = variable("_")
+      ast2 = variable("_")
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -430,8 +454,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "handles empty blocks" do
-      ast1 = {:block, []}
-      ast2 = {:block, []}
+      ast1 = block([])
+      ast2 = block([])
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -441,8 +465,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "handles nil else branches" do
-      ast1 = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, nil}
-      ast2 = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, nil}
+      ast1 = conditional(variable("x"), literal(:integer, 1), nil)
+      ast2 = conditional(variable("x"), literal(:integer, 1), nil)
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 
@@ -452,8 +476,8 @@ defmodule Metastatic.Analysis.DuplicationTest do
     end
 
     test "conditional with else branch differs from without" do
-      ast1 = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, nil}
-      ast2 = {:conditional, {:variable, "x"}, {:literal, :integer, 1}, {:literal, :integer, 2}}
+      ast1 = conditional(variable("x"), literal(:integer, 1), nil)
+      ast2 = conditional(variable("x"), literal(:integer, 1), literal(:integer, 2))
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :elixir)
 

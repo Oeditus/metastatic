@@ -79,29 +79,36 @@ defmodule Metastatic.Analysis.BusinessLogic.InlineJavascript do
   end
 
   @impl true
-  def analyze({:literal, :string, content} = node, _context) when is_binary(content) do
-    content_lower = String.downcase(content)
+  def analyze({:literal, meta, content} = node, _context)
+      when is_list(meta) and is_binary(content) do
+    # Check if this is a string literal in 3-tuple format
+    if Keyword.get(meta, :subtype) == :string do
+      content_lower = String.downcase(content)
 
-    if Enum.any?(@dangerous_patterns, &String.contains?(content_lower, &1)) do
-      [
-        Analyzer.issue(
-          analyzer: __MODULE__,
-          category: :security,
-          severity: :error,
-          message: "Inline JavaScript in string literal - XSS vulnerability",
-          node: node,
-          metadata: %{
-            pattern: "inline_script",
-            suggestion: "Use external scripts, CSP, or proper escaping/sanitization"
-          }
-        )
-      ]
+      if Enum.any?(@dangerous_patterns, &String.contains?(content_lower, &1)) do
+        [
+          Analyzer.issue(
+            analyzer: __MODULE__,
+            category: :security,
+            severity: :error,
+            message: "Inline JavaScript in string literal - XSS vulnerability",
+            node: node,
+            metadata: %{
+              pattern: "inline_script",
+              suggestion: "Use external scripts, CSP, or proper escaping/sanitization"
+            }
+          )
+        ]
+      else
+        []
+      end
     else
       []
     end
   end
 
-  def analyze({:function_call, fn_name, args} = node, _context) when is_binary(fn_name) do
+  def analyze({:function_call, meta, args} = node, _context) when is_list(meta) do
+    fn_name = Keyword.get(meta, :name, "")
     fn_lower = String.downcase(fn_name)
 
     # Check for dangerous functions
@@ -148,8 +155,9 @@ defmodule Metastatic.Analysis.BusinessLogic.InlineJavascript do
 
   defp has_script_in_args?(args) when is_list(args) do
     Enum.any?(args, fn
-      {:literal, :string, content} when is_binary(content) ->
-        String.contains?(String.downcase(content), ["<script>", "</script>"])
+      {:literal, meta, content} when is_list(meta) and is_binary(content) ->
+        Keyword.get(meta, :subtype) == :string and
+          String.contains?(String.downcase(content), ["<script>", "</script>"])
 
       _ ->
         false

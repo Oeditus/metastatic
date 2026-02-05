@@ -12,181 +12,116 @@ defmodule Metastatic.AST do
   - **M1:** Python AST, JavaScript AST, Elixir AST - what specific code IS
   - **M0:** Runtime execution - what code DOES
 
-  ## Layer Architecture (within M2)
+  ## Node Structure
 
-  The three layers represent different granularities of meta-modeling:
+  All MetaAST nodes are uniform 3-element tuples:
 
-  - **M2.1 (Core):** Universal concepts (ALL languages)
-  - **M2.2 (Extended):** Common patterns (MOST languages)
-  - **M2.3 (Native):** Language-specific escape hatches (embedded M1)
+      {type_atom, keyword_meta, children_or_value}
 
-  ## Semantic Equivalence
+  Where:
+  - `type_atom` - Node type (e.g., `:literal`, `:container`, `:function_def`)
+  - `keyword_meta` - Keyword list containing metadata (line, column, subtype, etc.)
+  - `children_or_value` - Either a value (for leaf nodes) or list of child nodes
 
-  Different M1 models can be instances of the same M2 concept:
+  ## Third Element Semantics
 
-      # M2: Meta-model definition
-      {:binary_op, :arithmetic, :+, left, right}
-
-      # M1 instances (all equivalent at M2 level):
-      Python:     BinOp(op=Add(), left=Name('x'), right=Num(5))
-      JavaScript: BinaryExpression(operator: '+', left: Identifier('x'), right: Literal(5))
-      Elixir:     {:+, [], [{:x, [], nil}, 5]}
-
-  All three are INSTANCES of the same M2 concept, differing only in concrete syntax (M1).
-
-  ## References
-
-  - OMG Meta Object Facility (MOF) Specification
-  - Eclipse Modeling Framework (EMF)
-  - Abstract Syntax Theory
-  """
-
-  # ----- M2 Node Type Definition -----
-
-  @typedoc """
-  Source location information from the original source code.
-
-  Preserves line and column information to enable precise error reporting
-  and code analysis. All fields use 1-indexed line numbers and 0-indexed
-  column offsets to match common editor conventions.
-
-  In addition to source position, this type preserves M1-level context metadata
-  such as module name, function name, and arity. This enables tools like Ragex
-  to provide rich context-aware analysis without losing abstraction at M2 level.
-
-  ## Fields
-
-  ### Source Position (existing)
-  - `:line` - 1-indexed line number (required)
-  - `:col` - 0-indexed column offset (optional)
-  - `:end_line` - 1-indexed end line number (optional)
-  - `:end_col` - 0-indexed end column offset (optional)
-
-  ### M1 Context Metadata (new)
-  - `:language` - Source language atom (`:elixir`, `:python`, etc.)
-  - `:module` - Fully qualified module/namespace name
-  - `:function` - Current function/method name
-  - `:arity` - Function arity (number of parameters)
-  - `:container` - Container name (class, module, namespace)
-  - `:visibility` - Visibility modifier (`:public`, `:private`, `:protected`)
-  - `:file` - Absolute or relative file path
-  - `:m1_meta` - Language-specific metadata escape hatch
+  The third element varies by node type:
+  - **Leaf nodes** (literal, variable): The actual value (`42`, `"x"`)
+  - **Composite nodes** (binary_op, function_call): List of child AST nodes
+  - **Container nodes** (container, function_def): List of body statements
 
   ## Examples
 
-      # Basic source position
-      %{line: 10}
-      %{line: 10, col: 5}
-      %{line: 10, col: 5, end_line: 10, end_col: 15}
+      # Literal integer
+      {:literal, [subtype: :integer, line: 10], 42}
 
-      # With M1 context metadata
-      %{
-        line: 42,
-        col: 8,
-        language: :elixir,
-        module: "MyApp.UserController",
-        function: "create",
-        arity: 2,
-        visibility: :public,
-        file: "lib/my_app/user_controller.ex"
-      }
+      # Variable
+      {:variable, [line: 5], "x"}
 
-      # Python example with class context
-      %{
-        line: 15,
-        language: :python,
-        container: "UserService",
-        function: "authenticate",
-        arity: 2,
-        file: "services/user_service.py"
-      }
+      # Binary operation
+      {:binary_op, [category: :arithmetic, operator: :+],
+       [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+
+      # Map with pairs
+      {:map, [],
+       [{:pair, [], [{:literal, [subtype: :symbol], :name},
+                     {:literal, [subtype: :string], "Alice"}]}]}
+
+  ## Traversal
+
+  Use `traverse/4` for walking and transforming ASTs:
+
+      AST.traverse(ast, acc, &pre/2, &post/2)
+
+  This mirrors `Macro.traverse/4` from Elixir's standard library.
   """
-  @type location :: %{
-          required(:line) => pos_integer(),
-          optional(:col) => non_neg_integer(),
-          optional(:end_line) => pos_integer(),
-          optional(:end_col) => non_neg_integer(),
-          optional(:language) => atom(),
-          optional(:module) => String.t(),
-          optional(:function) => String.t(),
-          optional(:arity) => non_neg_integer(),
-          optional(:container) => String.t(),
-          optional(:visibility) => atom(),
-          optional(:file) => String.t(),
-          optional(:m1_meta) => map()
-        }
+
+  # ----- Type Definitions -----
 
   @typedoc """
-  A MetaAST represents a programming language construct at the meta-level (M2).
+  A MetaAST node is a 3-tuple: {type, metadata, children_or_value}.
 
-  This is the union of all meta-types across the three layers.
-
-  ## Location Information
-
-  All MetaAST nodes can optionally carry source location information as the
-  final element of the tuple. This enables precise error reporting and analysis.
+  The type atom identifies the node kind.
+  The metadata is a keyword list with location, subtype, and other info.
+  The third element is either a value (leaf nodes) or list of children.
   """
-  # M2.1: Core layer - Universal programming concepts
-  @type meta_ast ::
-          literal()
-          | variable()
-          | list_literal()
-          | map_literal()
-          | binary_op()
-          | unary_op()
-          | function_call()
-          | conditional()
-          | early_return()
-          | block()
-          | assignment()
-          | inline_match()
-          # M2.2: Extended layer - Common patterns with variations
-          | loop()
-          | lambda()
-          | collection_op()
-          | pattern_match()
-          | exception_handling()
-          | async_operation()
-          # M2.2s: Structural/Organizational layer - Top-level constructs
-          | container()
-          | function_def()
-          | attribute_access()
-          | augmented_assignment()
-          | property()
-          # M2.3: Native layer - M1 escape hatch
-          | language_specific()
-
-  # ----- M2.1: Core Layer - Universal Meta-Types -----
-  # These represent concepts that exist in ALL programming languages
+  @type meta_ast :: {atom(), keyword(), term()}
 
   @typedoc """
-  M2 meta-type: Literal value.
-
-  Represents constant values that appear in source code.
-
-  ## M1 instances
-  - Python: `ast.Constant`, `ast.Num`, `ast.Str`
-  - JavaScript: `Literal`
-  - Elixir: integer, string, atom literals
-
-  ## Examples
-
-      {:literal, :integer, 42}
-      {:literal, :string, "hello"}
-      {:literal, :boolean, true}
-      {:literal, :null, nil}
-      {:literal, :integer, 42, %{line: 10}}
+  Node type atoms for M2.1 Core Layer - universal concepts.
   """
-  @type literal ::
-          {:literal, semantic_type(), value :: term()}
-          | {:literal, semantic_type(), value :: term(), location()}
+  @type core_type ::
+          :literal
+          | :variable
+          | :list
+          | :map
+          | :pair
+          | :tuple
+          | :binary_op
+          | :unary_op
+          | :function_call
+          | :conditional
+          | :early_return
+          | :block
+          | :assignment
+          | :inline_match
 
   @typedoc """
-  Semantic type classification for literals.
-
-  These categories exist across all languages, though syntax varies.
+  Node type atoms for M2.2 Extended Layer - common patterns.
   """
-  @type semantic_type ::
+  @type extended_type ::
+          :loop
+          | :lambda
+          | :collection_op
+          | :pattern_match
+          | :match_arm
+          | :exception_handling
+          | :async_operation
+
+  @typedoc """
+  Node type atoms for M2.2s Structural Layer - organizational constructs.
+  """
+  @type structural_type ::
+          :container
+          | :function_def
+          | :attribute_access
+          | :augmented_assignment
+          | :property
+
+  @typedoc """
+  Node type atoms for M2.3 Native Layer - language-specific escape hatch.
+  """
+  @type native_type :: :language_specific
+
+  @typedoc """
+  All valid node type atoms.
+  """
+  @type node_type :: core_type() | extended_type() | structural_type() | native_type()
+
+  @typedoc """
+  Semantic subtype for literals.
+  """
+  @type literal_subtype ::
           :integer
           | :float
           | :string
@@ -194,441 +129,11 @@ defmodule Metastatic.AST do
           | :null
           | :symbol
           | :regex
-          | :collection
 
   @typedoc """
-  M2 meta-type: Variable reference.
-
-  Represents an identifier that refers to a value in scope.
-
-  ## M1 instances
-  - Python: `ast.Name`
-  - JavaScript: `Identifier`
-  - Elixir: `{:var, meta, context}`
-
-  ## Examples
-
-      {:variable, "x"}
-      {:variable, "userName"}
-      {:variable, "x", %{line: 5}}
+  Category for binary/unary operators.
   """
-  @type variable ::
-          {:variable, name :: String.t()}
-          | {:variable, name :: String.t(), location()}
-
-  @typedoc """
-  M2 meta-type: List collection.
-
-  Represents ordered sequences of elements. Lists are fundamental data structures
-  present in all programming languages, making them universal (M2.1 Core).
-
-  ## M1 instances
-  - Python: `ast.List`
-  - JavaScript: `Array`
-  - Elixir: list literal `[1, 2, 3]`
-  - Ruby: `Array`
-  - Erlang: list
-
-  ## Examples
-
-      {:list, []}
-      {:list, [{:literal, :integer, 1}, {:literal, :integer, 2}]}
-      {:list, [{:variable, "x"}, {:variable, "y"}]}
-      {:list, [{:literal, :integer, 1}], %{line: 3}}
-  """
-  @type list_literal ::
-          {:list, elements :: [meta_ast()]}
-          | {:list, elements :: [meta_ast()], location()}
-
-  @typedoc """
-  M2 meta-type: Map/Dictionary collection.
-
-  Represents key-value mappings. Maps/dictionaries are fundamental data structures
-  present in all modern programming languages, making them universal (M2.1 Core).
-
-  ## M1 instances
-  - Python: `ast.Dict`
-  - JavaScript: `Object` literal
-  - Elixir: map `%{key => value}`
-  - Ruby: `Hash`
-  - Erlang: map
-
-  ## Examples
-
-      {:map, []}
-      {:map, [{{:literal, :string, "name"}, {:literal, :string, "Alice"}}]}
-      {:map, [{{:variable, "key"}, {:variable, "value"}}]}
-      {:map, [], %{line: 7}}
-  """
-  @type map_literal ::
-          {:map, pairs :: [{key :: meta_ast(), value :: meta_ast()}]}
-          | {:map, pairs :: [{key :: meta_ast(), value :: meta_ast()}], location()}
-
-  @typedoc """
-  M2 meta-type: Binary operation.
-
-  This is a meta-concept that abstracts over language-specific binary operations.
-
-  ## M1 instances
-  - Python: `ast.BinOp`
-  - JavaScript: `BinaryExpression`
-  - Elixir: `{:+, meta, [left, right]}`
-
-  All three are INSTANCES of this M2 concept.
-
-  ## Examples
-
-      {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
-      {:binary_op, :comparison, :>, {:variable, "age"}, {:literal, :integer, 18}}
-      {:binary_op, :boolean, :and, condition1, condition2}
-      {:binary_op, :arithmetic, :+, left, right, %{line: 10}}
-  """
-  @type binary_op ::
-          {:binary_op, :arithmetic | :comparison | :boolean, op :: atom(), left :: meta_ast(),
-           right :: meta_ast()}
-          | {:binary_op, :arithmetic | :comparison | :boolean, op :: atom(), left :: meta_ast(),
-             right :: meta_ast(), location()}
-
-  @typedoc """
-  M2 meta-type: Unary operation.
-
-  Represents operations with a single operand.
-
-  ## Examples
-
-      {:unary_op, :arithmetic, :-, {:variable, "x"}}
-      {:unary_op, :boolean, :not, {:variable, "flag"}}
-      {:unary_op, :arithmetic, :-, {:variable, "x"}, %{line: 15}}
-  """
-  @type unary_op ::
-          {:unary_op, :arithmetic | :boolean, op :: atom(), operand :: meta_ast()}
-          | {:unary_op, :arithmetic | :boolean, op :: atom(), operand :: meta_ast(), location()}
-
-  @typedoc """
-  M2 meta-type: Function call.
-
-  Represents invocation of a function or method.
-
-  ## M1 instances
-  - Python: `ast.Call`
-  - JavaScript: `CallExpression`
-  - Elixir: function application
-
-  ## Examples
-
-      {:function_call, "add", [{:variable, "x"}, {:variable, "y"}]}
-      {:function_call, "max", [a, b]}
-      {:function_call, "print", [arg], %{line: 20}}
-  """
-  @type function_call ::
-          {:function_call, name :: String.t(), args :: [meta_ast()]}
-          | {:function_call, name :: String.t(), args :: [meta_ast()], location()}
-
-  @typedoc """
-  M2 meta-type: Conditional expression.
-
-  Represents if/else or ternary conditional logic.
-
-  ## M1 instances
-  - Python: `ast.If`, `ast.IfExp`
-  - JavaScript: `IfStatement`, `ConditionalExpression`
-  - Elixir: `if`, `cond`
-
-  ## Examples
-
-      {:conditional,
-       {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
-       {:literal, :string, "positive"},
-       {:literal, :string, "non-positive"}}
-      {:conditional, cond, then_br, else_br, %{line: 25}}
-  """
-  @type conditional ::
-          {:conditional, condition :: meta_ast(), then_branch :: meta_ast(),
-           else_branch :: meta_ast() | nil}
-          | {:conditional, condition :: meta_ast(), then_branch :: meta_ast(),
-             else_branch :: meta_ast() | nil, location()}
-
-  @typedoc """
-  M2 meta-type: Early return.
-
-  Represents control flow that exits early from a block.
-
-  ## Examples
-
-      {:early_return, {:variable, "result"}}
-      {:early_return, {:variable, "result"}, %{line: 30}}
-  """
-  @type early_return ::
-          {:early_return, value :: meta_ast()}
-          | {:early_return, value :: meta_ast(), location()}
-
-  @typedoc """
-  M2 meta-type: Block of statements.
-
-  Represents a sequence of statements/expressions.
-
-  ## Examples
-
-      {:block, [stmt1, stmt2, stmt3]}
-      {:block, [stmt1, stmt2], %{line: 35}}
-  """
-  @type block ::
-          {:block, statements :: [meta_ast()]}
-          | {:block, statements :: [meta_ast()], location()}
-
-  @typedoc """
-  M2 meta-type: Assignment (imperative binding/mutation).
-
-  Represents imperative assignment in non-BEAM languages where `=` is a
-  mutation/binding operator. The left side is a **target** that receives a value.
-
-  ## Semantic Distinction from inline_match
-
-  This type is for **imperative assignment** (Python, JavaScript, Ruby, etc.)
-  where variables can be rebound/mutated. Contrast with `inline_match` which
-  represents **declarative pattern matching** (Elixir, Erlang).
-
-  ## M1 instances
-  - Python: `ast.Assign`, `ast.AugAssign`, `ast.AnnAssign`
-  - JavaScript: `AssignmentExpression`, `VariableDeclarator`
-  - Ruby: assignment statements
-
-  ## Examples
-
-      # Simple assignment: x = 5
-      {:assignment, {:variable, "x"}, {:literal, :integer, 5}}
-
-      # Tuple unpacking: x, y = 1, 2
-      {:assignment,
-       {:tuple, [{:variable, "x"}, {:variable, "y"}]},
-       {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
-
-      # Augmented assignment: x += 1 (desugared)
-      {:assignment, {:variable, "x"},
-       {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}}
-      {:assignment, target, value, %{line: 40}}
-  """
-  @type assignment ::
-          {:assignment, target :: meta_ast(), value :: meta_ast()}
-          | {:assignment, target :: meta_ast(), value :: meta_ast(), location()}
-
-  @typedoc """
-  M2 meta-type: Inline match (pattern matching).
-
-  Represents inline pattern matching in BEAM languages where `=` is a
-  **match operator**, not assignment. The left side is a **pattern** that
-  must unify with the right side value.
-
-  ## Semantic Distinction from assignment
-
-  This type is for **declarative pattern matching** (Elixir, Erlang) where:
-  - Elixir: Variables bind on first occurrence, rebind on subsequent use
-  - Erlang: Single-assignment semantics, match fails if variable already bound to different value
-
-  Contrast with `assignment` which represents imperative binding/mutation.
-
-  ## M1 instances
-  - Elixir: `=` operator in match context
-  - Erlang: `=` operator (single-assignment)
-
-  ## Examples
-
-      # Simple match: x = 5 (Elixir/Erlang)
-      {:inline_match, {:variable, "x"}, {:literal, :integer, 5}}
-
-      # Tuple destructuring: {x, y} = {1, 2}
-      {:inline_match,
-       {:tuple, [{:variable, "x"}, {:variable, "y"}]},
-       {:tuple, [{:literal, :integer, 1}, {:literal, :integer, 2}]}}
-
-      # List pattern: [head | tail] = list
-      {:inline_match,
-       {:cons_pattern, {:variable, "head"}, {:variable, "tail"}},
-       {:variable, "list"}}
-
-      # Pin operator (Elixir): ^x = 5
-      {:inline_match,
-       {:pin, {:variable, "x"}},
-       {:literal, :integer, 5}}
-      {:inline_match, pattern, value, %{line: 45}}
-  """
-  @type inline_match ::
-          {:inline_match, pattern :: meta_ast(), value :: meta_ast()}
-          | {:inline_match, pattern :: meta_ast(), value :: meta_ast(), location()}
-
-  # ----- M2.2: Extended Layer - Common Meta-Patterns -----
-  # These represent concepts that exist in MOST languages, with variations
-
-  @typedoc """
-  M2 meta-type: Loop construct.
-
-  Represents iterative execution patterns.
-
-  ## M1 instances
-  - Python: `ast.For`, `ast.While`
-  - JavaScript: `ForStatement`, `WhileStatement`
-  - Elixir: `Enum.each/2` (functional iteration)
-
-  ## Examples
-
-      {:loop, :while,
-       {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}},
-       {:block, [{:variable, "x"}]}}
-  """
-  @type loop ::
-          {:loop, :while, condition :: meta_ast(), body :: meta_ast()}
-          | {:loop, :for | :for_each, item :: meta_ast(), collection :: meta_ast(),
-             body :: meta_ast()}
-
-  @typedoc """
-  M2 meta-type: Lambda/anonymous function.
-
-  Represents function literals.
-
-  ## M1 instances
-  - Python: `ast.Lambda`
-  - JavaScript: `ArrowFunctionExpression`, `FunctionExpression`
-  - Elixir: `fn` expressions
-
-  ## Examples
-
-      {:lambda, ["x", "y"], [], {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
-  """
-  @type lambda ::
-          {:lambda, params :: [String.t()], captures :: [String.t()], body :: meta_ast()}
-
-  @typedoc """
-  M2 meta-type: Collection operations.
-
-  These represent functional transformations that exist across languages:
-
-  ## M1 instances
-  - Python: list comprehensions, `map()`, `filter()`
-  - JavaScript: `Array.prototype.map/filter/reduce`
-  - Elixir: `Enum.map/2`, `Enum.filter/2`, `Enum.reduce/3`
-
-  All are instances of the same M2 concept.
-
-  ## Examples
-
-      {:collection_op, :map,
-       {:lambda, ["x"], [], {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}}},
-       {:variable, "numbers"}}
-  """
-  @type collection_op ::
-          {:collection_op, :map | :filter, fn_or_pred :: meta_ast(), collection :: meta_ast()}
-          | {:collection_op, :reduce, fn_or_pred :: meta_ast(), collection :: meta_ast(),
-             initial :: meta_ast()}
-
-  @typedoc """
-  M2 meta-type: Pattern matching.
-
-  Represents switch/case/match constructs.
-
-  ## M1 instances
-  - Python: `ast.Match` (3.10+)
-  - JavaScript: `SwitchStatement`
-  - Elixir: `case`, pattern matching in function heads
-
-  ## Examples
-
-      {:pattern_match, {:variable, "value"},
-       [
-         {{:literal, :integer, 0}, {:literal, :string, "zero"}},
-         {{:literal, :integer, 1}, {:literal, :string, "one"}},
-         {:_, {:literal, :string, "other"}}
-       ]}
-  """
-  @type pattern_match ::
-          {:pattern_match, scrutinee :: meta_ast(),
-           arms :: [{pattern :: meta_ast(), body :: meta_ast()}]}
-
-  @typedoc """
-  M2 meta-type: Exception handling.
-
-  Represents try/catch/finally constructs.
-
-  ## Examples
-
-      {:exception_handling,
-       {:block, [{:function_call, "risky", []}]},
-       [{:error, {:variable, "e"}, {:function_call, "handle", [{:variable, "e"}]}}],
-       {:function_call, "cleanup", []}}
-  """
-  @type exception_handling ::
-          {:exception_handling, try_block :: meta_ast(),
-           rescue_clauses :: [{exception :: atom(), var :: meta_ast(), body :: meta_ast()}],
-           finally_block :: meta_ast() | nil}
-
-  @typedoc """
-  M2 meta-type: Asynchronous operation.
-
-  Represents async/await, promises, futures.
-
-  ## M1 instances
-  - Python: `async`/`await` with asyncio
-  - JavaScript: `async`/`await` with Promises
-  - Elixir: `Task.async`/`Task.await`
-
-  ## Examples
-
-      {:async_operation, :await,
-       {:function_call, "fetch_data", [{:literal, :string, "url"}]}}
-  """
-  @type async_operation :: {:async_operation, :await | :async, operation :: meta_ast()}
-
-  # ----- M2.2s: Structural/Organizational Layer -----
-  # Top-level constructs: modules, classes, function definitions
-
-  @typedoc """
-  M2 meta-type: Container (module/class/namespace).
-
-  Represents organizational units that group related code.
-
-  ## M1 instances
-  - Python: `ast.Module`, `ast.ClassDef`
-  - JavaScript: Module, `ClassDeclaration`
-  - Elixir: `defmodule`
-  - Ruby: `class`, `module`
-
-  ## Structure
-
-  The container tuple has the following elements:
-
-  1. `:container` - type tag
-  2. `type` - container type (`:module`, `:class`, or `:namespace`)
-  3. `name` - string name of the container
-  4. `parent` - string name of parent/superclass (nil if none)
-  5. `type_params` - list of string generic type parameter names (e.g. `["T", "U"]`)
-  6. `implements` - list of string interface/protocol names this implements
-  7. `body` - either a single MetaAST node (typically `:block`) or a list of MetaAST nodes (members)
-
-  Note: Additional metadata (visibility, organizational_model, etc.) can be stored in
-  member function_def opts maps or in separate analysis metadata, not in the core AST structure.
-  This keeps the core AST simple and focused on structure.
-
-  ## Examples
-
-      # Python class with superclass
-      {:container, :class, "Calculator", "BaseCalculator", [], [],
-       [function_def1, function_def2]}
-
-      # Elixir module (no parent, no type params, no implements)
-      {:container, :module, "MyApp.Calculator", nil, [], [],
-       [function_def1, function_def2]}
-
-      # Generic class with type parameters
-      {:container, :class, "List", nil, ["T"], [],
-       [function_def1]}
-
-      # Class implementing interfaces
-      {:container, :class, "MyClass", nil, [], ["Comparable", "Serializable"],
-       [function_def1]}
-  """
-  @type container ::
-          {:container, container_type(), name :: String.t(), parent :: String.t() | nil,
-           type_params :: [String.t()], implements :: [String.t()],
-           body :: meta_ast() | [meta_ast()]}
+  @type operator_category :: :arithmetic | :comparison | :boolean
 
   @typedoc """
   Container type classification.
@@ -636,383 +141,332 @@ defmodule Metastatic.AST do
   @type container_type :: :module | :class | :namespace
 
   @typedoc """
-  M2 meta-type: Function definition.
-
-  Represents a named function/method definition (not invocation).
-
-  ## M1 instances
-  - Python: `ast.FunctionDef`, `ast.AsyncFunctionDef`
-  - JavaScript: `FunctionDeclaration`, Method in `ClassDeclaration`
-  - Elixir: `def`, `defp`
-  - Ruby: `def`
-
-  ## Parameters
-
-  The params list can contain:
-  - Simple string names: `"x"`, `"count"`
-  - Pattern parameters: `{:pattern, meta_ast}` for destructuring
-  - Default parameters: `{:default, "name", default_value}`
-
-  ## Metadata Structure
-
-  The metadata map can contain:
-  - `:guards` - guard clause as MetaAST (Elixir/Erlang when clauses, etc.)
-  - `:arity` - integer arity of the function
-  - `:return_type` - type annotation for return value
-  - `:decorators` - list of decorator MetaAST nodes
-  - `:is_async` - boolean for async/await functions
-  - `:is_static` - boolean for static methods (in OOP)
-  - `:is_abstract` - boolean for abstract methods
-  - `:specs` - function specifications (@spec in Elixir, type hints in Python)
-  - `:doc` - documentation string
-  - `:original_ast` - original M1 AST for round-trip fidelity
-
-  Note: Guards are stored in metadata (not as separate parameter) per design decision Q1.2.
-  Note: Self parameter is removed at M2 level per design decision Q3.1.
-  Note: For multi-clause functions (Elixir), store as single function_def with pattern match in body per Q2.1.
-
-  ## Examples
-
-      # Simple function: def add(x, y), do: x + y
-      {:function_def, "add", ["x", "y"], nil,
-       %{arity: 2, visibility: :public},
-       {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
-
-      # Function with guard: def positive?(x) when x > 0
-      {:function_def, "positive?", ["x"], nil,
-       %{arity: 1, visibility: :public, guards: {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 0}}},
-       {:literal, :boolean, true}}
-
-      # Function with pattern matching parameter
-      {:function_def, "get_first", [{:pattern, {:tuple, [{:variable, "x"}, :_]}}], nil,
-       %{arity: 1, visibility: :public},
-       {:variable, "x"}}
-
-      # Function with default parameter
-      {:function_def, "greet", [{:default, "name", {:literal, :string, "World"}}], nil,
-       %{arity: 1, visibility: :public},
-       {:function_call, "puts", [{:literal, :string, "Hello"}]}}
-
-      # Function with return type annotation
-      {:function_def, "calculate", ["x"], "number",
-       %{visibility: :public},
-       {:variable, "x"}}
-  """
-  @type function_def ::
-          {:function_def, name :: String.t(), params :: [param()], ret_type :: String.t() | nil,
-           opts :: map() | [], body :: meta_ast()}
-
-  @typedoc """
-  Visibility classification for functions and members.
+  Visibility modifier.
   """
   @type visibility :: :public | :private | :protected
 
-  @typedoc """
-  Function parameter types.
-  """
-  @type param ::
-          String.t()
-          | {:pattern, meta_ast()}
-          | {:default, String.t(), meta_ast()}
+  # ----- Node Type Sets for Validation -----
 
-  @typedoc """
-  M2 meta-type: Attribute access.
+  @core_types [
+    :literal,
+    :variable,
+    :list,
+    :map,
+    :pair,
+    :tuple,
+    :binary_op,
+    :unary_op,
+    :function_call,
+    :conditional,
+    :early_return,
+    :block,
+    :assignment,
+    :inline_match
+  ]
 
-  Represents accessing a field/property/attribute on an object or module.
+  @extended_types [
+    :loop,
+    :lambda,
+    :collection_op,
+    :pattern_match,
+    :match_arm,
+    :exception_handling,
+    :async_operation
+  ]
 
-  ## M1 instances
-  - Python: `ast.Attribute`
-  - JavaScript: `MemberExpression`
-  - Elixir: Module.function (converted to function_call), struct.field
-  - Ruby: `object.method`, `object.field`
+  @structural_types [
+    :container,
+    :function_def,
+    :attribute_access,
+    :augmented_assignment,
+    :property
+  ]
 
-  ## Examples
+  @native_types [:language_specific]
 
-      # Python: obj.value
-      {:attribute_access, {:variable, "obj"}, "value"}
+  @all_types @core_types ++ @extended_types ++ @structural_types ++ @native_types
 
-      # JavaScript: user.name
-      {:attribute_access, {:variable, "user"}, "name"}
+  @literal_subtypes [:integer, :float, :string, :boolean, :null, :symbol, :regex]
 
-      # Chained access: user.address.street
-      {:attribute_access,
-       {:attribute_access, {:variable, "user"}, "address"},
-       "street"}
-  """
-  @type attribute_access ::
-          {:attribute_access, receiver :: meta_ast(), attribute :: String.t()}
+  @operator_categories [:arithmetic, :comparison, :boolean]
 
-  @typedoc """
-  M2 meta-type: Augmented assignment.
+  @container_types [:module, :class, :namespace]
 
-  Represents compound assignment operators (+=, -=, *=, etc.) in their
-  non-desugared form to preserve source structure.
+  # ----- Accessors -----
 
-  ## M1 instances
-  - Python: `ast.AugAssign`
-  - JavaScript: `AssignmentExpression` with operators like `+=`
-  - Ruby: `+=`, `-=` operators
-
-  Note: While these CAN be desugared to `{:assignment, target, {:binary_op, ...}}`,
-  preserving them as a distinct type maintains source fidelity and enables
-  augmented-assignment-specific analysis.
-
-  ## Examples
-
-      # Python: x += 5
-      {:augmented_assignment, :+, {:variable, "x"}, {:literal, :integer, 5}}
-
-      # JavaScript: count *= 2
-      {:augmented_assignment, :*, {:variable, "count"}, {:literal, :integer, 2}}
-
-      # Ruby: total -= discount
-      {:augmented_assignment, :-, {:variable, "total"}, {:variable, "discount"}}
-  """
-  @type augmented_assignment ::
-          {:augmented_assignment, operator :: atom(), target :: meta_ast(), value :: meta_ast()}
-
-  @typedoc """
-  M2 meta-type: Property.
-
-  Represents property declarations with getters/setters (Python @property,
-  Ruby attr_accessor, C# properties, etc.).
-
-  ## M1 instances
-  - Python: `@property` decorator pattern
-  - Ruby: `attr_accessor`, `attr_reader`, `attr_writer`
-  - C#: property declarations
-  - JavaScript: getter/setter in classes
-
-  ## Metadata Structure
-
-  - `:original_ast` - original M1 AST
-  - `:is_read_only` - boolean (true for attr_reader/getter-only)
-  - `:is_write_only` - boolean (rare, but possible)
-  - `:backing_field` - name of underlying field if applicable
+  @doc """
+  Extract the node type from a MetaAST node.
 
   ## Examples
 
-      # Python property with getter and setter
-      {:property, "temperature",
-       {:function_def, "temperature", [], nil, %{visibility: :public}, {:variable, "_temp"}},
-       {:function_def, "temperature", ["value"], nil, %{visibility: :public},
-        {:assignment, {:variable, "_temp"}, {:variable, "value"}}},
-       %{is_read_only: false}}
+      iex> Metastatic.AST.type({:literal, [subtype: :integer], 42})
+      :literal
 
-      # Ruby attr_reader (read-only)
-      {:property, "name",
-       {:function_def, "name", [], nil, %{visibility: :public}, {:variable, "@name"}},
-       nil,
-       %{is_read_only: true}}
+      iex> left = {:variable, [], "x"}
+      iex> right = {:literal, [subtype: :integer], 5}
+      iex> Metastatic.AST.type({:binary_op, [operator: :+], [left, right]})
+      :binary_op
   """
-  @type property ::
-          {:property, name :: String.t(), getter :: function_def() | nil,
-           setter :: function_def() | nil, metadata :: map()}
+  @spec type(meta_ast()) :: atom()
+  def type({type, _meta, _children}) when is_atom(type), do: type
 
-  # ----- M2.3: Native Layer - M1 Escape Hatch -----
-  # When M1 cannot be lifted to M2, preserve as-is with semantic hints
-
-  @typedoc """
-  M2 escape hatch: Language-specific construct.
-
-  When an M1 construct cannot be abstracted to M2, we preserve the M1 AST
-  directly with semantic hints.
-
-  This allows:
-  1. Round-trip fidelity (M1 → M2 → M1)
-  2. Partial analysis at M2 level (using semantic info)
-  3. Language-specific transformations when needed
+  @doc """
+  Extract the metadata keyword list from a MetaAST node.
 
   ## Examples
 
-      {:language_specific, :python,
-       %{construct: :list_comprehension, data: "[x for x in range(10)]"}}
-  """
-  @type language_specific :: {:language_specific, language :: atom(), native_info :: map()}
+      iex> Metastatic.AST.meta({:literal, [subtype: :integer, line: 10], 42})
+      [subtype: :integer, line: 10]
 
-  # ----- M2 Conformance Validation -----
+      iex> Metastatic.AST.meta({:variable, [], "x"})
+      []
+  """
+  @spec meta(meta_ast()) :: keyword()
+  def meta({_type, meta, _children}) when is_list(meta), do: meta
+
+  @doc """
+  Extract the children or value from a MetaAST node.
+
+  For leaf nodes (literal, variable), returns the value.
+  For composite nodes, returns the list of children.
+
+  ## Examples
+
+      iex> Metastatic.AST.children({:literal, [subtype: :integer], 42})
+      42
+
+      iex> left = {:variable, [], "x"}
+      iex> right = {:literal, [subtype: :integer], 5}
+      iex> Metastatic.AST.children({:binary_op, [operator: :+], [left, right]})
+      [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]
+  """
+  @spec children(meta_ast()) :: term()
+  def children({_type, _meta, children}), do: children
+
+  @doc """
+  Get a specific metadata value by key.
+
+  ## Examples
+
+      iex> ast = {:literal, [subtype: :integer, line: 10], 42}
+      iex> Metastatic.AST.get_meta(ast, :line)
+      10
+
+      iex> ast = {:variable, [], "x"}
+      iex> Metastatic.AST.get_meta(ast, :line)
+      nil
+
+      iex> ast = {:variable, [], "x"}
+      iex> Metastatic.AST.get_meta(ast, :line, 0)
+      0
+  """
+  @spec get_meta(meta_ast(), atom(), term()) :: term()
+  def get_meta({_type, meta, _children}, key, default \\ nil) when is_atom(key) do
+    Keyword.get(meta, key, default)
+  end
+
+  @doc """
+  Put a metadata value by key.
+
+  ## Examples
+
+      iex> ast = {:literal, [subtype: :integer], 42}
+      iex> Metastatic.AST.put_meta(ast, :line, 10)
+      {:literal, [line: 10, subtype: :integer], 42}
+
+      iex> ast = {:variable, [line: 5], "x"}
+      iex> Metastatic.AST.put_meta(ast, :line, 10)
+      {:variable, [line: 10], "x"}
+  """
+  @spec put_meta(meta_ast(), atom(), term()) :: meta_ast()
+  def put_meta({type, meta, children}, key, value) when is_atom(key) do
+    {type, Keyword.put(meta, key, value), children}
+  end
+
+  @doc """
+  Update multiple metadata keys at once.
+
+  ## Examples
+
+      iex> ast = {:literal, [subtype: :integer], 42}
+      iex> Metastatic.AST.update_meta(ast, line: 10, col: 5)
+      {:literal, [subtype: :integer, line: 10, col: 5], 42}
+  """
+  @spec update_meta(meta_ast(), keyword()) :: meta_ast()
+  def update_meta({type, meta, children}, updates) when is_list(updates) do
+    {type, Keyword.merge(meta, updates), children}
+  end
+
+  @doc """
+  Update the children/value of a node.
+
+  ## Examples
+
+      iex> old_left = {:variable, [], "x"}
+      iex> old_right = {:literal, [subtype: :integer], 5}
+      iex> ast = {:binary_op, [operator: :+], [old_left, old_right]}
+      iex> new_left = {:variable, [], "y"}
+      iex> new_right = {:literal, [subtype: :integer], 10}
+      iex> Metastatic.AST.update_children(ast, [new_left, new_right])
+      {:binary_op, [operator: :+], [{:variable, [], "y"}, {:literal, [subtype: :integer], 10}]}
+  """
+  @spec update_children(meta_ast(), term()) :: meta_ast()
+  def update_children({type, meta, _children}, new_children) do
+    {type, meta, new_children}
+  end
+
+  # ----- Traversal -----
+
+  @doc """
+  Traverse a MetaAST, applying pre and post functions.
+
+  This mirrors `Macro.traverse/4` from Elixir's standard library.
+
+  - `pre` is called before visiting children, receives `{ast, acc}`, returns `{ast, acc}`
+  - `post` is called after visiting children, receives `{ast, acc}`, returns `{ast, acc}`
+
+  The traversal visits children based on the node type:
+  - Leaf nodes (literal, variable): No children to visit
+  - Composite nodes: Visits each child in the list
+  - Non-AST values: Passed through unchanged
+
+  ## Examples
+
+      # Count all nodes
+      {_ast, count} = AST.traverse(ast, 0, fn node, acc -> {node, acc + 1} end, fn node, acc -> {node, acc} end)
+
+      # Collect all variable names
+      {_ast, vars} = AST.traverse(ast, [], fn
+        {:variable, _, name} = node, acc -> {node, [name | acc]}
+        node, acc -> {node, acc}
+      end, fn node, acc -> {node, acc} end)
+
+      # Transform all integers by doubling them
+      {new_ast, _} = AST.traverse(ast, nil, fn node, acc -> {node, acc} end, fn
+        {:literal, meta, value} = node, acc ->
+          if Keyword.get(meta, :subtype) == :integer do
+            {{:literal, meta, value * 2}, acc}
+          else
+            {node, acc}
+          end
+        node, acc -> {node, acc}
+      end)
+  """
+  @spec traverse(meta_ast() | term(), acc, pre_fun, post_fun) :: {meta_ast() | term(), acc}
+        when acc: term(),
+             pre_fun: (meta_ast() | term(), acc -> {meta_ast() | term(), acc}),
+             post_fun: (meta_ast() | term(), acc -> {meta_ast() | term(), acc})
+  def traverse(ast, acc, pre, post) when is_function(pre, 2) and is_function(post, 2) do
+    do_traverse(ast, acc, pre, post)
+  end
+
+  # Main traversal for MetaAST nodes
+  defp do_traverse({type, meta, _children} = ast, acc, pre, post)
+       when is_atom(type) and is_list(meta) do
+    # Apply pre function
+    {ast, acc} = pre.(ast, acc)
+
+    # Destructure again in case pre modified the node
+    {type, meta, children} = ast
+
+    # Traverse children based on node type
+    {new_children, acc} = traverse_children(type, children, acc, pre, post)
+
+    # Reconstruct node with traversed children
+    new_ast = {type, meta, new_children}
+
+    # Apply post function
+    post.(new_ast, acc)
+  end
+
+  # Pass through non-AST values (literals like integers, strings, atoms, nil)
+  defp do_traverse(other, acc, pre, post) do
+    {other, acc} = pre.(other, acc)
+    post.(other, acc)
+  end
+
+  # Traverse children based on node type
+  # Leaf nodes - value is not traversable
+  defp traverse_children(type, value, acc, _pre, _post)
+       when type in [:literal, :variable] do
+    {value, acc}
+  end
+
+  # Nodes with list of children
+  defp traverse_children(_type, children, acc, pre, post) when is_list(children) do
+    {new_children, acc} =
+      Enum.map_reduce(children, acc, fn child, acc ->
+        do_traverse(child, acc, pre, post)
+      end)
+
+    {new_children, acc}
+  end
+
+  # Fallback for any other value
+  defp traverse_children(_type, value, acc, _pre, _post) do
+    {value, acc}
+  end
+
+  @doc """
+  Traverse a MetaAST with only a pre function (post is identity).
+
+  ## Examples
+
+      {new_ast, acc} = AST.prewalk(ast, [], fn node, acc -> {node, acc} end)
+  """
+  @spec prewalk(meta_ast() | term(), acc, (meta_ast() | term(), acc -> {meta_ast() | term(), acc})) ::
+          {meta_ast() | term(), acc}
+        when acc: term()
+  def prewalk(ast, acc, fun) when is_function(fun, 2) do
+    traverse(ast, acc, fun, fn node, acc -> {node, acc} end)
+  end
+
+  @doc """
+  Traverse a MetaAST with only a post function (pre is identity).
+
+  ## Examples
+
+      {new_ast, acc} = AST.postwalk(ast, [], fn node, acc -> {node, acc} end)
+  """
+  @spec postwalk(meta_ast() | term(), acc, (meta_ast() | term(), acc ->
+                                              {meta_ast() | term(), acc})) ::
+          {meta_ast() | term(), acc}
+        when acc: term()
+  def postwalk(ast, acc, fun) when is_function(fun, 2) do
+    traverse(ast, acc, fn node, acc -> {node, acc} end, fun)
+  end
+
+  # ----- Conformance Validation -----
 
   @doc """
   Validate that a term conforms to the M2 meta-model.
 
-  This performs M1 → M2 conformance checking, ensuring that
-  the structure is a valid MetaAST.
+  Checks that the structure is a valid 3-tuple MetaAST node
+  with proper type, metadata, and children.
 
   ## Examples
 
-      iex> Metastatic.AST.conforms?({:literal, :integer, 42})
+      iex> Metastatic.AST.conforms?({:literal, [subtype: :integer], 42})
       true
 
-      iex> Metastatic.AST.conforms?({:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}})
+      iex> Metastatic.AST.conforms?({:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]})
       true
 
       iex> Metastatic.AST.conforms?({:invalid_node, "data"})
+      false
+
+      iex> Metastatic.AST.conforms?("not a tuple")
       false
   """
   @spec conforms?(term()) :: boolean()
   def conforms?(ast) do
     case ast do
-      # M2.1: Core - with location
-      {:literal, type, _value, loc}
-      when type in [:integer, :float, :string, :boolean, :null, :symbol, :regex, :collection] ->
-        valid_location?(loc)
+      {type, meta, children} when is_atom(type) and is_list(meta) ->
+        type in @all_types and valid_node?(type, meta, children)
 
-      {:variable, name, loc} when is_binary(name) ->
-        valid_location?(loc)
-
-      {:list, elements, loc} when is_list(elements) ->
-        valid_location?(loc) and Enum.all?(elements, &conforms?/1)
-
-      {:map, pairs, loc} when is_list(pairs) ->
-        valid_location?(loc) and
-          Enum.all?(pairs, fn {key, value} -> conforms?(key) and conforms?(value) end)
-
-      {:binary_op, category, _op, left, right, loc}
-      when category in [:arithmetic, :comparison, :boolean] ->
-        valid_location?(loc) and conforms?(left) and conforms?(right)
-
-      {:unary_op, category, _op, operand, loc} when category in [:arithmetic, :boolean] ->
-        valid_location?(loc) and conforms?(operand)
-
-      {:function_call, name, args, loc} when is_binary(name) and is_list(args) ->
-        valid_location?(loc) and Enum.all?(args, &conforms?/1)
-
-      {:conditional, condition, then_branch, else_branch, loc} ->
-        valid_location?(loc) and conforms?(condition) and conforms?(then_branch) and
-          (is_nil(else_branch) or conforms?(else_branch))
-
-      {:early_return, value, loc} ->
-        valid_location?(loc) and conforms?(value)
-
-      {:block, statements, loc} when is_list(statements) ->
-        valid_location?(loc) and Enum.all?(statements, &conforms?/1)
-
-      {:assignment, target, value, loc} ->
-        valid_location?(loc) and conforms?(target) and conforms?(value)
-
-      {:inline_match, pattern, value, loc} ->
-        valid_location?(loc) and conforms?(pattern) and conforms?(value)
-
-      # M2.1: Core - without location (backward compatibility)
-      {:literal, type, _value}
-      when type in [:integer, :float, :string, :boolean, :null, :symbol, :regex, :collection] ->
-        true
-
-      {:variable, name} when is_binary(name) ->
-        true
-
+      # Special case: wildcard pattern
       :_ ->
-        true
-
-      {:list, elements} when is_list(elements) ->
-        Enum.all?(elements, &conforms?/1)
-
-      {:map, pairs} when is_list(pairs) ->
-        Enum.all?(pairs, fn {key, value} -> conforms?(key) and conforms?(value) end)
-
-      {:binary_op, category, _op, left, right}
-      when category in [:arithmetic, :comparison, :boolean] ->
-        conforms?(left) and conforms?(right)
-
-      {:unary_op, category, _op, operand} when category in [:arithmetic, :boolean] ->
-        conforms?(operand)
-
-      {:function_call, name, args} when is_binary(name) and is_list(args) ->
-        Enum.all?(args, &conforms?/1)
-
-      {:conditional, condition, then_branch, else_branch} ->
-        conforms?(condition) and conforms?(then_branch) and
-          (is_nil(else_branch) or conforms?(else_branch))
-
-      {:early_return, value} ->
-        conforms?(value)
-
-      {:block, statements} when is_list(statements) ->
-        Enum.all?(statements, &conforms?/1)
-
-      {:assignment, target, value} ->
-        conforms?(target) and conforms?(value)
-
-      {:inline_match, pattern, value} ->
-        conforms?(pattern) and conforms?(value)
-
-      # Tuple (used in patterns and destructuring)
-      {:tuple, elements} when is_list(elements) ->
-        Enum.all?(elements, &conforms?/1)
-
-      # M2.2: Extended
-      {:loop, :while, condition, body} ->
-        conforms?(condition) and conforms?(body)
-
-      {:loop, kind, _item, collection, body} when kind in [:for, :for_each] ->
-        conforms?(collection) and conforms?(body)
-
-      {:lambda, params, captures, body}
-      when is_list(params) and is_list(captures) ->
-        conforms?(body)
-
-      {:collection_op, kind, fn_or_pred, collection} when kind in [:map, :filter] ->
-        conforms?(fn_or_pred) and conforms?(collection)
-
-      {:collection_op, kind, fn_or_pred, collection, initial} when kind == :reduce ->
-        conforms?(fn_or_pred) and conforms?(collection) and conforms?(initial)
-
-      {:pattern_match, scrutinee, arms} when is_list(arms) ->
-        conforms?(scrutinee) and
-          Enum.all?(arms, fn
-            {pattern, body} -> conforms?(pattern) and conforms?(body)
-            _other -> false
-          end)
-
-      {:exception_handling, try_block, rescue_clauses, finally_block}
-      when is_list(rescue_clauses) ->
-        conforms?(try_block) and
-          Enum.all?(rescue_clauses, fn {_ex, var, body} -> conforms?(var) and conforms?(body) end) and
-          (is_nil(finally_block) or conforms?(finally_block))
-
-      {:async_operation, kind, operation} when kind in [:await, :async] ->
-        conforms?(operation)
-
-      # M2.2s: Structural/Organizational
-      # New format: {:container, type, name, parent, type_params, implements, body}
-      {:container, type, name, _parent, type_params, implements, body}
-      when type in [:module, :class, :namespace] and is_binary(name) and is_list(type_params) and
-             is_list(implements) ->
-        if is_list(body) do
-          Enum.all?(body, &conforms?/1)
-        else
-          conforms?(body)
-        end
-
-      # New format: {:function_def, name, params, ret_type, opts, body}
-      {:function_def, name, params, _ret_type, _opts, body}
-      when is_binary(name) and is_list(params) ->
-        Enum.all?(params, &valid_param?/1) and conforms?(body)
-
-      {:attribute_access, receiver, attribute} when is_binary(attribute) ->
-        conforms?(receiver)
-
-      {:augmented_assignment, _operator, target, value} ->
-        conforms?(target) and conforms?(value)
-
-      {:property, name, getter, setter, metadata}
-      when is_binary(name) and is_map(metadata) ->
-        (is_nil(getter) or conforms?(getter)) and (is_nil(setter) or conforms?(setter))
-
-      # M2.3: Native
-      # 5-tuple with embedded metadata (preferred format)
-      {:language_specific, language, _native_info, hint, metadata}
-      when is_atom(language) and is_atom(hint) and is_map(metadata) ->
-        true
-
-      # 4-tuple without embedded metadata
-      {:language_specific, language, _native_info, hint}
-      when is_atom(language) and is_atom(hint) ->
-        true
-
-      # Legacy 3-tuple format (for backward compatibility)
-      {:language_specific, language, native_info}
-      when is_atom(language) and is_map(native_info) ->
         true
 
       _ ->
@@ -1020,43 +474,285 @@ defmodule Metastatic.AST do
     end
   end
 
-  # ----- Helper Functions -----
+  # Validate specific node types
+  defp valid_node?(:literal, meta, value) do
+    subtype = Keyword.get(meta, :subtype)
+    subtype in @literal_subtypes and valid_literal_value?(subtype, value)
+  end
+
+  defp valid_node?(:variable, _meta, name) do
+    is_binary(name)
+  end
+
+  defp valid_node?(:list, _meta, elements) do
+    is_list(elements) and Enum.all?(elements, &conforms?/1)
+  end
+
+  defp valid_node?(:map, _meta, pairs) do
+    is_list(pairs) and Enum.all?(pairs, &conforms?/1)
+  end
+
+  defp valid_node?(:pair, _meta, [key, value]) do
+    conforms?(key) and conforms?(value)
+  end
+
+  defp valid_node?(:pair, _meta, _), do: false
+
+  defp valid_node?(:tuple, _meta, elements) do
+    is_list(elements) and Enum.all?(elements, &conforms?/1)
+  end
+
+  defp valid_node?(:binary_op, meta, [left, right]) do
+    category = Keyword.get(meta, :category)
+    operator = Keyword.get(meta, :operator)
+
+    category in @operator_categories and is_atom(operator) and
+      conforms?(left) and conforms?(right)
+  end
+
+  defp valid_node?(:binary_op, _meta, _), do: false
+
+  defp valid_node?(:unary_op, meta, [operand]) do
+    category = Keyword.get(meta, :category)
+    operator = Keyword.get(meta, :operator)
+    category in @operator_categories and is_atom(operator) and conforms?(operand)
+  end
+
+  defp valid_node?(:unary_op, _meta, _), do: false
+
+  defp valid_node?(:function_call, meta, args) do
+    name = Keyword.get(meta, :name)
+    is_binary(name) and is_list(args) and Enum.all?(args, &conforms?/1)
+  end
+
+  defp valid_node?(:conditional, _meta, [condition, then_branch, else_branch]) do
+    conforms?(condition) and conforms?(then_branch) and
+      (is_nil(else_branch) or conforms?(else_branch))
+  end
+
+  defp valid_node?(:conditional, _meta, _), do: false
+
+  defp valid_node?(:early_return, _meta, [value]) do
+    conforms?(value)
+  end
+
+  defp valid_node?(:early_return, _meta, []), do: true
+  defp valid_node?(:early_return, _meta, _), do: false
+
+  defp valid_node?(:block, _meta, statements) do
+    is_list(statements) and Enum.all?(statements, &conforms?/1)
+  end
+
+  defp valid_node?(:assignment, _meta, [target, value]) do
+    conforms?(target) and conforms?(value)
+  end
+
+  defp valid_node?(:assignment, _meta, _), do: false
+
+  defp valid_node?(:inline_match, _meta, [pattern, value]) do
+    conforms?(pattern) and conforms?(value)
+  end
+
+  defp valid_node?(:inline_match, _meta, _), do: false
+
+  # M2.2 Extended types
+  defp valid_node?(:loop, meta, children) do
+    loop_type = Keyword.get(meta, :loop_type)
+
+    case {loop_type, children} do
+      {:while, [condition, body]} ->
+        conforms?(condition) and conforms?(body)
+
+      {t, [iterator, collection, body]} when t in [:for, :for_each] ->
+        conforms?(iterator) and conforms?(collection) and conforms?(body)
+
+      _ ->
+        false
+    end
+  end
+
+  defp valid_node?(:lambda, meta, body) do
+    params = Keyword.get(meta, :params, [])
+    is_list(params) and is_list(body) and Enum.all?(body, &conforms?/1)
+  end
+
+  defp valid_node?(:collection_op, meta, children) do
+    op_type = Keyword.get(meta, :op_type)
+
+    case {op_type, children} do
+      {t, [func, collection]} when t in [:map, :filter] ->
+        conforms?(func) and conforms?(collection)
+
+      {:reduce, [func, collection, initial]} ->
+        conforms?(func) and conforms?(collection) and conforms?(initial)
+
+      _ ->
+        false
+    end
+  end
+
+  defp valid_node?(:pattern_match, _meta, [scrutinee, arms]) when is_list(arms) do
+    conforms?(scrutinee) and valid_pattern_arms?(arms)
+  end
+
+  defp valid_node?(:pattern_match, _meta, _), do: false
+
+  defp valid_pattern_arms?(arms) when is_list(arms) do
+    Enum.all?(arms, fn
+      {pattern, body} -> (conforms?(pattern) or pattern == :_) and conforms?(body)
+      arm -> conforms?(arm)
+    end)
+  end
+
+  defp valid_node?(:match_arm, meta, body) do
+    pattern = Keyword.get(meta, :pattern)
+
+    (is_nil(pattern) or conforms?(pattern)) and
+      is_list(body) and Enum.all?(body, &conforms?/1)
+  end
+
+  defp valid_node?(:exception_handling, _meta, [try_block, handlers, finally]) do
+    conforms?(try_block) and
+      valid_exception_handlers?(handlers) and
+      (is_nil(finally) or conforms?(finally))
+  end
+
+  defp valid_node?(:exception_handling, _meta, _), do: false
+
+  defp valid_exception_handlers?(handlers) when is_list(handlers) do
+    Enum.all?(handlers, fn
+      {:error, var, body} -> conforms?(var) and conforms?(body)
+      handler -> conforms?(handler)
+    end)
+  end
+
+  defp valid_node?(:async_operation, meta, [operation]) do
+    op_type = Keyword.get(meta, :op_type)
+    op_type in [:await, :async] and conforms?(operation)
+  end
+
+  defp valid_node?(:async_operation, _meta, _), do: false
+
+  # M2.2s Structural types
+  defp valid_node?(:container, meta, body) do
+    container_type = Keyword.get(meta, :container_type)
+    name = Keyword.get(meta, :name)
+
+    container_type in @container_types and is_binary(name) and
+      is_list(body) and Enum.all?(body, &conforms?/1)
+  end
+
+  defp valid_node?(:function_def, meta, body) do
+    name = Keyword.get(meta, :name)
+    params = Keyword.get(meta, :params, [])
+
+    is_binary(name) and is_list(params) and
+      is_list(body) and Enum.all?(body, &conforms?/1)
+  end
+
+  defp valid_node?(:attribute_access, meta, [receiver]) do
+    attribute = Keyword.get(meta, :attribute)
+    is_binary(attribute) and conforms?(receiver)
+  end
+
+  defp valid_node?(:attribute_access, _meta, _), do: false
+
+  defp valid_node?(:augmented_assignment, meta, [target, value]) do
+    operator = Keyword.get(meta, :operator)
+    is_atom(operator) and conforms?(target) and conforms?(value)
+  end
+
+  defp valid_node?(:augmented_assignment, _meta, _), do: false
+
+  defp valid_node?(:property, meta, children) do
+    name = Keyword.get(meta, :name)
+
+    is_binary(name) and is_list(children) and
+      Enum.all?(children, fn
+        nil -> true
+        child -> conforms?(child)
+      end)
+  end
+
+  # M2.3 Native type
+  defp valid_node?(:language_specific, meta, _native_ast) do
+    language = Keyword.get(meta, :language)
+    is_atom(language)
+  end
+
+  # Validate literal values match their subtype
+  defp valid_literal_value?(:integer, value), do: is_integer(value)
+  defp valid_literal_value?(:float, value), do: is_float(value)
+  defp valid_literal_value?(:string, value), do: is_binary(value)
+  defp valid_literal_value?(:boolean, value), do: is_boolean(value)
+  defp valid_literal_value?(:null, value), do: is_nil(value)
+  defp valid_literal_value?(:symbol, value), do: is_atom(value)
+  defp valid_literal_value?(:regex, _value), do: true
+
+  # ----- Variable Extraction -----
 
   @doc """
-  Extract location information from a MetaAST node if present.
+  Extract all variable names referenced in an AST.
 
-  Returns the location map if the node carries location information,
-  or `nil` if no location is attached.
+  Uses traverse/4 internally to collect all variable nodes.
 
   ## Examples
 
-      iex> ast = {:literal, :integer, 42, %{line: 10, col: 5}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:variable, [], "x"}, {:variable, [], "y"}]}
+      iex> Metastatic.AST.variables(ast)
+      MapSet.new(["x", "y"])
+
+      iex> ast = {:literal, [subtype: :integer], 42}
+      iex> Metastatic.AST.variables(ast)
+      MapSet.new([])
+  """
+  @spec variables(meta_ast()) :: MapSet.t(String.t())
+  def variables(ast) do
+    {_ast, vars} =
+      traverse(
+        ast,
+        MapSet.new(),
+        fn
+          {:variable, _meta, name} = node, acc when is_binary(name) ->
+            {node, MapSet.put(acc, name)}
+
+          node, acc ->
+            {node, acc}
+        end,
+        fn node, acc -> {node, acc} end
+      )
+
+    vars
+  end
+
+  # ----- Location Helpers -----
+
+  @doc """
+  Extract location information from a MetaAST node.
+
+  Returns a map with :line, :col, :end_line, :end_col if present in metadata.
+
+  ## Examples
+
+      iex> ast = {:literal, [subtype: :integer, line: 10, col: 5], 42}
       iex> Metastatic.AST.location(ast)
       %{line: 10, col: 5}
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:variable, [], "x"}
       iex> Metastatic.AST.location(ast)
       nil
-
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}, %{line: 15}}
-      iex> Metastatic.AST.location(ast)
-      %{line: 15}
   """
-  @spec location(meta_ast()) :: location() | nil
-  def location(ast) when is_tuple(ast) do
-    size = tuple_size(ast)
+  @spec location(meta_ast()) :: map() | nil
+  def location({_type, meta, _children}) when is_list(meta) do
+    loc_keys = [:line, :col, :end_line, :end_col]
 
-    if size > 2 do
-      last_elem = elem(ast, size - 1)
+    loc =
+      meta
+      |> Keyword.take(loc_keys)
+      |> Map.new()
 
-      if is_map(last_elem) and Map.has_key?(last_elem, :line) do
-        last_elem
-      else
-        nil
-      end
-    else
-      nil
-    end
+    if map_size(loc) > 0, do: loc, else: nil
   end
 
   def location(_), do: nil
@@ -1064,549 +760,361 @@ defmodule Metastatic.AST do
   @doc """
   Attach location information to a MetaAST node.
 
-  If location is `nil`, returns the node unchanged. Otherwise, appends
-  the location map as the final element of the tuple.
-
   ## Examples
 
-      iex> ast = {:literal, :integer, 42}
-      iex> Metastatic.AST.with_location(ast, %{line: 10})
-      {:literal, :integer, 42, %{line: 10}}
+      iex> ast = {:literal, [subtype: :integer], 42}
+      iex> Metastatic.AST.with_location(ast, %{line: 10, col: 5})
+      {:literal, [subtype: :integer, line: 10, col: 5], 42}
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:variable, [], "x"}
       iex> Metastatic.AST.with_location(ast, nil)
-      {:literal, :integer, 42}
-
-      iex> ast = {:variable, "x"}
-      iex> Metastatic.AST.with_location(ast, %{line: 5, col: 2})
-      {:variable, "x", %{line: 5, col: 2}}
+      {:variable, [], "x"}
   """
-  @spec with_location(meta_ast(), location() | nil) :: meta_ast()
+  @spec with_location(meta_ast(), map() | nil) :: meta_ast()
   def with_location(ast, nil), do: ast
 
-  def with_location(ast, loc) when is_tuple(ast) and is_map(loc) do
-    Tuple.insert_at(ast, tuple_size(ast), loc)
+  def with_location({type, meta, children}, loc) when is_map(loc) do
+    loc_updates = Enum.filter(loc, fn {k, _v} -> k in [:line, :col, :end_line, :end_col] end)
+    {type, Keyword.merge(meta, loc_updates), children}
   end
 
-  def with_location(ast, _loc), do: ast
-
   @doc """
-  Merge context metadata into a node's location.
+  Merge context metadata into a node's metadata.
 
-  If the node already has location metadata, merges the context into it.
-  If the node has no location, creates a new location with just the context
-  (without line number, which is optional for context-only metadata).
+  Used for attaching M1-level context like module name, function name, etc.
+  Note: Order of merged keys is not guaranteed due to map iteration order.
 
   ## Examples
 
-      iex> ast = {:variable, "x", %{line: 10}}
-      iex> context = %{module: "MyApp", function: "foo"}
-      iex> Metastatic.AST.with_context(ast, context)
-      {:variable, "x", %{line: 10, module: "MyApp", function: "foo"}}
-
-      iex> ast = {:variable, "x"}
-      iex> context = %{module: "MyApp", function: "foo", arity: 2}
-      iex> Metastatic.AST.with_context(ast, context)
-      {:variable, "x", %{module: "MyApp", function: "foo", arity: 2}}
+      iex> ast = {:variable, [line: 10], "x"}
+      iex> context = %{module: "MyApp"}
+      iex> {:variable, meta, "x"} = Metastatic.AST.with_context(ast, context)
+      iex> Keyword.get(meta, :module)
+      "MyApp"
+      iex> Keyword.get(meta, :line)
+      10
   """
   @spec with_context(meta_ast(), map()) :: meta_ast()
-  def with_context(ast, context) when is_tuple(ast) and is_map(context) do
-    existing_loc = location(ast)
-
-    new_loc =
-      if existing_loc do
-        Map.merge(existing_loc, context)
-      else
-        context
-      end
-
-    # Remove existing location if present, then add merged location
-    ast_without_loc = strip_location(ast)
-    with_location(ast_without_loc, new_loc)
+  def with_context({type, meta, children}, context) when is_map(context) do
+    context_updates = Enum.to_list(context)
+    {type, Keyword.merge(meta, context_updates), children}
   end
 
-  def with_context(ast, _context), do: ast
+  def with_context(ast, _), do: ast
+
+  # ----- Metadata Extractors -----
 
   @doc """
-  Extract a specific metadata value from a node's location.
-
-  Returns the value if present, or `nil` if not found or no location attached.
+  Extract module name from node metadata.
 
   ## Examples
 
-      iex> ast = {:variable, "x", %{line: 10, module: "MyApp", function: "foo"}}
-      iex> Metastatic.AST.extract_metadata(ast, :module)
-      "MyApp"
-
-      iex> ast = {:variable, "x", %{line: 10}}
-      iex> Metastatic.AST.extract_metadata(ast, :module)
-      nil
-
-      iex> ast = {:variable, "x"}
-      iex> Metastatic.AST.extract_metadata(ast, :function)
-      nil
-  """
-  @spec extract_metadata(meta_ast(), atom()) :: term() | nil
-  def extract_metadata(ast, key) when is_atom(key) do
-    case location(ast) do
-      nil -> nil
-      loc -> Map.get(loc, key)
-    end
-  end
-
-  @doc """
-  Extract module name from a node's location metadata.
-
-  ## Examples
-
-      iex> ast = {:variable, "x", %{line: 10, module: "MyApp.UserController"}}
+      iex> ast = {:variable, [module: "MyApp.Controller"], "x"}
       iex> Metastatic.AST.node_module(ast)
-      "MyApp.UserController"
-
-      iex> ast = {:variable, "x", %{line: 10}}
-      iex> Metastatic.AST.node_module(ast)
-      nil
+      "MyApp.Controller"
   """
   @spec node_module(meta_ast()) :: String.t() | nil
-  def node_module(ast), do: extract_metadata(ast, :module)
+  def node_module(ast), do: get_meta(ast, :module)
 
   @doc """
-  Extract function name from a node's location metadata.
-
-  ## Examples
-
-      iex> ast = {:variable, "x", %{line: 10, function: "create"}}
-      iex> Metastatic.AST.node_function(ast)
-      "create"
-
-      iex> ast = {:variable, "x"}
-      iex> Metastatic.AST.node_function(ast)
-      nil
+  Extract function name from node metadata.
   """
   @spec node_function(meta_ast()) :: String.t() | nil
-  def node_function(ast), do: extract_metadata(ast, :function)
+  def node_function(ast), do: get_meta(ast, :function)
 
   @doc """
-  Extract function arity from a node's location metadata.
-
-  ## Examples
-
-      iex> ast = {:variable, "x", %{line: 10, arity: 3}}
-      iex> Metastatic.AST.node_arity(ast)
-      3
-
-      iex> ast = {:variable, "x", %{line: 10}}
-      iex> Metastatic.AST.node_arity(ast)
-      nil
+  Extract arity from node metadata.
   """
   @spec node_arity(meta_ast()) :: non_neg_integer() | nil
-  def node_arity(ast), do: extract_metadata(ast, :arity)
+  def node_arity(ast), do: get_meta(ast, :arity)
 
   @doc """
-  Extract file path from a node's location metadata.
-
-  ## Examples
-
-      iex> ast = {:variable, "x", %{line: 10, file: "lib/my_app.ex"}}
-      iex> Metastatic.AST.node_file(ast)
-      "lib/my_app.ex"
-
-      iex> ast = {:variable, "x"}
-      iex> Metastatic.AST.node_file(ast)
-      nil
+  Extract file path from node metadata.
   """
   @spec node_file(meta_ast()) :: String.t() | nil
-  def node_file(ast), do: extract_metadata(ast, :file)
+  def node_file(ast), do: get_meta(ast, :file)
 
   @doc """
-  Extract container name from a node's location metadata.
-
-  ## Examples
-
-      iex> ast = {:variable, "x", %{line: 10, container: "UserService"}}
-      iex> Metastatic.AST.node_container(ast)
-      "UserService"
-
-      iex> ast = {:variable, "x"}
-      iex> Metastatic.AST.node_container(ast)
-      nil
+  Extract container name from node metadata.
   """
   @spec node_container(meta_ast()) :: String.t() | nil
-  def node_container(ast), do: extract_metadata(ast, :container)
+  def node_container(ast), do: get_meta(ast, :container)
 
   @doc """
-  Extract visibility from a node's location metadata.
-
-  ## Examples
-
-      iex> ast = {:variable, "x", %{line: 10, visibility: :private}}
-      iex> Metastatic.AST.node_visibility(ast)
-      :private
-
-      iex> ast = {:variable, "x"}
-      iex> Metastatic.AST.node_visibility(ast)
-      nil
+  Extract visibility from node metadata.
   """
-  @spec node_visibility(meta_ast()) :: atom() | nil
-  def node_visibility(ast), do: extract_metadata(ast, :visibility)
+  @spec node_visibility(meta_ast()) :: visibility() | nil
+  def node_visibility(ast), do: get_meta(ast, :visibility)
 
-  # Strip location from a node (helper for with_context)
-  defp strip_location(ast) when is_tuple(ast) do
-    size = tuple_size(ast)
-
-    if size > 2 do
-      last_elem = elem(ast, size - 1)
-
-      if is_map(last_elem) and Map.has_key?(last_elem, :line) do
-        # Remove the last element (location)
-        ast |> Tuple.to_list() |> Enum.drop(-1) |> List.to_tuple()
-      else
-        ast
-      end
-    else
-      ast
-    end
-  end
-
-  defp strip_location(ast), do: ast
+  # ----- Structural Helpers -----
 
   @doc """
-  Extract all variables referenced in an AST.
-
-  Useful for analyzing dependencies and scope.
+  Check if a node is a leaf node (no children to traverse).
 
   ## Examples
 
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}
-      iex> Metastatic.AST.variables(ast)
-      MapSet.new(["x", "y"])
+      iex> Metastatic.AST.leaf?({:literal, [subtype: :integer], 42})
+      true
+
+      iex> Metastatic.AST.leaf?({:variable, [], "x"})
+      true
+
+      iex> left = {:variable, [], "x"}
+      iex> right = {:literal, [subtype: :integer], 5}
+      iex> Metastatic.AST.leaf?({:binary_op, [], [left, right]})
+      false
   """
-  @spec variables(meta_ast()) :: MapSet.t(String.t())
-  def variables(ast) do
-    collect_variables(ast, MapSet.new())
-  end
+  @spec leaf?(meta_ast()) :: boolean()
+  def leaf?({type, _meta, _children}) when type in [:literal, :variable], do: true
+  def leaf?(_), do: false
 
   @doc """
-  Extract the container name from a container node.
+  Get the layer classification for a node type.
+
+  Returns :core, :extended, :structural, or :native.
 
   ## Examples
 
-      iex> ast = {:container, :module, "MyApp.Math", nil, [], [], []}
+      iex> Metastatic.AST.layer(:literal)
+      :core
+
+      iex> Metastatic.AST.layer(:lambda)
+      :extended
+
+      iex> Metastatic.AST.layer(:container)
+      :structural
+
+      iex> Metastatic.AST.layer(:language_specific)
+      :native
+  """
+  @spec layer(atom()) :: :core | :extended | :structural | :native | :unknown
+  def layer(type) when type in @core_types, do: :core
+  def layer(type) when type in @extended_types, do: :extended
+  def layer(type) when type in @structural_types, do: :structural
+  def layer(type) when type in @native_types, do: :native
+  def layer(_), do: :unknown
+
+  @doc """
+  Extract the name from a container node.
+
+  ## Examples
+
+      iex> ast = {:container, [container_type: :module, name: "MyApp.Math"], []}
       iex> Metastatic.AST.container_name(ast)
       "MyApp.Math"
   """
-  @spec container_name(container()) :: String.t()
-  def container_name({:container, _type, name, _parent, _type_params, _implements, _body}),
-    do: name
+  @spec container_name(meta_ast()) :: String.t() | nil
+  def container_name({:container, meta, _body}), do: Keyword.get(meta, :name)
+  def container_name(_), do: nil
 
   @doc """
-  Extract the function name from a function_def node.
+  Extract the name from a function_def node.
 
   ## Examples
 
-      iex> ast = {:function_def, "add", ["x", "y"], nil, %{}, {:binary_op, :arithmetic, :+, {:variable, "x"}, {:variable, "y"}}}
+      iex> body = {:binary_op, [operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}
+      iex> ast = {:function_def, [name: "add", params: ["x", "y"]], [body]}
       iex> Metastatic.AST.function_name(ast)
       "add"
   """
-  @spec function_name(function_def()) :: String.t()
-  def function_name({:function_def, name, _params, _ret_type, _opts, _body}), do: name
+  @spec function_name(meta_ast()) :: String.t() | nil
+  def function_name({:function_def, meta, _body}), do: Keyword.get(meta, :name)
+  def function_name(_), do: nil
 
   @doc """
-  Get the visibility of a function_def from opts.
+  Get the visibility of a function_def node.
 
   ## Examples
 
-      iex> ast = {:function_def, "add", [], nil, %{visibility: :public}, {:literal, :integer, 0}}
+      iex> body = {:binary_op, [operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}
+      iex> ast = {:function_def, [name: "add", visibility: :public], [body]}
       iex> Metastatic.AST.function_visibility(ast)
       :public
   """
-  @spec function_visibility(function_def()) :: visibility()
-  def function_visibility({:function_def, _name, _params, _ret_type, opts, _body}) do
-    if is_map(opts), do: Map.get(opts, :visibility, :public), else: :public
+  @spec function_visibility(meta_ast()) :: visibility()
+  def function_visibility({:function_def, meta, _body}) do
+    Keyword.get(meta, :visibility, :public)
   end
 
-  @doc """
-  Check if a container has state (mutable or immutable).
+  def function_visibility(_), do: :public
 
-  Looks at the container type - classes typically have state.
+  @doc """
+  Check if a container has state (classes typically have state).
 
   ## Examples
 
-      iex> ast = {:container, :class, "Counter", nil, [], [], []}
+      iex> ast = {:container, [container_type: :class, name: "Counter"], []}
       iex> Metastatic.AST.has_state?(ast)
       true
 
-      iex> ast = {:container, :module, "Math", nil, [], [], []}
+      iex> ast = {:container, [container_type: :module, name: "Math"], []}
       iex> Metastatic.AST.has_state?(ast)
       false
   """
-  @spec has_state?(container()) :: boolean()
-  def has_state?({:container, type, _name, _parent, _type_params, _implements, _body}) do
-    type == :class
+  @spec has_state?(meta_ast()) :: boolean()
+  def has_state?({:container, meta, _body}) do
+    Keyword.get(meta, :container_type) == :class
   end
 
-  # Validate parameter structure for function_def
-  defp valid_param?(param) when is_binary(param), do: true
-  # New format: {:param, name, pattern, default}
-  defp valid_param?({:param, name, pattern, default}) when is_binary(name) do
-    (is_nil(pattern) or conforms?(pattern)) and (is_nil(default) or conforms?(default))
+  def has_state?(_), do: false
+
+  # ----- Builder Helpers -----
+
+  @doc """
+  Create a literal node.
+
+  ## Examples
+
+      iex> Metastatic.AST.literal(:integer, 42)
+      {:literal, [subtype: :integer], 42}
+
+      iex> Metastatic.AST.literal(:string, "hello", line: 5)
+      {:literal, [subtype: :string, line: 5], "hello"}
+  """
+  @spec literal(literal_subtype(), term(), keyword()) :: meta_ast()
+  def literal(subtype, value, extra_meta \\ []) when subtype in @literal_subtypes do
+    {:literal, Keyword.merge([subtype: subtype], extra_meta), value}
   end
 
-  # Old format compatibility
-  defp valid_param?({:pattern, ast}), do: conforms?(ast)
-  defp valid_param?({:default, name, default}) when is_binary(name), do: conforms?(default)
-  defp valid_param?(_), do: false
+  @doc """
+  Create a variable node.
 
-  # Validate location structure
-  defp valid_location?(%{line: line}) when is_integer(line) and line > 0, do: true
-  defp valid_location?(_), do: false
+  ## Examples
 
-  defp collect_variables({:variable, name}, acc), do: MapSet.put(acc, name)
-  defp collect_variables({:variable, name, _loc}, acc), do: MapSet.put(acc, name)
+      iex> Metastatic.AST.variable("x")
+      {:variable, [], "x"}
 
-  defp collect_variables({:binary_op, _, _, left, right}, acc) do
-    acc = collect_variables(left, acc)
-    collect_variables(right, acc)
+      iex> Metastatic.AST.variable("count", line: 10)
+      {:variable, [line: 10], "count"}
+  """
+  @spec variable(String.t(), keyword()) :: meta_ast()
+  def variable(name, meta \\ []) when is_binary(name) do
+    {:variable, meta, name}
   end
 
-  defp collect_variables({:binary_op, _, _, left, right, _loc}, acc) do
-    acc = collect_variables(left, acc)
-    collect_variables(right, acc)
+  @doc """
+  Create a binary operation node.
+
+  ## Examples
+
+      iex> left = {:variable, [], "x"}
+      iex> right = {:literal, [subtype: :integer], 5}
+      iex> Metastatic.AST.binary_op(:arithmetic, :+, left, right)
+      {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+  """
+  @spec binary_op(operator_category(), atom(), meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def binary_op(category, operator, left, right, extra_meta \\ [])
+      when category in @operator_categories and is_atom(operator) do
+    meta = Keyword.merge([category: category, operator: operator], extra_meta)
+    {:binary_op, meta, [left, right]}
   end
 
-  defp collect_variables({:unary_op, _, _, operand}, acc) do
-    collect_variables(operand, acc)
+  @doc """
+  Create a function call node.
+
+  ## Examples
+
+      iex> args = [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]
+      iex> Metastatic.AST.function_call("add", args)
+      {:function_call, [name: "add"], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+  """
+  @spec function_call(String.t(), [meta_ast()], keyword()) :: meta_ast()
+  def function_call(name, args, extra_meta \\ []) when is_binary(name) and is_list(args) do
+    meta = Keyword.merge([name: name], extra_meta)
+    {:function_call, meta, args}
   end
 
-  defp collect_variables({:unary_op, _, _, operand, _loc}, acc) do
-    collect_variables(operand, acc)
+  @doc """
+  Create a block node.
+
+  ## Examples
+
+      iex> stmts = [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]
+      iex> Metastatic.AST.block(stmts)
+      {:block, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]}
+  """
+  @spec block([meta_ast()], keyword()) :: meta_ast()
+  def block(statements, meta \\ []) when is_list(statements) do
+    {:block, meta, statements}
   end
 
-  defp collect_variables({:function_call, _, args}, acc) do
-    Enum.reduce(args, acc, fn arg, a -> collect_variables(arg, a) end)
+  @doc """
+  Create a map node with pairs.
+
+  ## Examples
+
+      iex> pairs = [Metastatic.AST.pair(
+      ...>   {:literal, [subtype: :symbol], :name},
+      ...>   {:literal, [subtype: :string], "Alice"})]
+      iex> Metastatic.AST.map_node(pairs)
+      {:map, [], [{:pair, [], [{:literal, [subtype: :symbol], :name}, {:literal, [subtype: :string], "Alice"}]}]}
+  """
+  @spec map_node([meta_ast()], keyword()) :: meta_ast()
+  def map_node(pairs, meta \\ []) when is_list(pairs) do
+    {:map, meta, pairs}
   end
 
-  defp collect_variables({:function_call, _, args, _loc}, acc) do
-    Enum.reduce(args, acc, fn arg, a -> collect_variables(arg, a) end)
+  @doc """
+  Create a key-value pair node for maps.
+
+  ## Examples
+
+      iex> key = {:literal, [subtype: :symbol], :name}
+      iex> value = {:literal, [subtype: :string], "Alice"}
+      iex> Metastatic.AST.pair(key, value)
+      {:pair, [], [{:literal, [subtype: :symbol], :name}, {:literal, [subtype: :string], "Alice"}]}
+  """
+  @spec pair(meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def pair(key, value, meta \\ []) do
+    {:pair, meta, [key, value]}
   end
 
-  defp collect_variables({:conditional, condition, then_branch, else_branch}, acc) do
-    acc = collect_variables(condition, acc)
-    acc = collect_variables(then_branch, acc)
-    if else_branch, do: collect_variables(else_branch, acc), else: acc
+  @doc """
+  Create an inline match node.
+
+  ## Examples
+
+      iex> pattern = {:variable, [], "x"}
+      iex> value = {:literal, [subtype: :integer], 42}
+      iex> Metastatic.AST.inline_match(pattern, value)
+      {:inline_match, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]}
+  """
+  @spec inline_match(meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def inline_match(pattern, value, meta \\ []) do
+    {:inline_match, meta, [pattern, value]}
   end
 
-  defp collect_variables({:conditional, condition, then_branch, else_branch, _loc}, acc) do
-    acc = collect_variables(condition, acc)
-    acc = collect_variables(then_branch, acc)
-    if else_branch, do: collect_variables(else_branch, acc), else: acc
+  @doc """
+  Create a container node.
+
+  ## Examples
+
+      iex> func_def1 = {:function_def, [name: "add", params: ["x", "y"]], []}
+      iex> func_def2 = {:function_def, [name: "sub", params: ["x", "y"]], []}
+      iex> Metastatic.AST.container(:module, "MyApp.Math", [func_def1, func_def2])
+      {:container, [container_type: :module, name: "MyApp.Math"], [{:function_def, [name: "add", params: ["x", "y"]], []}, {:function_def, [name: "sub", params: ["x", "y"]], []}]}
+  """
+  @spec container(container_type(), String.t(), [meta_ast()], keyword()) :: meta_ast()
+  def container(type, name, body, extra_meta \\ [])
+      when type in @container_types and is_binary(name) and is_list(body) do
+    meta = Keyword.merge([container_type: type, name: name], extra_meta)
+    {:container, meta, body}
   end
 
-  defp collect_variables({:block, statements}, acc) do
-    Enum.reduce(statements, acc, fn stmt, a -> collect_variables(stmt, a) end)
+  @doc """
+  Create a function definition node.
+
+  ## Examples
+
+      iex> body = [{:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:variable, [], "x"}, {:variable, [], "y"}]}]
+      iex> Metastatic.AST.function_def("add", ["x", "y"], body)
+      {:function_def, [name: "add", params: ["x", "y"]], [{:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}]}
+  """
+  @spec function_def(String.t(), [term()], [meta_ast()], keyword()) :: meta_ast()
+  def function_def(name, params, body, extra_meta \\ [])
+      when is_binary(name) and is_list(params) and is_list(body) do
+    meta = Keyword.merge([name: name, params: params], extra_meta)
+    {:function_def, meta, body}
   end
-
-  defp collect_variables({:block, statements, _loc}, acc) do
-    Enum.reduce(statements, acc, fn stmt, a -> collect_variables(stmt, a) end)
-  end
-
-  defp collect_variables({:assignment, target, value}, acc) do
-    acc = collect_variables(target, acc)
-    collect_variables(value, acc)
-  end
-
-  defp collect_variables({:assignment, target, value, _loc}, acc) do
-    acc = collect_variables(target, acc)
-    collect_variables(value, acc)
-  end
-
-  defp collect_variables({:inline_match, pattern, value}, acc) do
-    acc = collect_variables(pattern, acc)
-    collect_variables(value, acc)
-  end
-
-  defp collect_variables({:inline_match, pattern, value, _loc}, acc) do
-    acc = collect_variables(pattern, acc)
-    collect_variables(value, acc)
-  end
-
-  defp collect_variables({:tuple, elements}, acc) do
-    Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
-  end
-
-  defp collect_variables({:list, elements}, acc) do
-    Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
-  end
-
-  defp collect_variables({:list, elements, _loc}, acc) do
-    Enum.reduce(elements, acc, fn el, a -> collect_variables(el, a) end)
-  end
-
-  defp collect_variables({:map, pairs}, acc) do
-    Enum.reduce(pairs, acc, fn {key, value}, a ->
-      a = collect_variables(key, a)
-      collect_variables(value, a)
-    end)
-  end
-
-  defp collect_variables({:map, pairs, _loc}, acc) do
-    Enum.reduce(pairs, acc, fn {key, value}, a ->
-      a = collect_variables(key, a)
-      collect_variables(value, a)
-    end)
-  end
-
-  defp collect_variables({:loop, :while, condition, body}, acc) do
-    acc = collect_variables(condition, acc)
-    collect_variables(body, acc)
-  end
-
-  defp collect_variables({:loop, _, item, collection, body}, acc) do
-    acc = collect_variables(item, acc)
-    acc = collect_variables(collection, acc)
-    collect_variables(body, acc)
-  end
-
-  defp collect_variables({:lambda, params, captures, body}, acc) do
-    acc = Enum.reduce(params, acc, fn p, a -> MapSet.put(a, p) end)
-    acc = Enum.reduce(captures, acc, fn c, a -> MapSet.put(a, c) end)
-    collect_variables(body, acc)
-  end
-
-  defp collect_variables({:collection_op, _, fn_or_pred, collection}, acc) do
-    acc = collect_variables(fn_or_pred, acc)
-    collect_variables(collection, acc)
-  end
-
-  defp collect_variables({:collection_op, _, fn_or_pred, collection, initial}, acc) do
-    acc = collect_variables(fn_or_pred, acc)
-    acc = collect_variables(collection, acc)
-    collect_variables(initial, acc)
-  end
-
-  defp collect_variables({:pattern_match, scrutinee, arms}, acc) do
-    acc = collect_variables(scrutinee, acc)
-
-    Enum.reduce(arms, acc, fn
-      {:match_arm, pattern, guard, body}, a ->
-        a = collect_variables(pattern, a)
-        a = if guard, do: collect_variables(guard, a), else: a
-        collect_variables(body, a)
-
-      {pattern, body}, a ->
-        a = collect_variables(pattern, a)
-        collect_variables(body, a)
-    end)
-  end
-
-  defp collect_variables({:exception_handling, try_block, rescue_clauses, finally_block}, acc) do
-    acc = collect_variables(try_block, acc)
-
-    acc =
-      Enum.reduce(rescue_clauses, acc, fn {_, var, body}, a ->
-        a = collect_variables(var, a)
-        collect_variables(body, a)
-      end)
-
-    if finally_block, do: collect_variables(finally_block, acc), else: acc
-  end
-
-  defp collect_variables({:async_operation, _, operation}, acc) do
-    collect_variables(operation, acc)
-  end
-
-  defp collect_variables({:early_return, value}, acc) do
-    collect_variables(value, acc)
-  end
-
-  # M2.2s: Structural/Organizational
-  defp collect_variables({:container, _, _, _parent, _type_params, _implements, body}, acc) do
-    # Collect variables from body (can be single node or list of members)
-    if is_list(body) do
-      Enum.reduce(body, acc, fn member, a -> collect_variables(member, a) end)
-    else
-      collect_variables(body, acc)
-    end
-  end
-
-  defp collect_variables({:function_def, _name, params, _ret_type, opts, body}, acc) do
-    # Collect from parameters (including patterns and defaults)
-    acc =
-      Enum.reduce(params, acc, fn
-        param, a when is_binary(param) ->
-          MapSet.put(a, param)
-
-        # New format: {:param, name, pattern, default}
-        {:param, name, pattern, default}, a ->
-          a = MapSet.put(a, name)
-          a = if pattern, do: collect_variables(pattern, a), else: a
-          if default, do: collect_variables(default, a), else: a
-
-        # Old format compatibility
-        {:pattern, pattern}, a ->
-          collect_variables(pattern, a)
-
-        {:default, name, default}, a ->
-          collect_variables(default, MapSet.put(a, name))
-      end)
-
-    # Collect from guards in opts if opts is a map
-    acc =
-      if is_map(opts) do
-        case Map.get(opts, :guards) do
-          nil -> acc
-          guards -> collect_variables(guards, acc)
-        end
-      else
-        acc
-      end
-
-    # Collect from decorators in opts if present
-    acc =
-      if is_map(opts) do
-        case Map.get(opts, :decorators) do
-          nil -> acc
-          decorators -> Enum.reduce(decorators, acc, fn dec, a -> collect_variables(dec, a) end)
-        end
-      else
-        acc
-      end
-
-    # Collect from body
-    collect_variables(body, acc)
-  end
-
-  defp collect_variables({:attribute_access, receiver, _attribute}, acc) do
-    collect_variables(receiver, acc)
-  end
-
-  defp collect_variables({:augmented_assignment, _op, target, value}, acc) do
-    acc = collect_variables(target, acc)
-    collect_variables(value, acc)
-  end
-
-  defp collect_variables({:property, _name, getter, setter, _metadata}, acc) do
-    acc = if getter, do: collect_variables(getter, acc), else: acc
-    if setter, do: collect_variables(setter, acc), else: acc
-  end
-
-  # Language-specific: traverse embedded body if present
-  defp collect_variables({:language_specific, _, _, _, metadata}, acc) when is_map(metadata) do
-    case Map.get(metadata, :body) do
-      nil -> acc
-      body -> collect_variables(body, acc)
-    end
-  end
-
-  defp collect_variables({:language_specific, _, _, _}, acc), do: acc
-  defp collect_variables({:language_specific, _, _}, acc), do: acc
-
-  # Match arms with guards
-  defp collect_variables({:match_arm, pattern, guard, body}, acc) do
-    acc = collect_variables(pattern, acc)
-    acc = if guard, do: collect_variables(guard, acc), else: acc
-    collect_variables(body, acc)
-  end
-
-  defp collect_variables(_, acc), do: acc
 end

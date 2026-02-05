@@ -108,7 +108,21 @@ defmodule Metastatic.Analysis.BusinessLogic.HardcodedValue do
   end
 
   @impl true
-  def analyze({:literal, :string, value} = node, context) when is_binary(value) do
+  def analyze({:literal, meta, value} = node, context) when is_list(meta) and is_binary(value) do
+    # Check if this is a string literal in the new 3-tuple format
+    subtype = Keyword.get(meta, :subtype)
+
+    if subtype == :string do
+      check_hardcoded_value(node, value, context)
+    else
+      []
+    end
+  end
+
+  def analyze(_node, _context), do: []
+
+  # Helper to check hardcoded values
+  defp check_hardcoded_value(node, value, context) do
     exclude_localhost = Map.get(context, :exclude_localhost, true)
     exclude_local_ips = Map.get(context, :exclude_local_ips, true)
 
@@ -141,8 +155,6 @@ defmodule Metastatic.Analysis.BusinessLogic.HardcodedValue do
         []
     end
   end
-
-  def analyze(_node, _context), do: []
 
   # ----- Private Helpers -----
 

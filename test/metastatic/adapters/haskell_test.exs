@@ -32,7 +32,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         "value" => %{"literalType" => "int", "value" => 42}
       }
 
-      assert {:ok, {:literal, :integer, 42}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:literal, [subtype: :integer], 42}, %{}} = ToMeta.transform(ast)
     end
 
     test "transforms float literals" do
@@ -41,7 +41,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         "value" => %{"literalType" => "float", "value" => 3.14}
       }
 
-      assert {:ok, {:literal, :float, 3.14}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:literal, [subtype: :float], 3.14}, %{}} = ToMeta.transform(ast)
     end
 
     test "transforms string literals" do
@@ -50,7 +50,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         "value" => %{"literalType" => "string", "value" => "hello"}
       }
 
-      assert {:ok, {:literal, :string, "hello"}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:literal, [subtype: :string], "hello"}, %{}} = ToMeta.transform(ast)
     end
 
     test "transforms char literals" do
@@ -59,19 +59,19 @@ defmodule Metastatic.Adapters.HaskellTest do
         "value" => %{"literalType" => "char", "value" => "a"}
       }
 
-      assert {:ok, {:literal, :char, "a"}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:literal, [subtype: :char], "a"}, %{}} = ToMeta.transform(ast)
     end
   end
 
   describe "ToMeta - variables (M2.1 Core Layer)" do
     test "transforms variables" do
       ast = %{"type" => "var", "name" => "x"}
-      assert {:ok, {:variable, "x"}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:variable, [], "x"}, %{}} = ToMeta.transform(ast)
     end
 
     test "transforms constructors" do
       ast = %{"type" => "con", "name" => "Just"}
-      assert {:ok, {:literal, :constructor, "Just"}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:literal, [subtype: :constructor], "Just"}, %{}} = ToMeta.transform(ast)
     end
   end
 
@@ -90,9 +90,11 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:binary_op, :arithmetic, :+, left, right}, %{}} = ToMeta.transform(ast)
-      assert {:literal, :integer, 1} = left
-      assert {:literal, :integer, 2} = right
+      assert {:ok, {:binary_op, [category: :arithmetic, operator: :+], [left, right]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:literal, [subtype: :integer], 1} = left
+      assert {:literal, [subtype: :integer], 2} = right
     end
 
     test "transforms multiplication" do
@@ -109,7 +111,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:binary_op, :arithmetic, :*, _, _}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :arithmetic, operator: :*], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms comparison operators" do
@@ -123,7 +126,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:binary_op, :comparison, :<, _, _}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :comparison, operator: :<], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms boolean operators" do
@@ -134,7 +138,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         "right" => %{"type" => "var", "name" => "b"}
       }
 
-      assert {:ok, {:binary_op, :boolean, :&&, _, _}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:binary_op, [category: :boolean, operator: :&&], _children}, %{}} =
+               ToMeta.transform(ast)
     end
 
     test "transforms custom operators as function calls" do
@@ -145,7 +150,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         "right" => %{"type" => "var", "name" => "y"}
       }
 
-      assert {:ok, {:function_call, "<$>", [_, _]}, %{custom_op: true}} = ToMeta.transform(ast)
+      assert {:ok, {:function_call, [name: "<$>"], _args}, %{custom_op: true}} =
+               ToMeta.transform(ast)
     end
   end
 
@@ -157,8 +163,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         "argument" => %{"type" => "var", "name" => "x"}
       }
 
-      assert {:ok, {:function_call, "f", [arg]}, %{}} = ToMeta.transform(ast)
-      assert {:variable, "x"} = arg
+      assert {:ok, {:function_call, [name: "f"], [arg]}, %{}} = ToMeta.transform(ast)
+      assert {:variable, [], "x"} = arg
     end
 
     test "transforms curried function application" do
@@ -173,9 +179,9 @@ defmodule Metastatic.Adapters.HaskellTest do
         "argument" => %{"type" => "var", "name" => "y"}
       }
 
-      assert {:ok, {:function_call, "f", [arg1, arg2]}, %{}} = ToMeta.transform(ast)
-      assert {:variable, "x"} = arg1
-      assert {:variable, "y"} = arg2
+      assert {:ok, {:function_call, [name: "f"], [arg1, arg2]}, %{}} = ToMeta.transform(ast)
+      assert {:variable, [], "x"} = arg1
+      assert {:variable, [], "y"} = arg2
     end
   end
 
@@ -195,8 +201,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:lambda, ["x"], body}, %{}} = ToMeta.transform(ast)
-      assert {:binary_op, :arithmetic, :+, _, _} = body
+      assert {:ok, {:lambda, [params: ["x"], captures: []], [body]}, %{}} = ToMeta.transform(ast)
+      assert {:binary_op, [category: :arithmetic, operator: :+], _children} = body
     end
 
     test "transforms lambda with multiple parameters" do
@@ -214,8 +220,10 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:lambda, ["x", "y"], body}, %{}} = ToMeta.transform(ast)
-      assert {:binary_op, :arithmetic, :+, _, _} = body
+      assert {:ok, {:lambda, [params: ["x", "y"], captures: []], [body]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:binary_op, [category: :arithmetic, operator: :+], _children} = body
     end
   end
 
@@ -234,12 +242,12 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:conditional, condition, then_branch, else_branch}, %{}} =
+      assert {:ok, {:conditional, [], [condition, then_branch, else_branch]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:variable, "x"} = condition
-      assert {:literal, :integer, 1} = then_branch
-      assert {:literal, :integer, 2} = else_branch
+      assert {:variable, [], "x"} = condition
+      assert {:literal, [subtype: :integer], 1} = then_branch
+      assert {:literal, [subtype: :integer], 2} = else_branch
     end
   end
 
@@ -260,10 +268,15 @@ defmodule Metastatic.Adapters.HaskellTest do
         "body" => %{"type" => "var", "name" => "x"}
       }
 
-      assert {:ok, {:block, statements}, %{construct: :let}} = ToMeta.transform(ast)
+      assert {:ok, {:block, [construct: :let], statements}, %{construct: :let}} =
+               ToMeta.transform(ast)
+
       assert [assignment, body] = statements
-      assert {:assignment, {:variable, "x"}, {:literal, :integer, 42}} = assignment
-      assert {:variable, "x"} = body
+
+      assert {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]} =
+               assignment
+
+      assert {:variable, [], "x"} = body
     end
   end
 
@@ -283,7 +296,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:literal, :collection, elements}, %{collection_type: :list}} =
+      assert {:ok, {:list, [collection_type: :list], elements}, %{collection_type: :list}} =
                ToMeta.transform(ast)
 
       assert [_, _] = elements
@@ -304,7 +317,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:literal, :collection, elements}, %{collection_type: :tuple}} =
+      # Haskell tuples are represented as lists with collection_type: :tuple
+      assert {:ok, {:list, [collection_type: :tuple], elements}, %{collection_type: :tuple}} =
                ToMeta.transform(ast)
 
       assert [_, _] = elements
@@ -337,8 +351,9 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:pattern_match, scrutinee, branches, nil}, %{}} = ToMeta.transform(ast)
-      assert {:variable, "x"} = scrutinee
+      # Haskell case produces [scrutinee, branches, nil] (nil = no else)
+      assert {:ok, {:pattern_match, [], [scrutinee, branches, nil]}, %{}} = ToMeta.transform(ast)
+      assert {:variable, [], "x"} = scrutinee
       assert [_, _] = branches
     end
   end
@@ -360,7 +375,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :list_comp}, %{}} =
+      assert {:ok, {:language_specific, [language: :haskell, hint: :list_comp], data}, %{}} =
                ToMeta.transform(ast)
 
       assert is_map(data)
@@ -386,7 +401,9 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:block, statements}, %{construct: :do_notation}} = ToMeta.transform(ast)
+      assert {:ok, {:block, [construct: :do_notation], statements}, %{construct: :do_notation}} =
+               ToMeta.transform(ast)
+
       assert [_, _] = statements
     end
   end
@@ -395,25 +412,25 @@ defmodule Metastatic.Adapters.HaskellTest do
     test "parses and transforms integer literal" do
       {:ok, ast} = Haskell.parse("42")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:literal, :integer, 42} = meta_ast
+      assert {:literal, [subtype: :integer], 42} = meta_ast
     end
 
     test "parses and transforms arithmetic" do
       {:ok, ast} = Haskell.parse("5 + 3")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:binary_op, :arithmetic, :+, _, _} = meta_ast
+      assert {:binary_op, [category: :arithmetic, operator: :+], _children} = meta_ast
     end
 
     test "parses and transforms function application" do
       {:ok, ast} = Haskell.parse("f x")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:function_call, "f", [_]} = meta_ast
+      assert {:function_call, [name: "f"], _args} = meta_ast
     end
 
     test "parses and transforms lambda" do
       {:ok, ast} = Haskell.parse("\\x -> x + 1")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:lambda, ["x"], _} = meta_ast
+      assert {:lambda, [params: ["x"], captures: []], _body} = meta_ast
     end
   end
 
@@ -427,7 +444,7 @@ defmodule Metastatic.Adapters.HaskellTest do
     alias Metastatic.Adapters.Haskell.FromMeta
 
     test "transforms function calls with currying" do
-      meta_ast = {:function_call, "f", [{:variable, "x"}, {:variable, "y"}]}
+      meta_ast = {:function_call, [name: "f"], [{:variable, [], "x"}, {:variable, [], "y"}]}
       assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
       assert ast["type"] == "app"
       assert get_in(ast, ["function", "type"]) == "app"
@@ -435,41 +452,51 @@ defmodule Metastatic.Adapters.HaskellTest do
 
     test "transforms lists" do
       meta_ast =
-        {:literal, :collection, [{:literal, :integer, 1}, {:literal, :integer, 2}],
-         %{collection_type: :list}}
+        {:list, [collection_type: :list],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
 
-      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{collection_type: :list})
       assert ast["type"] == "list"
       assert length(ast["elements"]) == 2
     end
 
     test "transforms tuples" do
+      # Haskell tuples are represented as lists with collection_type: :tuple
       meta_ast =
-        {:literal, :collection, [{:literal, :integer, 1}, {:literal, :string, "hello"}],
-         %{collection_type: :tuple}}
+        {:list, [collection_type: :tuple],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "hello"}]}
 
-      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{collection_type: :tuple})
       assert ast["type"] == "tuple"
     end
 
     test "transforms let bindings" do
       meta_ast =
-        {:block, [{:assignment, {:variable, "x"}, {:literal, :integer, 42}}, {:variable, "x"}],
-         %{construct: :let}}
+        {:block, [construct: :let],
+         [
+           {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]},
+           {:variable, [], "x"}
+         ]}
 
-      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{construct: :let})
       assert ast["type"] == "let"
       assert is_list(ast["bindings"])
       assert ast["body"] != nil
     end
 
     test "transforms case expressions" do
+      # Haskell case has [scrutinee, branches, nil] format with {:pair, [], [pattern, body]} branches
       meta_ast =
-        {:pattern_match, {:variable, "x"},
+        {:pattern_match, [],
          [
-           {{:literal, :integer, 1}, {:literal, :string, "one"}},
-           {:_, {:literal, :string, "other"}}
-         ], nil}
+           {:variable, [], "x"},
+           [
+             {:pair, [],
+              [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}]},
+             {:pair, [], [:_, {:literal, [subtype: :string], "other"}]}
+           ],
+           nil
+         ]}
 
       assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
       assert ast["type"] == "case"
@@ -490,7 +517,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :type_signature}, %{}} =
+      assert {:ok, {:language_specific, [language: :haskell, hint: :type_signature], data}, %{}} =
                ToMeta.transform(ast)
 
       assert data["names"] == ["factorial"]
@@ -508,7 +535,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :data_decl}, %{}} =
+      assert {:ok, {:language_specific, [language: :haskell, hint: :data_decl], data}, %{}} =
                ToMeta.transform(ast)
 
       assert data["kind"] == "data"
@@ -524,7 +551,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         "constructors" => [%{"name" => "Identity", "types" => []}]
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :data_decl}, %{}} =
+      assert {:ok, {:language_specific, [language: :haskell, hint: :data_decl], data}, %{}} =
                ToMeta.transform(ast)
 
       assert data["kind"] == "newtype"
@@ -540,7 +567,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :type_alias}, %{}} =
+      assert {:ok, {:language_specific, [language: :haskell, hint: :type_alias], data}, %{}} =
                ToMeta.transform(ast)
 
       assert data["name"] == "String"
@@ -560,7 +587,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :class_decl}, %{}} =
+      assert {:ok, {:language_specific, [language: :haskell, hint: :class_decl], data}, %{}} =
                ToMeta.transform(ast)
 
       assert data["name"] == "Eq"
@@ -574,7 +601,7 @@ defmodule Metastatic.Adapters.HaskellTest do
         "methods" => []
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :instance_decl}, %{}} =
+      assert {:ok, {:language_specific, [language: :haskell, hint: :instance_decl], data}, %{}} =
                ToMeta.transform(ast)
 
       assert data["rule"]["class"] == "Eq"
@@ -592,8 +619,12 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:assignment, {:variable, "factorial"}, {:lambda, ["n"], {:variable, "n"}}},
-              %{construct: :function_binding}} = ToMeta.transform(ast)
+      assert {:ok,
+              {:assignment, [],
+               [
+                 {:variable, [], "factorial"},
+                 {:lambda, [params: ["n"], captures: []], [{:variable, [], "n"}]}
+               ]}, %{construct: :function_binding}} = ToMeta.transform(ast)
     end
 
     test "transforms module with declarations" do
@@ -617,7 +648,9 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:language_specific, :haskell, data, :module}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:language_specific, [language: :haskell, hint: :module], data}, %{}} =
+               ToMeta.transform(ast)
+
       assert [_, _] = data["declarations"]
     end
   end

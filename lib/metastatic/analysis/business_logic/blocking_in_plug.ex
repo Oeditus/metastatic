@@ -99,8 +99,8 @@ defmodule Metastatic.Analysis.BusinessLogic.BlockingInPlug do
   end
 
   @impl true
-  def analyze({:function_call, fn_name, _args} = node, context)
-      when is_binary(fn_name) do
+  def analyze({:function_call, meta, _args} = node, context) when is_list(meta) do
+    fn_name = Keyword.get(meta, :name, "")
     fn_lower = String.downcase(fn_name)
 
     if in_middleware_context?(context) and

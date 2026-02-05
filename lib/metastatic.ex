@@ -12,12 +12,12 @@ defmodule Metastatic do
   ## Examples
 
       # Parse Python code to MetaAST
-      iex> {:ok, ast} = Metastatic.quote("x + 5", :python)
-      iex> match?({:binary_op, :arithmetic, :+, {:variable, "x", _}, {:literal, :integer, 5, _}, _}, ast)
+      iex> {:ok, {:binary_op, meta, _}} = Metastatic.quote("x + 5", :python)
+      iex> Keyword.get(meta, :category) == :arithmetic and Keyword.get(meta, :operator) == :+
       true
 
       # Convert MetaAST back to Python source
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> Metastatic.unquote(ast, :python)
       {:ok, "x + 5"}
 
@@ -82,16 +82,16 @@ defmodule Metastatic do
 
   ## Examples
 
-      iex> {:ok, ast} = Metastatic.quote("x + 5", :python)
-      iex> match?({:binary_op, :arithmetic, :+, {:variable, "x", _}, {:literal, :integer, 5, _}, _}, ast)
+      iex> {:ok, {:binary_op, meta, _}} = Metastatic.quote("x + 5", :python)
+      iex> Keyword.get(meta, :category) == :arithmetic and Keyword.get(meta, :operator) == :+
       true
 
-      iex> {:ok, ast} = Metastatic.quote("x + 5", :elixir)
-      iex> match?({:binary_op, :arithmetic, :+, {:variable, "x", _}, {:literal, :integer, 5}, _}, ast)
+      iex> {:ok, {:binary_op, meta, _}} = Metastatic.quote("x + 5", :elixir)
+      iex> Keyword.get(meta, :category) == :arithmetic and Keyword.get(meta, :operator) == :+
       true
 
-      iex> {:ok, ast} = Metastatic.quote("[1, 2, 3]", :python)
-      iex> match?({:list, [{:literal, :integer, 1, _}, {:literal, :integer, 2, _}, {:literal, :integer, 3, _}], _}, ast)
+      iex> {:ok, {:list, _, items}} = Metastatic.quote("[1, 2, 3]", :python)
+      iex> length(items) == 3
       true
   """
   @spec quote(String.t(), language()) :: {:ok, meta_ast()} | {:error, term()}
@@ -119,19 +119,19 @@ defmodule Metastatic do
 
   ## Examples
 
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> Metastatic.unquote(ast, :python)
       {:ok, "x + 5"}
 
-      iex> ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
       iex> Metastatic.unquote(ast, :elixir)
       {:ok, "x + 5"}
 
-      iex> ast = {:literal, :integer, 42}
+      iex> ast = {:literal, [subtype: :integer], 42}
       iex> Metastatic.unquote(ast, :python)
       {:ok, "42"}
 
-      iex> ast = {:list, [{:literal, :integer, 1}, {:literal, :integer, 2}]}
+      iex> ast = {:list, [], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
       iex> Metastatic.unquote(ast, :python)
       {:ok, "[1, 2]"}
 
