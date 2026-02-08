@@ -124,13 +124,14 @@ defmodule Metastatic.Analysis.DeadCodeAnalyzer do
 
       node = Map.get(location, :context, %{}) |> Map.get(:ast)
 
+      # Let Analyzer.issue/1 extract location from node metadata automatically
+      # Don't override with explicit nil location
       Analyzer.issue(
         analyzer: __MODULE__,
         category: :correctness,
         severity: severity,
         message: Map.get(location, :reason, "Dead code detected"),
         node: node || context.document.ast,
-        location: %{line: nil, column: nil, path: nil},
         suggestion:
           Analyzer.suggestion(
             type: :remove,
