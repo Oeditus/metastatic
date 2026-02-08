@@ -81,6 +81,25 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingErrorHandling do
   end
 
   @impl true
+  # New 3-tuple format: {:pattern_match, meta, [scrutinee | match_arms]}
+  def analyze({:pattern_match, meta, [pattern | _rest]} = node, _context) when is_list(meta) do
+    if success_pattern_without_error?(pattern) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :correctness,
+          severity: :warning,
+          message: "Pattern match on success case without error handling can cause crashes",
+          node: node,
+          metadata: %{pattern: pattern}
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  # Legacy format for backwards compatibility
   def analyze({:pattern_match, pattern, _value} = node, _context) do
     if success_pattern_without_error?(pattern) do
       [

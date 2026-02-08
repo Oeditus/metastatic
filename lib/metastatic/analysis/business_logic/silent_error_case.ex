@@ -94,6 +94,28 @@ defmodule Metastatic.Analysis.BusinessLogic.SilentErrorCase do
   end
 
   @impl true
+  # New 3-tuple format: {:conditional, meta, [condition, then_branch, else_branch]}
+  def analyze({:conditional, meta, [condition, _then_branch, else_branch]} = node, _context)
+      when is_list(meta) do
+    # Check if condition looks like it's checking a success case
+    # and there's no else branch to handle the error case
+    if success_condition?(condition) and missing_else_branch?(else_branch) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :correctness,
+          severity: :warning,
+          message: "Conditional only handles success case without error or catch-all branch",
+          node: node,
+          metadata: %{condition: condition}
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  # Legacy format for backwards compatibility
   def analyze({:conditional, condition, _then_branch, else_branch} = node, _context) do
     # Check if condition looks like it's checking a success case
     # and there's no else branch to handle the error case

@@ -341,34 +341,29 @@ defmodule Metastatic.Analysis.Analyzer do
 
   # Extract location information from a MetaAST node
   # The new 3-tuple format stores location in keyword meta: {type, keyword_meta, children}
-  # AST.location/1 returns a keyword list (or nil), so we use Keyword.get
+  # AST.metadata/1 returns the full keyword list from the node
   defp extract_location_from_node(node) do
-    node_loc = AST.location(node)
+    node_meta = AST.metadata(node)
 
-    if node_loc do
+    if node_meta != [] do
       # Build location map with all available metadata from keyword list
-      # AST.location/1 already returns a keyword list extracted from meta
+      # AST.metadata/1 returns the full metadata including M1 context fields
       %{
-        line: get_loc_value(node_loc, :line),
-        column: get_loc_value(node_loc, :col) || get_loc_value(node_loc, :column),
-        path: get_loc_value(node_loc, :file) || get_loc_value(node_loc, :path)
+        line: Keyword.get(node_meta, :line),
+        column: Keyword.get(node_meta, :col) || Keyword.get(node_meta, :column),
+        path: Keyword.get(node_meta, :file) || Keyword.get(node_meta, :path)
       }
-      |> maybe_add(:module, get_loc_value(node_loc, :module))
-      |> maybe_add(:function, get_loc_value(node_loc, :function))
-      |> maybe_add(:arity, get_loc_value(node_loc, :arity))
-      |> maybe_add(:container, get_loc_value(node_loc, :container))
-      |> maybe_add(:visibility, get_loc_value(node_loc, :visibility))
-      |> maybe_add(:language, get_loc_value(node_loc, :language))
+      |> maybe_add(:module, Keyword.get(node_meta, :module))
+      |> maybe_add(:function, Keyword.get(node_meta, :function))
+      |> maybe_add(:arity, Keyword.get(node_meta, :arity))
+      |> maybe_add(:container, Keyword.get(node_meta, :container))
+      |> maybe_add(:visibility, Keyword.get(node_meta, :visibility))
+      |> maybe_add(:language, Keyword.get(node_meta, :language))
     else
-      # No location metadata in node
+      # No metadata in node
       %{line: nil, column: nil, path: nil}
     end
   end
-
-  # Helper to get value from either keyword list or map
-  defp get_loc_value(loc, key) when is_list(loc), do: Keyword.get(loc, key)
-  defp get_loc_value(loc, key) when is_map(loc), do: Map.get(loc, key)
-  defp get_loc_value(_, _), do: nil
 
   # Helper to conditionally add key to map if value is not nil
   defp maybe_add(map, _key, nil), do: map

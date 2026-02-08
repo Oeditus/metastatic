@@ -62,6 +62,27 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingTelemetryForExternalHttp do
   end
 
   @impl true
+  # New 3-tuple format: {:function_call, [name: name, ...], args}
+  def analyze({:function_call, meta, _args} = node, _context) when is_list(meta) do
+    func_name = Keyword.get(meta, :name, "")
+
+    if http_function?(func_name) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :maintainability,
+          severity: :info,
+          message: "HTTP request '#{func_name}' should be wrapped with telemetry",
+          node: node,
+          metadata: %{function: func_name}
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  # Legacy format for backwards compatibility
   def analyze({:function_call, func_name, _args} = node, _context) when is_atom(func_name) do
     if http_function?(func_name) do
       [
@@ -81,8 +102,25 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingTelemetryForExternalHttp do
 
   def analyze(_node, _context), do: []
 
-  defp http_function?(func_name) do
+  defp http_function?(func_name) when is_atom(func_name) do
     func_name in @http_keywords or
       String.contains?(Atom.to_string(func_name), ["http", "fetch", "request"])
   end
+
+  defp http_function?(func_name) when is_binary(func_name) do
+    func_lower = String.downcase(func_name)
+
+    String.contains?(func_lower, [
+      "http",
+      "fetch",
+      "request",
+      "get",
+      "post",
+      "put",
+      "patch",
+      "delete"
+    ])
+  end
+
+  defp http_function?(_), do: false
 end

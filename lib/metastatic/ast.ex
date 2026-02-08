@@ -790,6 +790,30 @@ defmodule Metastatic.AST do
   def location(_), do: nil
 
   @doc """
+  Extract all metadata from a MetaAST node as a keyword list.
+
+  Returns the full metadata including location, M1 context (module, function, arity, etc.),
+  and node-specific metadata (subtype, operator, etc.).
+
+  ## Examples
+
+      iex> ast = {:literal, [subtype: :integer, line: 10], 42}
+      iex> Metastatic.AST.metadata(ast)
+      [subtype: :integer, line: 10]
+
+      iex> ast = {:variable, [line: 5, module: "MyApp", function: "create"], "x"}
+      iex> Metastatic.AST.metadata(ast)
+      [line: 5, module: "MyApp", function: "create"]
+
+      iex> ast = {:variable, [], "x"}
+      iex> Metastatic.AST.metadata(ast)
+      []
+  """
+  @spec metadata(meta_ast()) :: keyword()
+  def metadata({_type, meta, _children}) when is_list(meta), do: meta
+  def metadata(_), do: []
+
+  @doc """
   Attach location information to a MetaAST node.
 
   ## Examples
