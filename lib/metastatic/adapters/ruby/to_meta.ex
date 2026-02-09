@@ -756,6 +756,13 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
+  # Keyword splat operator (**kw)
+  def transform(%{"type" => "kwsplat", "children" => [value]} = ast) do
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:language_specific, [language: :ruby, hint: :kwsplat], ast}, %{value: value_meta}}
+    end
+  end
+
   # Defined? operator
   def transform(%{"type" => "defined?", "children" => [expr]} = ast) do
     with {:ok, expr_meta, _} <- transform(expr) do
@@ -824,6 +831,13 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, key_meta, _} <- transform(key),
          {:ok, value_meta, _} <- transform(value) do
       {:ok, {:pair, [], [key_meta, value_meta]}}
+    end
+  end
+
+  # Keyword splat in hash context (e.g., {**other_hash})
+  defp transform_hash_pair(%{"type" => "kwsplat", "children" => [value]}) do
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:language_specific, [language: :ruby, hint: :kwsplat], value_meta}}
     end
   end
 

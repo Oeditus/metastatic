@@ -1242,6 +1242,77 @@ defmodule Metastatic.Adapters.RubyTest do
       assert {:ok, {:language_specific, [language: :ruby, hint: :zsuper], ^ast}, %{}} =
                ToMeta.transform(ast)
     end
+
+    test "transforms kwsplat (keyword argument splat) as standalone" do
+      # Represents **kw as a standalone node
+      ast = %{
+        "type" => "kwsplat",
+        "children" => [%{"type" => "send", "children" => [nil, "kw"]}]
+      }
+
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :kwsplat], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :kwsplat], _original_ast},
+              metadata} = ToMeta.transform(ast)
+
+      # The value should be transformed from the send node (variable reference)
+      assert {:function_call, [name: "kw"], []} = metadata.value
+    end
+
+    test "transforms hash with kwsplat" do
+      # Represents {a: 1, **other}
+      ast = %{
+        "type" => "hash",
+        "children" => [
+          %{
+            "type" => "pair",
+            "children" => [
+              %{"type" => "sym", "children" => [:a]},
+              %{"type" => "int", "children" => [1]}
+            ]
+          },
+          %{
+            "type" => "kwsplat",
+            "children" => [%{"type" => "send", "children" => [nil, "other"]}]
+          }
+        ]
+      }
+
+      # The hash should be transformed to a map with a pair and a kwsplat
+      assert {:ok, {:map, [], elements}, %{collection_type: :hash}} = ToMeta.transform(ast)
+
+      # Should have a regular pair and a kwsplat
+      assert [_, _] = elements
+      assert Enum.any?(elements, &match?({:pair, _, _}, &1))
+
+      assert Enum.any?(elements, &match?({:language_specific, [language: :ruby, hint: :kwsplat], _},
+                                         &1))
+    end
+
+    test "transforms hash with multiple kwsplats" do
+      # Represents {**a, **b}
+      ast = %{
+        "type" => "hash",
+        "children" => [
+          %{
+            "type" => "kwsplat",
+            "children" => [%{"type" => "send", "children" => [nil, "a"]}]
+          },
+          %{
+            "type" => "kwsplat",
+            "children" => [%{"type" => "send", "children" => [nil, "b"]}]
+          }
+        ]
+      }
+
+      # The hash should be transformed to a map with two kwsplats
+      assert {:ok, {:map, [], elements}, %{collection_type: :hash}} = ToMeta.transform(ast)
+
+      # Should have two kwsplat elements
+      assert [_, _] = elements
+
+      assert Enum.all?(elements,
+                       &match?({:language_specific, [language: :ruby, hint: :kwsplat], _}, &1))
+    end
   end
 
   describe "ToMeta - Control Flow (return/break/next/redo/retry)" do
