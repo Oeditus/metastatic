@@ -1313,6 +1313,87 @@ defmodule Metastatic.Adapters.RubyTest do
       assert Enum.all?(elements,
                        &match?({:language_specific, [language: :ruby, hint: :kwsplat], _}, &1))
     end
+
+    test "transforms multiple assignment (parallel assignment)" do
+      # Represents: a, b = [1, 2]
+      ast = %{
+        "type" => "masgn",
+        "children" => [
+          %{
+            "type" => "mlhs",
+            "children" => [
+              %{"type" => "lvasgn", "children" => ["a"]},
+              %{"type" => "lvasgn", "children" => ["b"]}
+            ]
+          },
+          %{
+            "type" => "array",
+            "children" => [
+              %{"type" => "int", "children" => [1]},
+              %{"type" => "int", "children" => [2]}
+            ]
+          }
+        ]
+      }
+
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :multiple_assignment], original_ast}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :multiple_assignment], ^ast},
+              metadata} = ToMeta.transform(ast)
+
+      # Metadata should contain transformed left and right sides
+      assert {:language_specific, [language: :ruby, hint: :mlhs], _targets} = metadata.left
+      assert {:list, [], _elements} = metadata.right
+    end
+
+    test "transforms mlhs (multiple left-hand side)" do
+      # Represents: a, b, c (the left side of a multiple assignment)
+      ast = %{
+        "type" => "mlhs",
+        "children" => [
+          %{"type" => "lvasgn", "children" => ["a"]},
+          %{"type" => "lvasgn", "children" => ["b"]},
+          %{"type" => "lvasgn", "children" => ["c"]}
+        ]
+      }
+
+      # 3-tuple format: {:language_specific, [language: :ruby, hint: :mlhs], targets}
+      assert {:ok, {:language_specific, [language: :ruby, hint: :mlhs], targets}, %{}} =
+               ToMeta.transform(ast)
+
+      # Targets should be a list of variable nodes
+      assert [_, _, _] = targets
+      assert Enum.all?(targets, &match?({:variable, [scope: :local], _}, &1))
+    end
+
+    test "transforms multiple assignment from method call" do
+      # Represents: x, y = some_method(arg)
+      ast = %{
+        "type" => "masgn",
+        "children" => [
+          %{
+            "type" => "mlhs",
+            "children" => [
+              %{"type" => "lvasgn", "children" => ["x"]},
+              %{"type" => "lvasgn", "children" => ["y"]}
+            ]
+          },
+          %{
+            "type" => "send",
+            "children" => [
+              nil,
+              :some_method,
+              %{"type" => "lvar", "children" => ["arg"]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :multiple_assignment], ^ast},
+              metadata} = ToMeta.transform(ast)
+
+      # Right side should be a function call
+      assert {:function_call, [name: "some_method"], _args} = metadata.right
+    end
   end
 
   describe "ToMeta - Control Flow (return/break/next/redo/retry)" do

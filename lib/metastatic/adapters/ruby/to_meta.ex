@@ -182,8 +182,9 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # Arithmetic operators: +, -, *, /, %, **
   # Operators can be either atoms or strings from JSON
+  # Note: We check that left is not nil to avoid catching local method calls
   def transform(%{"type" => "send", "children" => [left, op, right]} = ast)
-      when not is_nil(right) do
+      when not is_nil(left) and not is_nil(right) do
     cond do
       is_arithmetic_op?(op) ->
         op_atom = normalize_op(op)
@@ -291,13 +292,23 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
-  # Method call with receiver
+  # Method call with receiver (method name as atom)
   def transform(%{"type" => "send", "children" => [receiver, method_name | args]})
       when not is_nil(receiver) and is_atom(method_name) do
     with {:ok, receiver_meta, _} <- transform(receiver),
          {:ok, args_meta} <- transform_list(args) do
       # For now, represent as "receiver.method" format
       # In future, might want to preserve receiver as separate field
+      method_str = "#{format_receiver(receiver_meta)}.#{method_name}"
+      {:ok, {:function_call, [name: method_str], args_meta}, %{call_type: :instance}}
+    end
+  end
+
+  # Method call with receiver (method name as string)
+  def transform(%{"type" => "send", "children" => [receiver, method_name | args]})
+      when not is_nil(receiver) and is_binary(method_name) do
+    with {:ok, receiver_meta, _} <- transform(receiver),
+         {:ok, args_meta} <- transform_list(args) do
       method_str = "#{format_receiver(receiver_meta)}.#{method_name}"
       {:ok, {:function_call, [name: method_str], args_meta}, %{call_type: :instance}}
     end
@@ -763,6 +774,22 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
+  # Multiple assignment (parallel assignment): a, b = values
+  def transform(%{"type" => "masgn", "children" => [lhs, rhs]} = ast) do
+    with {:ok, lhs_meta, _} <- transform(lhs),
+         {:ok, rhs_meta, _} <- transform(rhs) do
+      {:ok, {:language_specific, [language: :ruby, hint: :multiple_assignment], ast},
+       %{left: lhs_meta, right: rhs_meta}}
+    end
+  end
+
+  # Multiple left-hand side (targets in multiple assignment): a, b, c
+  def transform(%{"type" => "mlhs", "children" => targets}) do
+    with {:ok, targets_meta} <- transform_list(targets) do
+      {:ok, {:language_specific, [language: :ruby, hint: :mlhs], targets_meta}, %{}}
+    end
+  end
+
   # Defined? operator
   def transform(%{"type" => "defined?", "children" => [expr]} = ast) do
     with {:ok, expr_meta, _} <- transform(expr) do
@@ -878,7 +905,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, receiver_meta, _} <- transform(receiver),
          {:ok, arg_meta, _} <- transform(arg) do
       qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
-      {:ok, {:function_call, qualified_name, [arg_meta]}, %{call_type: :instance}}
+      {:ok, {:function_call, [name: qualified_name], [arg_meta]}, %{call_type: :instance}}
     end
   end
 
