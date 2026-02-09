@@ -1243,4 +1243,421 @@ defmodule Metastatic.Adapters.RubyTest do
                ToMeta.transform(ast)
     end
   end
+
+  describe "ToMeta - Control Flow (return/break/next/redo/retry)" do
+    test "transforms return without value" do
+      ast = %{"type" => "return", "children" => []}
+
+      assert {:ok, {:early_return, _, [nil]}, %{}} = ToMeta.transform(ast)
+    end
+
+    test "transforms return with single value" do
+      ast = %{
+        "type" => "return",
+        "children" => [%{"type" => "int", "children" => [42]}]
+      }
+
+      assert {:ok, {:early_return, _, [value]}, %{}} = ToMeta.transform(ast)
+      assert {:literal, [subtype: :integer], 42} = value
+    end
+
+    test "transforms return with multiple values" do
+      ast = %{
+        "type" => "return",
+        "children" => [
+          %{"type" => "int", "children" => [1]},
+          %{"type" => "int", "children" => [2]}
+        ]
+      }
+
+      assert {:ok, {:early_return, _, [{:tuple, [], values}]}, %{}} = ToMeta.transform(ast)
+      assert [_, _] = values
+    end
+
+    test "transforms break without value" do
+      ast = %{"type" => "break", "children" => []}
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :break], ^ast}, %{value: nil}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms break with value" do
+      ast = %{
+        "type" => "break",
+        "children" => [%{"type" => "int", "children" => [42]}]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :break], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:literal, [subtype: :integer], 42} = metadata.value
+    end
+
+    test "transforms next without value" do
+      ast = %{"type" => "next", "children" => []}
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :next], ^ast}, %{value: nil}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms next with value" do
+      ast = %{
+        "type" => "next",
+        "children" => [%{"type" => "str", "children" => ["skip"]}]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :next], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:literal, [subtype: :string], "skip"} = metadata.value
+    end
+
+    test "transforms redo" do
+      ast = %{"type" => "redo", "children" => []}
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :redo], ^ast}, %{}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms retry" do
+      ast = %{"type" => "retry", "children" => []}
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :retry], ^ast}, %{}} =
+               ToMeta.transform(ast)
+    end
+  end
+
+  describe "ToMeta - Range Literals" do
+    test "transforms inclusive range (1..10)" do
+      ast = %{
+        "type" => "irange",
+        "children" => [
+          %{"type" => "int", "children" => [1]},
+          %{"type" => "int", "children" => [10]}
+        ]
+      }
+
+      assert {:ok, {:literal, meta, {start_val, end_val}}, %{range_type: :inclusive}} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :subtype) == :range
+      assert Keyword.get(meta, :inclusive) == true
+      assert {:literal, [subtype: :integer], 1} = start_val
+      assert {:literal, [subtype: :integer], 10} = end_val
+    end
+
+    test "transforms exclusive range (1...10)" do
+      ast = %{
+        "type" => "erange",
+        "children" => [
+          %{"type" => "int", "children" => [1]},
+          %{"type" => "int", "children" => [10]}
+        ]
+      }
+
+      assert {:ok, {:literal, meta, {start_val, end_val}}, %{range_type: :exclusive}} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :subtype) == :range
+      assert Keyword.get(meta, :inclusive) == false
+      assert {:literal, [subtype: :integer], 1} = start_val
+      assert {:literal, [subtype: :integer], 10} = end_val
+    end
+
+    test "transforms range with variables" do
+      ast = %{
+        "type" => "irange",
+        "children" => [
+          %{"type" => "lvar", "children" => ["start"]},
+          %{"type" => "lvar", "children" => ["finish"]}
+        ]
+      }
+
+      assert {:ok, {:literal, meta, {start_val, end_val}}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :subtype) == :range
+      assert {:variable, _, "start"} = start_val
+      assert {:variable, _, "finish"} = end_val
+    end
+  end
+
+  describe "ToMeta - Splat and Block Pass" do
+    test "transforms splat operator" do
+      ast = %{
+        "type" => "splat",
+        "children" => [%{"type" => "lvar", "children" => ["args"]}]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :splat], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:variable, _, "args"} = metadata.value
+    end
+
+    test "transforms block_pass operator" do
+      ast = %{
+        "type" => "block_pass",
+        "children" => [%{"type" => "lvar", "children" => ["block"]}]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :block_pass], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:variable, _, "block"} = metadata.value
+    end
+  end
+
+  describe "ToMeta - Proc and Additional Iterators" do
+    test "transforms proc block" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{"type" => "send", "children" => [nil, "proc"]},
+          %{"type" => "args", "children" => [%{"type" => "arg", "children" => ["x"]}]},
+          %{
+            "type" => "send",
+            "children" => [
+              %{"type" => "lvar", "children" => ["x"]},
+              :+,
+              %{"type" => "int", "children" => [1]}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, {:lambda, meta, [body]}, %{kind: :proc}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :params) == ["x"]
+      assert Keyword.get(meta, :kind) == :proc
+      assert {:binary_op, _, _} = body
+    end
+
+    test "transforms times iterator" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [%{"type" => "int", "children" => [5]}, "times"]
+          },
+          %{"type" => "args", "children" => [%{"type" => "arg", "children" => ["i"]}]},
+          %{
+            "type" => "send",
+            "children" => [nil, "puts", %{"type" => "lvar", "children" => ["i"]}]
+          }
+        ]
+      }
+
+      assert {:ok, {:collection_op, meta, [lambda, count]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :op_type) == :times
+      assert {:lambda, _, _} = lambda
+      assert {:literal, [subtype: :integer], 5} = count
+    end
+
+    test "transforms each_with_index iterator" do
+      ast = %{
+        "type" => "block",
+        "children" => [
+          %{
+            "type" => "send",
+            "children" => [%{"type" => "array", "children" => []}, "each_with_index"]
+          },
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "arg", "children" => ["item"]},
+              %{"type" => "arg", "children" => ["index"]}
+            ]
+          },
+          %{"type" => "int", "children" => [1]}
+        ]
+      }
+
+      assert {:ok, {:collection_op, meta, [lambda, collection]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :op_type) == :each_with_index
+      assert {:lambda, lambda_meta, _} = lambda
+      assert Keyword.get(lambda_meta, :params) == ["item", "index"]
+      assert {:list, [], []} = collection
+    end
+  end
+
+  describe "ToMeta - Defined? Operator" do
+    test "transforms defined? with variable" do
+      ast = %{
+        "type" => "defined?",
+        "children" => [%{"type" => "lvar", "children" => ["foo"]}]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :defined], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:variable, _, "foo"} = metadata.expr
+    end
+
+    test "transforms defined? with method call" do
+      ast = %{
+        "type" => "defined?",
+        "children" => [%{"type" => "send", "children" => [nil, "some_method"]}]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :defined], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:function_call, _, _} = metadata.expr
+    end
+  end
+
+  describe "ToMeta - BEGIN/END Blocks" do
+    test "transforms BEGIN block" do
+      ast = %{
+        "type" => "preexe",
+        "children" => [
+          %{"type" => "send", "children" => [nil, "puts", %{"type" => "int", "children" => [1]}]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :begin_block], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:function_call, _, _} = metadata.body
+    end
+
+    test "transforms END block" do
+      ast = %{
+        "type" => "postexe",
+        "children" => [
+          %{"type" => "send", "children" => [nil, "puts", %{"type" => "int", "children" => [1]}]}
+        ]
+      }
+
+      assert {:ok, {:language_specific, [language: :ruby, hint: :end_block], ^ast}, metadata} =
+               ToMeta.transform(ast)
+
+      assert {:function_call, _, _} = metadata.body
+    end
+  end
+
+  describe "Integration - parse and transform new constructs" do
+    test "parses and transforms return statement" do
+      {:ok, ast} = Ruby.parse("return 42")
+      assert {:ok, {:early_return, _, [value]}, _} = ToMeta.transform(ast)
+      assert {:literal, _, 42} = value
+    end
+
+    test "parses and transforms range literal" do
+      {:ok, ast} = Ruby.parse("1..10")
+      assert {:ok, {:literal, meta, _}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :subtype) == :range
+      assert Keyword.get(meta, :inclusive) == true
+    end
+
+    test "parses and transforms exclusive range" do
+      {:ok, ast} = Ruby.parse("1...10")
+      assert {:ok, {:literal, meta, _}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :subtype) == :range
+      assert Keyword.get(meta, :inclusive) == false
+    end
+
+    test "parses and transforms proc" do
+      {:ok, ast} = Ruby.parse("proc { |x| x + 1 }")
+      assert {:ok, {:lambda, meta, _}, %{kind: :proc}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :kind) == :proc
+    end
+
+    test "parses and transforms require statement" do
+      {:ok, ast} = Ruby.parse("require 'json'")
+      assert {:ok, {:function_call, meta, args}, _} = ToMeta.transform(ast)
+      # Meta can be a keyword list or a string depending on whether it's a local call
+      name = if is_list(meta), do: Keyword.get(meta, :name), else: meta
+      assert name =~ "require"
+      assert [_] = args
+    end
+
+    test "parses and transforms attr_reader" do
+      {:ok, ast} = Ruby.parse("attr_reader :name, :age")
+      assert {:ok, {:function_call, meta, args}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :name) == "attr_reader"
+      assert [_, _] = args
+    end
+
+    test "parses and transforms class with inheritance" do
+      source = """
+      class Dog < Animal
+        def bark
+          "woof"
+        end
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:container, meta, _}, %{superclass: superclass}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :container_type) == :class
+      assert Keyword.get(meta, :name) == "Dog"
+      assert Keyword.get(meta, :parent) == "Animal"
+      assert {:literal, [subtype: :constant], "Animal"} = superclass
+    end
+
+    test "parses and transforms module with methods" do
+      source = """
+      module Utilities
+        def self.helper(x)
+          x * 2
+        end
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:container, meta, [body]}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :container_type) == :module
+      assert Keyword.get(meta, :name) == "Utilities"
+      assert {:function_def, func_meta, _} = body
+      assert Keyword.get(func_meta, :name) == "self.helper"
+    end
+
+    test "parses and transforms complex iterator chain" do
+      source = "[1, 2, 3].map { |x| x * 2 }"
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:collection_op, meta, [lambda, collection]}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :op_type) == :map
+      assert {:lambda, _, _} = lambda
+      assert {:list, _, _} = collection
+    end
+
+    test "parses and transforms case/when statement" do
+      # Use a variable that's already defined (via assignment)
+      source = """
+      y = 1
+      case y
+      when 1 then :one
+      when 2 then :two
+      else :other
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      # The result is a block with assignment and case
+      assert {:ok, {:block, _, [_assignment, pattern_match]}, _} = ToMeta.transform(ast)
+      {:pattern_match, _, [scrutinee, branches, else_branch]} = pattern_match
+
+      # Scrutinee is a variable reference
+      assert {:variable, _, "y"} = scrutinee
+      assert [_, _] = branches
+      assert {:literal, [subtype: :symbol], :other} = else_branch
+    end
+
+    test "parses and transforms begin/rescue/ensure" do
+      source = """
+      begin
+        risky
+      rescue StandardError => e
+        handle(e)
+      ensure
+        cleanup
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:exception_handling, _, _}, metadata} = ToMeta.transform(ast)
+      assert metadata.ensure != nil
+    end
+  end
 end

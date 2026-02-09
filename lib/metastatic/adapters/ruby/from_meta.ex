@@ -249,6 +249,131 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
     end
   end
 
+  # M2.1 Core Layer - Early return (New 3-tuple format)
+
+  def transform({:early_return, meta, [value]}, _metadata) when is_list(meta) do
+    with {:ok, value_ast} <- transform_or_nil(value) do
+      if is_nil(value_ast) do
+        {:ok, %{"type" => "return", "children" => []}}
+      else
+        {:ok, %{"type" => "return", "children" => [value_ast]}}
+      end
+    end
+  end
+
+  # M2.1 Core Layer - Tuple (for multiple return values)
+
+  def transform({:tuple, meta, elements}, _metadata) when is_list(meta) do
+    with {:ok, elements_ast} <- transform_list(elements) do
+      {:ok, %{"type" => "array", "children" => elements_ast}}
+    end
+  end
+
+  # M2.2 Extended Layer - Lambda with proc kind
+
+  def transform({:lambda, meta, [body]}, _metadata) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
+    kind = Keyword.get(meta, :kind, :lambda)
+
+    args_ast = build_args_ast(params)
+
+    with {:ok, body_ast} <- transform_or_nil(body) do
+      case kind do
+        :proc ->
+          # Rebuild as proc { |params| body }
+          {:ok,
+           %{
+             "type" => "block",
+             "children" => [
+               %{"type" => "send", "children" => [nil, "proc"]},
+               args_ast,
+               body_ast
+             ]
+           }}
+
+        _ ->
+          # Regular lambda
+          {:ok,
+           %{
+             "type" => "block",
+             "children" => [
+               %{"type" => "send", "children" => [nil, "lambda"]},
+               args_ast,
+               body_ast
+             ]
+           }}
+      end
+    end
+  end
+
+  # M2.2 Extended Layer - Collection operations
+
+  def transform({:collection_op, meta, [lambda, collection | rest]}, _metadata)
+      when is_list(meta) do
+    op_type = Keyword.get(meta, :op_type)
+
+    with {:ok, lambda_ast} <- transform(lambda, %{}),
+         {:ok, collection_ast} <- transform_or_nil(collection) do
+      case op_type do
+        :times ->
+          # N.times { |i| body }
+          {:ok,
+           %{
+             "type" => "block",
+             "children" => [
+               %{"type" => "send", "children" => [collection_ast, :times]},
+               lambda_ast["children"] |> Enum.at(1),
+               lambda_ast["children"] |> Enum.at(2)
+             ]
+           }}
+
+        :reduce when rest != [] ->
+          [initial | _] = rest
+          {:ok, initial_ast} = transform_or_nil(initial)
+
+          {:ok,
+           %{
+             "type" => "block",
+             "children" => [
+               %{"type" => "send", "children" => [collection_ast, :reduce, initial_ast]},
+               lambda_ast["children"] |> Enum.at(1),
+               lambda_ast["children"] |> Enum.at(2)
+             ]
+           }}
+
+        op ->
+          {:ok,
+           %{
+             "type" => "block",
+             "children" => [
+               %{"type" => "send", "children" => [collection_ast, op]},
+               lambda_ast["children"] |> Enum.at(1),
+               lambda_ast["children"] |> Enum.at(2)
+             ]
+           }}
+      end
+    end
+  end
+
+  # Literal ranges
+
+  def transform({:literal, meta, {start_val, end_val}}, _metadata) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype)
+    inclusive = Keyword.get(meta, :inclusive, true)
+
+    case subtype do
+      :range ->
+        with {:ok, start_ast} <- transform(start_val, %{}),
+             {:ok, end_ast} <- transform(end_val, %{}) do
+          type = if inclusive, do: "irange", else: "erange"
+          {:ok, %{"type" => type, "children" => [start_ast, end_ast]}}
+        end
+
+      _ ->
+        {:error, "Unknown tuple literal subtype: #{subtype}"}
+    end
+  end
+
   # M2.3 Native Layer - Passthrough (New 3-tuple format)
 
   def transform({:language_specific, meta, original_ast}, _metadata) when is_list(meta) do
