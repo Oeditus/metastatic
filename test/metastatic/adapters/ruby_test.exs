@@ -1284,8 +1284,13 @@ defmodule Metastatic.Adapters.RubyTest do
       assert [_, _] = elements
       assert Enum.any?(elements, &match?({:pair, _, _}, &1))
 
-      assert Enum.any?(elements, &match?({:language_specific, [language: :ruby, hint: :kwsplat], _},
-                                         &1))
+      assert Enum.any?(
+               elements,
+               &match?(
+                 {:language_specific, [language: :ruby, hint: :kwsplat], _},
+                 &1
+               )
+             )
     end
 
     test "transforms hash with multiple kwsplats" do
@@ -1310,8 +1315,10 @@ defmodule Metastatic.Adapters.RubyTest do
       # Should have two kwsplat elements
       assert [_, _] = elements
 
-      assert Enum.all?(elements,
-                       &match?({:language_specific, [language: :ruby, hint: :kwsplat], _}, &1))
+      assert Enum.all?(
+               elements,
+               &match?({:language_specific, [language: :ruby, hint: :kwsplat], _}, &1)
+             )
     end
 
     test "transforms multiple assignment (parallel assignment)" do
