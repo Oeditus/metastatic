@@ -56,6 +56,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SyncOverAsync do
 
   @behaviour Metastatic.Analysis.Analyzer
   alias Metastatic.Analysis.Analyzer
+  alias Metastatic.Semantic.OpKind
 
   @blocking_functions ~w[
     get post put delete patch request
@@ -78,6 +79,47 @@ defmodule Metastatic.Analysis.BusinessLogic.SyncOverAsync do
   end
 
   @impl true
+  # New 3-tuple format: {:function_call, [name: name, ...], args}
+  def analyze({:function_call, meta, _args} = node, context) when is_list(meta) do
+    fn_name = Keyword.get(meta, :name, "")
+    fn_lower = String.downcase(fn_name)
+    op_kind = Keyword.get(meta, :op_kind)
+
+    blocking? =
+      case op_kind do
+        # Semantic detection: check if op_kind indicates blocking operation
+        op_kind when is_list(op_kind) ->
+          domain = OpKind.domain(op_kind)
+          # DB, HTTP, file, external_api operations are blocking
+          domain in [:db, :http, :file, :external_api]
+
+        # Fallback to heuristic detection
+        nil ->
+          String.contains?(fn_lower, @blocking_functions)
+      end
+
+    if blocking? and in_async_context?(context) do
+      [
+        Analyzer.issue(
+          analyzer: __MODULE__,
+          category: :performance,
+          severity: :warning,
+          message:
+            "Synchronous '#{fn_name}' call in async context - consider using async alternative",
+          node: node,
+          metadata: %{
+            function: fn_name,
+            context: "async",
+            suggestion: "Use async/await or non-blocking alternative"
+          }
+        )
+      ]
+    else
+      []
+    end
+  end
+
+  # Legacy format for backwards compatibility
   def analyze({:function_call, fn_name, _args} = node, context)
       when is_binary(fn_name) do
     fn_lower = String.downcase(fn_name)

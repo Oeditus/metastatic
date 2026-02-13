@@ -40,6 +40,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingTelemetryForExternalHttp do
 
   @behaviour Metastatic.Analysis.Analyzer
   alias Metastatic.Analysis.Analyzer
+  alias Metastatic.Semantic.OpKind
 
   @http_keywords [:get, :post, :put, :patch, :delete, :request, :fetch, :send]
 
@@ -65,8 +66,20 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingTelemetryForExternalHttp do
   # New 3-tuple format: {:function_call, [name: name, ...], args}
   def analyze({:function_call, meta, _args} = node, _context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
+    op_kind = Keyword.get(meta, :op_kind)
 
-    if http_function?(func_name) do
+    is_http? =
+      case op_kind do
+        # Semantic detection: check if op_kind indicates HTTP operation
+        op_kind when is_list(op_kind) ->
+          OpKind.http?(op_kind)
+
+        # Fallback to heuristic detection
+        nil ->
+          http_function?(func_name)
+      end
+
+    if is_http? do
       [
         Analyzer.issue(
           analyzer: __MODULE__,

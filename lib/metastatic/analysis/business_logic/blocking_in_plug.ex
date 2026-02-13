@@ -74,6 +74,7 @@ defmodule Metastatic.Analysis.BusinessLogic.BlockingInPlug do
 
   @behaviour Metastatic.Analysis.Analyzer
   alias Metastatic.Analysis.Analyzer
+  alias Metastatic.Semantic.OpKind
 
   @middleware_indicators Application.compile_env(:metastatic, :middleware_indicators, ~w[
     middleware plug handler interceptor
@@ -106,8 +107,22 @@ defmodule Metastatic.Analysis.BusinessLogic.BlockingInPlug do
   def analyze({:function_call, meta, _args} = node, context) when is_list(meta) do
     fn_name = Keyword.get(meta, :name, "")
     fn_lower = String.downcase(fn_name)
+    op_kind = Keyword.get(meta, :op_kind)
 
-    if in_middleware_context?(context) and has_blocking_operations?(fn_lower) do
+    blocking? =
+      case op_kind do
+        # Semantic detection: check if op_kind indicates blocking operation
+        op_kind when is_list(op_kind) ->
+          domain = OpKind.domain(op_kind)
+          # DB, HTTP, file, cache, external_api, and queue operations are potentially blocking
+          domain in [:db, :http, :file, :cache, :external_api, :queue]
+
+        # Fallback to heuristic detection
+        nil ->
+          has_blocking_operations?(fn_lower)
+      end
+
+    if in_middleware_context?(context) and blocking? do
       [
         Analyzer.issue(
           analyzer: __MODULE__,

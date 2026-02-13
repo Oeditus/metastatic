@@ -99,6 +99,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
   @behaviour Metastatic.Analysis.Analyzer
 
   alias Metastatic.Analysis.Analyzer
+  alias Metastatic.Semantic.OpKind
 
   # Keywords suggesting "fetch all" operations
   @fetch_all_keywords [
@@ -265,10 +266,23 @@ defmodule Metastatic.Analysis.BusinessLogic.InefficientFilter do
   defp variables_match?(_, _), do: false
 
   # Check if expression is a "fetch all" operation (handle all formats)
-  # New 3-tuple: {:function_call, [name: name], args}
+  # New 3-tuple: {:function_call, [name: name, op_kind: [...]], args}
   defp fetch_all?({:function_call, meta, _args}) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
-    fetch_all_function?(func_name)
+    op_kind = Keyword.get(meta, :op_kind)
+
+    case op_kind do
+      # Semantic detection: check if op_kind indicates fetch-all operation
+      op_kind when is_list(op_kind) ->
+        domain = OpKind.domain(op_kind)
+        operation = OpKind.operation(op_kind)
+        # DB operations that fetch all records
+        domain == :db and operation in [:retrieve_all, :query]
+
+      # Fallback to heuristic detection
+      nil ->
+        fetch_all_function?(func_name)
+    end
   end
 
   defp fetch_all?({:function_call, func_name, _args, _loc}) when is_atom(func_name) do

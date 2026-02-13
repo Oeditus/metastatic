@@ -87,6 +87,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
   @behaviour Metastatic.Analysis.Analyzer
 
   alias Metastatic.Analysis.Analyzer
+  alias Metastatic.Semantic.OpKind
 
   # Check functions that verify resource state
   @check_functions %{
@@ -244,8 +245,24 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
   # Extract check function info from a condition
   defp extract_check_info({:function_call, meta, args}) when is_list(meta) do
     name = Keyword.get(meta, :name, "")
+    op_kind = Keyword.get(meta, :op_kind)
 
-    check_type = find_check_type(name)
+    # Check if semantic metadata indicates this is a file check operation
+    check_type =
+      case op_kind do
+        op_kind when is_list(op_kind) ->
+          domain = OpKind.domain(op_kind)
+          operation = OpKind.operation(op_kind)
+          # File operations that are typically "checks" (exists, stat, etc.)
+          if domain == :file and operation in [:exists, :stat] do
+            :file_check
+          else
+            nil
+          end
+
+        nil ->
+          find_check_type(name)
+      end
 
     if check_type do
       resources = extract_resource_from_args(args)
@@ -333,9 +350,24 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
   defp find_use_in_node({:function_call, meta, args} = _node, check_info, original_node)
        when is_list(meta) do
     name = Keyword.get(meta, :name, "")
+    op_kind = Keyword.get(meta, :op_kind)
     use_functions = Map.get(@use_functions, check_info.type, [])
 
-    if use_function?(name, use_functions) and same_resource?(args, check_info.resources) do
+    # Check if this is a file use operation using semantic metadata
+    is_use_function? =
+      case op_kind do
+        op_kind when is_list(op_kind) ->
+          domain = OpKind.domain(op_kind)
+          operation = OpKind.operation(op_kind)
+          # File operations that are typically "use" operations (read, write, delete, etc.)
+          check_info.type == :file_check and domain == :file and
+            operation in [:read, :write, :append, :delete, :open]
+
+        nil ->
+          use_function?(name, use_functions)
+      end
+
+    if is_use_function? and same_resource?(args, check_info.resources) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
@@ -473,9 +505,24 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
   defp find_use_in_sequential({:function_call, meta, args}, check_info, original_node)
        when is_list(meta) do
     name = Keyword.get(meta, :name, "")
+    op_kind = Keyword.get(meta, :op_kind)
     use_functions = Map.get(@use_functions, check_info.type, [])
 
-    if use_function?(name, use_functions) and same_resource?(args, check_info.resources) do
+    # Check if this is a file use operation using semantic metadata
+    is_use_function? =
+      case op_kind do
+        op_kind when is_list(op_kind) ->
+          domain = OpKind.domain(op_kind)
+          operation = OpKind.operation(op_kind)
+          # File operations that are typically "use" operations
+          check_info.type == :file_check and domain == :file and
+            operation in [:read, :write, :append, :delete, :open]
+
+        nil ->
+          use_function?(name, use_functions)
+      end
+
+    if is_use_function? and same_resource?(args, check_info.resources) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
