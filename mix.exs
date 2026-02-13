@@ -212,6 +212,7 @@ defmodule Metastatic.MixProject do
         Metastatic.Analysis.BusinessLogic.SwallowingException,
         Metastatic.Analysis.BusinessLogic.SyncOverAsync,
         Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction,
+        Metastatic.Analysis.BusinessLogic.TOCTOU,
         Metastatic.Analysis.BusinessLogic.UnmanagedTask,
         Metastatic.Analysis.Cohesion,
         Metastatic.Analysis.Cohesion.Formatter,
