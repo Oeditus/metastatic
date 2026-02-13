@@ -111,13 +111,13 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingThrottle do
   ]
 
   # Resource-intensive patterns that should always have limits
-  @high_risk_operations ~w[
-    send_email send_sms notify broadcast
-    external_api third_party payment
-    file_upload video_upload media
-    database_dump full_export
-    password_reset login register signup
-  ]
+  # @high_risk_operations ~w[
+  #   send_email send_sms notify broadcast
+  #   external_api third_party payment
+  #   file_upload video_upload media
+  #   database_dump full_export
+  #   password_reset login register signup
+  # ]
 
   @impl true
   def info do

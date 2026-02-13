@@ -2,7 +2,7 @@ defmodule Metastatic.MixProject do
   use Mix.Project
 
   @app :metastatic
-  @version "0.10.0"
+  @version "0.10.1"
   @source_url "https://github.com/Oeditus/metastatic"
 
   def project do
@@ -197,8 +197,14 @@ defmodule Metastatic.MixProject do
         Metastatic.Analysis.BusinessLogic.CallbackHell,
         Metastatic.Analysis.BusinessLogic.DirectStructUpdate,
         Metastatic.Analysis.BusinessLogic.HardcodedValue,
+        Metastatic.Analysis.BusinessLogic.ImproperInputValidation,
+        Metastatic.Analysis.BusinessLogic.IncorrectAuthorization,
         Metastatic.Analysis.BusinessLogic.InefficientFilter,
         Metastatic.Analysis.BusinessLogic.InlineJavascript,
+        Metastatic.Analysis.BusinessLogic.InsecureDirectObjectReference,
+        Metastatic.Analysis.BusinessLogic.MissingAuthentication,
+        Metastatic.Analysis.BusinessLogic.MissingAuthorization,
+        Metastatic.Analysis.BusinessLogic.MissingCSRFProtection,
         Metastatic.Analysis.BusinessLogic.MissingErrorHandling,
         Metastatic.Analysis.BusinessLogic.MissingHandleAsync,
         Metastatic.Analysis.BusinessLogic.MissingPreload,
@@ -208,12 +214,18 @@ defmodule Metastatic.MixProject do
         Metastatic.Analysis.BusinessLogic.MissingTelemetryInObanWorker,
         Metastatic.Analysis.BusinessLogic.MissingThrottle,
         Metastatic.Analysis.BusinessLogic.NPlusOneQuery,
+        Metastatic.Analysis.BusinessLogic.PathTraversal,
+        Metastatic.Analysis.BusinessLogic.SensitiveDataExposure,
         Metastatic.Analysis.BusinessLogic.SilentErrorCase,
+        Metastatic.Analysis.BusinessLogic.SQLInjection,
+        Metastatic.Analysis.BusinessLogic.SSRFVulnerability,
         Metastatic.Analysis.BusinessLogic.SwallowingException,
         Metastatic.Analysis.BusinessLogic.SyncOverAsync,
         Metastatic.Analysis.BusinessLogic.TelemetryInRecursiveFunction,
         Metastatic.Analysis.BusinessLogic.TOCTOU,
+        Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload,
         Metastatic.Analysis.BusinessLogic.UnmanagedTask,
+        Metastatic.Analysis.BusinessLogic.XSSVulnerability,
         Metastatic.Analysis.Cohesion,
         Metastatic.Analysis.Cohesion.Formatter,
         Metastatic.Analysis.Cohesion.Result,
