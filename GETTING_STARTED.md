@@ -29,6 +29,7 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 - Perform taint analysis for security vulnerabilities
 - Scan for security issues with CWE identifiers
 - Detect code smells and maintainability issues
+- Semantic operation detection via OpKind (DB, HTTP, file, cache, auth, queue, external API)
 - 15+ CLI tools for all analysis operations
 
 ### Optional (for future adapter development)
@@ -78,6 +79,9 @@ metastatic/
 │       │   ├── registry.ex         # ✅ Supplemental module registry
 │       │   ├── transformer.ex      # ✅ Transformation helper
 │       │   └── python/             # ✅ Pykka (actors), Asyncio
+│       ├── semantic/               # ✅ Semantic metadata systems
+│       │   ├── op_kind.ex          # ✅ Operation kind metadata (DB, HTTP, file, etc.)
+│       │   └── enricher.ex         # ✅ Semantic enrichment for AST nodes
 │       ├── analysis/               # ✅ Complete analysis suite
 │       │   ├── purity.ex           # ✅ Purity analyzer
 │       │   ├── purity/             # ✅ Side effect detection

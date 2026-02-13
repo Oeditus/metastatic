@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OpKind Semantic Metadata System** - Semantic operation kind metadata for accurate code analysis:
+  - New `Metastatic.Semantic.OpKind` module providing semantic meaning for function calls and operations
+  - Supports 7 domains: `:db`, `:http`, `:auth`, `:cache`, `:queue`, `:file`, `:external_api`
+  - Rich operation types for each domain (e.g., DB: retrieve, retrieve_all, query, create, update, delete, transaction, preload, aggregate)
+  - Framework-aware detection (Ecto, Django, Sequelize, ActiveRecord, etc.)
+  - OpKind stored in `:op_kind` metadata field of `:function_call` nodes
+  - 5 business logic analyzers updated to use OpKind with semantic-first, heuristic-fallback pattern:
+    - BlockingInPlug: Checks OpKind domain for blocking operations
+    - MissingTelemetryForExternalHttp: Uses OpKind.http?() for HTTP detection
+    - SyncOverAsync: Identifies blocking operations via OpKind domain
+    - InefficientFilter: Detects fetch-all operations via OpKind (domain: :db, operation: :retrieve_all/:query)
+    - TOCTOU: Identifies file check/use operations via OpKind
+  - Significantly improves analyzer accuracy while maintaining backward compatibility
+  - Example: `{:function_call, [name: "Repo.get", op_kind: [domain: :db, operation: :retrieve, target: "User"]], [args...]}`
+
 ### Changed
 - **Uniform 3-Tuple MetaAST Format** - Complete migration to `{type_atom, keyword_meta, children_or_value}` structure:
   - All MetaAST nodes now use a uniform 3-tuple format for consistency and easier pattern matching

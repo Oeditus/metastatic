@@ -6,6 +6,31 @@ This directory contains business logic analyzers ported from `oeditus_credo` and
 
 These analyzers detect common code quality issues and anti-patterns that transcend language boundaries. By operating on the MetaAST representation, they can analyze code in any supported language (Python, JavaScript, Elixir, Rust, Go, etc.) without modification.
 
+### Detection Modes: Semantic vs Heuristic
+
+Analyzers use a **semantic-first, heuristic-fallback** approach powered by the OpKind metadata system:
+
+**1. Semantic Detection (Preferred)**
+- Uses `OpKind` metadata attached to `:function_call` nodes
+- OpKind captures semantic meaning: domain (`:db`, `:http`, `:file`, etc.) and operation (`:retrieve`, `:create`, `:query`, etc.)
+- Framework-aware: recognizes patterns from Ecto, Django, Sequelize, ActiveRecord, etc.
+- Highly accurate with no false positives when semantic enrichment is available
+- Example: `{:function_call, [name: "Repo.get", op_kind: [domain: :db, operation: :retrieve, target: "User"]], [args...]}`
+
+**2. Heuristic Detection (Fallback)**
+- Pattern matching on function names when `op_kind` metadata is not available
+- Maintains backward compatibility with code that hasn't been semantically enriched
+- May produce false positives for ambiguous function names
+
+**Analyzers Using OpKind:**
+- `BlockingInPlug`: Checks OpKind domain for blocking operations (`:db`, `:http`, `:file`, `:cache`, `:external_api`, `:queue`)
+- `MissingTelemetryForExternalHttp`: Uses `OpKind.http?()` for HTTP operation detection
+- `SyncOverAsync`: Identifies blocking operations via OpKind domain
+- `InefficientFilter`: Detects fetch-all operations (`domain: :db`, `operation: :retrieve_all/:query`)
+- `TOCTOU`: Identifies file check/use operations via OpKind
+- `MissingPreload`: Detects database collection queries
+- `NPlusOneQuery`: Identifies database operations in loops
+
 ## Available Analyzers
 
 ### Language-Agnostic Analyzers (✅ Implemented)

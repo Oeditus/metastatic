@@ -139,6 +139,8 @@ defmodule Metastatic.MixProject do
         Metastatic.Analysis.Taint,
         Metastatic.Analysis.UnusedVariables,
         Metastatic.CLI,
+        Metastatic.Semantic,
+        Metastatic.Semantic.Domains,
         Metastatic.Supplemental
       ],
       authors: ["Aleksei Matiushkin"],
@@ -175,6 +177,18 @@ defmodule Metastatic.MixProject do
         Metastatic.CLI.Formatter,
         Metastatic.CLI.Inspector,
         Metastatic.CLI.Translator
+      ],
+      Semantic: [
+        Metastatic.Semantic.Domains.Auth,
+        Metastatic.Semantic.Domains.Cache,
+        Metastatic.Semantic.Domains.Database,
+        Metastatic.Semantic.Domains.ExternalApi,
+        Metastatic.Semantic.Domains.File,
+        Metastatic.Semantic.Domains.Http,
+        Metastatic.Semantic.Domains.Queue,
+        Metastatic.Semantic.Enricher,
+        Metastatic.Semantic.OpKind,
+        Metastatic.Semantic.Patterns
       ],
       Analysis: [
         Metastatic.Analysis.Analyzer,

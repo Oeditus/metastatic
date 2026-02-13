@@ -206,6 +206,77 @@ end
 - Runner's `update_contexts/2` propagates structural node context to analyzer `context` map
 - Analyzers access via `context.module_name` and `context.function_name`
 
+### OpKind Semantic Metadata
+
+The library provides semantic metadata for function calls through the `OpKind` system, enabling analyzers to reason about operations at a higher semantic level than raw syntax.
+
+**OpKind Structure:**
+An OpKind is a keyword list with the following fields:
+- `:domain` - The operation domain (required): `:db`, `:http`, `:auth`, `:cache`, `:queue`, `:file`, `:external_api`
+- `:operation` - The specific operation type (required): e.g., `:retrieve`, `:create`, `:query` for DB domain
+- `:target` - The entity/resource being operated on (optional): e.g., "User", "Post"
+- `:async` - Whether this is an async operation (optional, default: false)
+- `:framework` - The framework/library this pattern comes from (optional): e.g., `:ecto`, `:django`, `:sequelize`
+
+**Example - Database Operation:**
+```elixir
+# Elixir/Ecto: Repo.get(User, 1)
+{:function_call, [
+  name: "Repo.get",
+  line: 42,
+  op_kind: [domain: :db, operation: :retrieve, target: "User", framework: :ecto]
+], [args...]}
+```
+
+**Analyzer Usage Pattern (Semantic-First, Heuristic-Fallback):**
+```elixir
+def analyze({:function_call, meta, _args} = node, context) when is_list(meta) do
+  op_kind = Keyword.get(meta, :op_kind)
+  
+  is_db_operation? =
+    case op_kind do
+      # Semantic detection: op_kind metadata present (accurate)
+      op_kind when is_list(op_kind) ->
+        OpKind.db?(op_kind)
+      
+      # Fallback to heuristic detection (may have false positives)
+      nil ->
+        func_name = Keyword.get(meta, :name, "")
+        database_function?(func_name)  # Pattern matching on name
+    end
+  
+  if is_db_operation? do
+    # Issue warning
+  end
+end
+```
+
+**Analyzers Using OpKind:**
+- `BlockingInPlug`: Checks OpKind domain for blocking operations
+- `MissingTelemetryForExternalHttp`: Uses `OpKind.http?()` for HTTP detection
+- `SyncOverAsync`: Identifies blocking operations via OpKind domain
+- `InefficientFilter`: Detects fetch-all operations via OpKind
+- `TOCTOU`: Identifies file check/use operations via OpKind
+- `MissingPreload`: Detects database collection queries
+- `NPlusOneQuery`: Identifies database operations in loops
+
+**Helper Functions:**
+```elixir
+# Check operation domain
+OpKind.db?(op_kind)           # => true if domain is :db
+OpKind.http?(op_kind)         # => true if domain is :http
+OpKind.file?(op_kind)         # => true if domain is :file
+
+# Extract fields
+OpKind.domain(op_kind)        # => :db
+OpKind.operation(op_kind)     # => :retrieve
+OpKind.target(op_kind)        # => "User"
+
+# Check operation type
+OpKind.read?(op_kind)         # => true for :retrieve, :retrieve_all, :query
+OpKind.write?(op_kind)        # => true for :create, :update, :delete
+```
+
 ### Type System Key Decisions
 
 **Uniform 3-Tuple Format (NEW):**

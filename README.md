@@ -20,6 +20,7 @@ Build tools once, apply them everywhere. Create a universal meta-model for progr
 - **Code Duplication Detection**: Find code clones across different programming languages (Type I-IV clones)
 - **Advanced Analysis**: 9 built-in analyzers (purity, complexity, security, dead code, taint, smells, CFG, unused vars)
 - **Business Logic Analyzers**: 20 language-agnostic analyzers detecting anti-patterns across all languages
+- **Semantic Analysis**: OpKind metadata system for accurate operation detection (DB, HTTP, file, cache, auth, queue, external API)
 
 ## Scope
 
