@@ -76,22 +76,47 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingThrottle do
   @behaviour Metastatic.Analysis.Analyzer
   alias Metastatic.Analysis.Analyzer
 
+  # Expanded expensive operations for better CWE-770 coverage
   @expensive_operations ~w[
-    search query aggregate calculate
-    export import generate process
-    upload download convert transform
-    analyze scan crawl index
+    search query aggregate calculate compute
+    export import generate process batch
+    upload download convert transform transcode
+    analyze scan crawl index reindex
+    report render pdf email send
+    sync synchronize migrate backup
+    encrypt decrypt hash compress decompress
+    resize thumbnail watermark
+    train predict inference model
+    bulk mass all fetch_all
   ]
 
+  # Rate limiting indicators across frameworks
   @rate_limit_indicators ~w[
-    ratelimit throttle limiter bucket
-    quota limit_rate slowapi
+    ratelimit rate_limit throttle limiter bucket
+    quota limit_rate slowapi rate_limiter
+    Hammer ExRated PlugAttack Rihanna
+    express-rate-limit ratelimiter redis-rate-limiter
+    Bucket4j RateLimiter Guava
+    leaky_bucket token_bucket sliding_window
+    max_requests per_second per_minute
   ]
 
+  # API endpoint patterns
   @api_endpoints ~w[
-    post put patch delete create
+    post put patch delete create update
     route endpoint handler action
-    api controller
+    api controller resource
+    webhook callback trigger
+    graphql mutation
+  ]
+
+  # Resource-intensive patterns that should always have limits
+  @high_risk_operations ~w[
+    send_email send_sms notify broadcast
+    external_api third_party payment
+    file_upload video_upload media
+    database_dump full_export
+    password_reset login register signup
   ]
 
   @impl true

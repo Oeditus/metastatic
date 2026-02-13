@@ -51,33 +51,141 @@ defmodule Metastatic.Analysis.Taint do
   alias Metastatic.Analysis.Taint.Result
   alias Metastatic.Document
 
-  # Taint sources by language
+  # Taint sources by language (expanded for better CWE-78/77/94 coverage)
   @taint_sources %{
-    python: ["input", "raw_input", "sys.argv", "request.args", "request.form"],
-    elixir: ["IO.gets", "System.argv"],
-    erlang: ["io:get_line", "init:get_argument"]
-  }
-
-  # Taint sinks by language
-  @taint_sinks %{
     python: [
-      {"eval", :critical},
-      {"exec", :critical},
-      {"os.system", :critical},
-      {"subprocess.call", :high},
-      {"compile", :high}
+      "input",
+      "raw_input",
+      "sys.argv",
+      "request.args",
+      "request.form",
+      "request.data",
+      "request.json",
+      "request.files",
+      "request.cookies",
+      "os.environ",
+      "getenv",
+      "flask.request",
+      "django.request",
+      "sys.stdin",
+      "fileinput"
+    ],
+    javascript: [
+      "req.body",
+      "req.query",
+      "req.params",
+      "req.headers",
+      "req.cookies",
+      "process.argv",
+      "process.env",
+      "readline",
+      "prompt"
     ],
     elixir: [
+      "IO.gets",
+      "System.argv",
+      "System.get_env",
+      "conn.params",
+      "conn.body_params",
+      "conn.query_params",
+      "socket.assigns",
+      "Phoenix.LiveView"
+    ],
+    ruby: [
+      "params",
+      "request.params",
+      "ARGV",
+      "ENV",
+      "gets",
+      "readline",
+      "request.body",
+      "request.headers"
+    ],
+    erlang: ["io:get_line", "init:get_argument", "os:getenv"]
+  }
+
+  # Taint sinks by language (expanded for CWE-78/77/94)
+  # CWE-78: OS Command Injection
+  # CWE-77: Command Injection
+  # CWE-94: Code Injection
+  @taint_sinks %{
+    python: [
+      # CWE-94: Code Injection
+      {"eval", :critical},
+      {"exec", :critical},
+      {"compile", :high},
+      {"__import__", :high},
+      {"importlib.import_module", :high},
+      # CWE-78/77: Command Injection
+      {"os.system", :critical},
+      {"os.popen", :critical},
+      {"subprocess.call", :high},
+      {"subprocess.run", :high},
+      {"subprocess.Popen", :high},
+      {"commands.getoutput", :critical},
+      {"commands.getstatusoutput", :critical},
+      # Shell utilities
+      {"os.execl", :critical},
+      {"os.execle", :critical},
+      {"os.execlp", :critical},
+      {"os.execv", :critical},
+      {"os.execve", :critical},
+      {"os.spawnl", :high},
+      {"os.spawnle", :high}
+    ],
+    javascript: [
+      # CWE-94: Code Injection
+      {"eval", :critical},
+      {"Function", :critical},
+      {"setTimeout", :high},
+      {"setInterval", :high},
+      {"new Function", :critical},
+      # CWE-78/77: Command Injection
+      {"child_process.exec", :critical},
+      {"child_process.execSync", :critical},
+      {"child_process.spawn", :high},
+      {"child_process.spawnSync", :high},
+      {"child_process.execFile", :high},
+      {"require('child_process')", :high}
+    ],
+    elixir: [
+      # CWE-94: Code Injection
       {"Code.eval_string", :critical},
+      {"Code.eval_quoted", :critical},
+      {"Code.eval_file", :critical},
+      {"Code.compile_string", :high},
+      # CWE-78/77: Command Injection
       {":os.cmd", :critical},
-      {"System.cmd", :high}
+      {"System.cmd", :high},
+      {"System.shell", :critical},
+      {"Port.open", :high}
+    ],
+    ruby: [
+      # CWE-94: Code Injection
+      {"eval", :critical},
+      {"instance_eval", :critical},
+      {"class_eval", :critical},
+      {"module_eval", :critical},
+      {"send", :high},
+      {"__send__", :high},
+      {"public_send", :high},
+      # CWE-78/77: Command Injection
+      {"system", :critical},
+      {"exec", :critical},
+      # backticks
+      {"`", :critical},
+      {"%x", :critical},
+      {"Open3.capture2", :high},
+      {"Open3.capture3", :high},
+      {"IO.popen", :high}
     ],
     erlang: [
       {"erl_eval:expr", :critical},
-      {":os.cmd", :critical}
+      {"erl_eval:exprs", :critical},
+      {":os.cmd", :critical},
+      {"open_port", :high}
     ]
   }
-
   use Metastatic.Document.Analyzer,
     doc: """
     Analyzes a document for taint flows.

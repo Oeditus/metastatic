@@ -50,28 +50,99 @@ defmodule Metastatic.Analysis.Security do
   alias Metastatic.Analysis.Security.Result
   alias Metastatic.Document
 
-  # Dangerous function patterns by language
+  # Dangerous function patterns by language (expanded for CWE-502 coverage)
   @dangerous_functions %{
     # Python dangerous functions
     python: %{
+      # CWE-94/95: Code Injection
       "eval" => {:unsafe_deserialization, :critical, 95},
       "exec" => {:unsafe_deserialization, :critical, 95},
+      "compile" => {:unsafe_deserialization, :high, 95},
+      # CWE-502: Unsafe Deserialization
       "pickle.loads" => {:unsafe_deserialization, :critical, 502},
+      "pickle.load" => {:unsafe_deserialization, :critical, 502},
+      "cPickle.loads" => {:unsafe_deserialization, :critical, 502},
+      "cPickle.load" => {:unsafe_deserialization, :critical, 502},
+      "marshal.loads" => {:unsafe_deserialization, :critical, 502},
+      "marshal.load" => {:unsafe_deserialization, :critical, 502},
+      # Without safe_load
+      "yaml.load" => {:unsafe_deserialization, :high, 502},
+      "yaml.unsafe_load" => {:unsafe_deserialization, :critical, 502},
+      "jsonpickle.decode" => {:unsafe_deserialization, :high, 502},
+      "shelve.open" => {:unsafe_deserialization, :high, 502},
+      "dill.loads" => {:unsafe_deserialization, :critical, 502},
+      # CWE-78: Command Injection
       "os.system" => {:injection, :critical, 78},
       "subprocess.call" => {:injection, :high, 78},
       "subprocess.run" => {:injection, :high, 78},
-      "compile" => {:unsafe_deserialization, :high, 95}
+      "subprocess.Popen" => {:injection, :high, 78}
+    },
+    # JavaScript dangerous functions
+    javascript: %{
+      # CWE-94/95: Code Injection
+      "eval" => {:unsafe_deserialization, :critical, 95},
+      "Function" => {:unsafe_deserialization, :critical, 95},
+      # CWE-502: Unsafe Deserialization
+      "serialize-javascript" => {:unsafe_deserialization, :high, 502},
+      "node-serialize" => {:unsafe_deserialization, :critical, 502},
+      "funcster" => {:unsafe_deserialization, :critical, 502},
+      # CWE-78: Command Injection
+      "child_process.exec" => {:injection, :critical, 78},
+      "child_process.execSync" => {:injection, :critical, 78}
     },
     # Elixir dangerous functions
     elixir: %{
+      # CWE-94/95: Code Injection
       "Code.eval_string" => {:unsafe_deserialization, :critical, 95},
+      "Code.eval_quoted" => {:unsafe_deserialization, :critical, 95},
+      "Code.eval_file" => {:unsafe_deserialization, :critical, 95},
+      # CWE-502: Unsafe Deserialization
+      ":erlang.binary_to_term" => {:unsafe_deserialization, :critical, 502},
+      "Plug.Crypto.non_executable_binary_to_term" => {:unsafe_deserialization, :high, 502},
+      # CWE-78: Command Injection
       ":os.cmd" => {:injection, :critical, 78},
-      "System.cmd" => {:injection, :high, 78}
+      "System.cmd" => {:injection, :high, 78},
+      "System.shell" => {:injection, :critical, 78}
+    },
+    # Ruby dangerous functions
+    ruby: %{
+      # CWE-94/95: Code Injection
+      "eval" => {:unsafe_deserialization, :critical, 95},
+      "instance_eval" => {:unsafe_deserialization, :critical, 95},
+      "class_eval" => {:unsafe_deserialization, :critical, 95},
+      # CWE-502: Unsafe Deserialization
+      "Marshal.load" => {:unsafe_deserialization, :critical, 502},
+      "Marshal.restore" => {:unsafe_deserialization, :critical, 502},
+      "YAML.load" => {:unsafe_deserialization, :high, 502},
+      "Psych.load" => {:unsafe_deserialization, :high, 502},
+      "Oj.load" => {:unsafe_deserialization, :high, 502},
+      # CWE-78: Command Injection
+      "system" => {:injection, :critical, 78},
+      "exec" => {:injection, :critical, 78},
+      "`" => {:injection, :critical, 78}
+    },
+    # Java dangerous functions
+    java: %{
+      # CWE-502: Unsafe Deserialization
+      "ObjectInputStream.readObject" => {:unsafe_deserialization, :critical, 502},
+      "XMLDecoder.readObject" => {:unsafe_deserialization, :critical, 502},
+      "XStream.fromXML" => {:unsafe_deserialization, :high, 502},
+      "ObjectMapper.readValue" => {:unsafe_deserialization, :high, 502},
+      "Yaml.load" => {:unsafe_deserialization, :high, 502},
+      # CWE-78: Command Injection
+      "Runtime.exec" => {:injection, :critical, 78},
+      "ProcessBuilder" => {:injection, :high, 78}
     },
     # Erlang dangerous functions
     erlang: %{
       "erl_eval:expr" => {:unsafe_deserialization, :critical, 95},
-      ":os.cmd" => {:injection, :critical, 78}
+      "erl_eval:exprs" => {:unsafe_deserialization, :critical, 95},
+      # CWE-502: Unsafe Deserialization
+      "binary_to_term" => {:unsafe_deserialization, :critical, 502},
+      "erlang:binary_to_term" => {:unsafe_deserialization, :critical, 502},
+      # CWE-78: Command Injection
+      ":os.cmd" => {:injection, :critical, 78},
+      "os:cmd" => {:injection, :critical, 78}
     }
   }
 
