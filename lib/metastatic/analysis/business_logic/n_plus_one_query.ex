@@ -93,11 +93,21 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
 
   This analyzer is not configurable - N+1 queries are always a performance issue.
 
+  ## Detection Modes
+
+  The analyzer supports two detection modes:
+
+  1. **Semantic (preferred)**: Uses `op_kind` metadata from semantic enrichment.
+     If a function_call has `op_kind: [domain: :db, ...]`, it's definitively
+     a database operation. This is accurate and framework-aware.
+
+  2. **Heuristic (fallback)**: Uses pattern matching on function names when
+     semantic metadata is not available. May produce false positives.
+
   ## Limitations
 
-  - May produce false positives for non-database "get" operations
+  - Heuristic mode may produce false positives for non-database "get" operations
   - Cannot detect N+1 at higher levels (e.g., GraphQL resolvers)
-  - Requires heuristic matching - adapt as needed
   """
 
   @behaviour Metastatic.Analysis.Analyzer
@@ -241,10 +251,19 @@ defmodule Metastatic.Analysis.BusinessLogic.NPlusOneQuery do
     Enum.any?(statements, &contains_database_call?/1)
   end
 
-  # New 3-tuple function_call: {:function_call, [name: name], args}
+  # New 3-tuple function_call: {:function_call, [name: name, op_kind: [...]], args}
+  # Check op_kind metadata first (semantic), then fall back to heuristics
   defp contains_database_call?({:function_call, meta, _args}) when is_list(meta) do
-    func_name = Keyword.get(meta, :name, "")
-    database_function?(func_name)
+    case Keyword.get(meta, :op_kind) do
+      # Semantic detection: op_kind metadata present
+      op_kind when is_list(op_kind) ->
+        Keyword.get(op_kind, :domain) == :db
+
+      # Fallback to heuristic detection
+      nil ->
+        func_name = Keyword.get(meta, :name, "")
+        database_function?(func_name)
+    end
   end
 
   defp contains_database_call?({:function_call, func_name, _args}) when is_atom(func_name) do

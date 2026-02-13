@@ -47,6 +47,28 @@ defmodule Metastatic.AST do
        [{:pair, [], [{:literal, [subtype: :symbol], :name},
                      {:literal, [subtype: :string], "Alice"}]}]}
 
+  ## Semantic Enrichment (op_kind)
+
+  Function call nodes may include semantic metadata via the `op_kind` key.
+  This metadata is added during M1 -> M2 transformation by the semantic
+  enricher, which detects known patterns (e.g., database operations).
+
+  When present, `op_kind` is a keyword list with:
+  - `:domain` - Semantic domain (e.g., `:db`, `:http`, `:cache`)
+  - `:operation` - Operation type within the domain (e.g., `:retrieve`, `:create`)
+  - `:target` - Optional target entity (e.g., `"User"`, `"orders"`)
+  - `:async` - Whether the operation is asynchronous
+  - `:framework` - Source framework (e.g., `:ecto`, `:sqlalchemy`)
+
+  Example:
+
+      {:function_call,
+       [name: "Repo.get", op_kind: [domain: :db, operation: :retrieve, target: "User"]],
+       [{:variable, [], "User"}, {:variable, [], "id"}]}
+
+  Analyzers can use `op_kind` for precise semantic detection instead of heuristics.
+  See `Metastatic.Semantic.OpKind` for the full type specification.
+
   ## Traversal
 
   Use `traverse/4` for walking and transforming ASTs:
@@ -145,6 +167,47 @@ defmodule Metastatic.AST do
   Visibility modifier.
   """
   @type visibility :: :public | :private | :protected
+
+  @typedoc """
+  Semantic domain for op_kind metadata.
+  Domains categorize operations by their high-level purpose.
+  """
+  @type semantic_domain :: :db | :http | :cache | :queue | :file | :external
+
+  @typedoc """
+  Database operation types for op_kind metadata.
+  """
+  @type db_operation ::
+          :retrieve
+          | :retrieve_all
+          | :query
+          | :create
+          | :update
+          | :delete
+          | :transaction
+          | :preload
+          | :aggregate
+
+  @typedoc """
+  Semantic operation kind metadata added to function_call nodes.
+  Provides precise semantic information about what a function does.
+
+  Fields:
+  - `:domain` - High-level semantic category (required)
+  - `:operation` - Specific operation within the domain (required)
+  - `:target` - Target entity or resource (optional)
+  - `:async` - Whether the operation is asynchronous (optional)
+  - `:framework` - Source framework that provides this operation (optional)
+
+  Example: `[domain: :db, operation: :retrieve, target: "User", framework: :ecto]`
+  """
+  @type op_kind :: [
+          domain: semantic_domain(),
+          operation: atom(),
+          target: String.t() | nil,
+          async: boolean(),
+          framework: atom() | nil
+        ]
 
   # ----- Node Type Sets for Validation -----
 

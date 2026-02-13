@@ -61,6 +61,17 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
       puts user.profile.bio  # N+1 - profile query per user
   end
   ```
+
+  ## Detection Modes
+
+  The analyzer supports two detection modes:
+
+  1. **Semantic (preferred)**: Uses `op_kind` metadata from semantic enrichment.
+     If a function_call has `op_kind: [domain: :db, operation: :retrieve_all]`,
+     it's definitively a database collection query.
+
+  2. **Heuristic (fallback)**: Uses pattern matching on function names when
+     semantic metadata is not available. May produce false positives.
   """
 
   @behaviour Metastatic.Analysis.Analyzer
@@ -199,11 +210,23 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingPreload do
 
   def analyze(_node, _context), do: []
 
-  # New 3-tuple: {:function_call, [name: name], args}
+  # New 3-tuple: {:function_call, [name: name, op_kind: [...]], args}
+  # Check op_kind metadata first (semantic), then fall back to heuristics
   defp from_database_query?({:function_call, meta, _args}) when is_list(meta) do
-    fn_name = Keyword.get(meta, :name, "")
-    fn_lower = String.downcase(to_string(fn_name))
-    String.contains?(fn_lower, @query_functions)
+    case Keyword.get(meta, :op_kind) do
+      # Semantic detection: op_kind metadata present
+      op_kind when is_list(op_kind) ->
+        # Check if it's a DB operation that returns collections
+        domain = Keyword.get(op_kind, :domain)
+        operation = Keyword.get(op_kind, :operation)
+        domain == :db and operation in [:retrieve_all, :query]
+
+      # Fallback to heuristic detection
+      nil ->
+        fn_name = Keyword.get(meta, :name, "")
+        fn_lower = String.downcase(to_string(fn_name))
+        String.contains?(fn_lower, @query_functions)
+    end
   end
 
   # Handle location-aware nodes

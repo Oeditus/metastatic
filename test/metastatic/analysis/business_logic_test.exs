@@ -466,6 +466,37 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
       # Variable name suggests DB results
       assert [_] = issues
     end
+
+    test "detects missing preload using op_kind metadata (semantic detection)" do
+      # 3-tuple format with op_kind metadata
+      ast =
+        {:collection_op, [op_type: :map],
+         [
+           {:lambda, [params: [{:param, [], "user"}]], [{:variable, [], "user"}]},
+           {:function_call,
+            [name: "Repo.all", op_kind: [domain: :db, operation: :retrieve_all, target: "User"]],
+            [{:variable, [], "User"}]}
+         ]}
+
+      issues = MissingPreload.analyze(ast, %{})
+
+      assert [issue] = issues
+      assert issue.message =~ "Mapping over database results"
+    end
+
+    test "does not flag non-retrieve_all db operations" do
+      # Single retrieval shouldn't trigger missing preload
+      ast =
+        {:collection_op, [op_type: :map],
+         [
+           {:lambda, [params: [{:param, [], "id"}]], [{:variable, [], "id"}]},
+           {:function_call,
+            [name: "Repo.get", op_kind: [domain: :db, operation: :retrieve, target: "User"]],
+            [{:variable, [], "User"}, {:literal, [subtype: :integer], 1}]}
+         ]}
+
+      assert [] = MissingPreload.analyze(ast, %{})
+    end
   end
 
   describe "MissingTelemetryForExternalHttp" do
@@ -753,6 +784,44 @@ defmodule Metastatic.Analysis.BusinessLogicTest do
          {:lambda, [{:variable, "x"}],
           {:block, [{:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 1}}]}},
          {:variable, "numbers"}}
+
+      assert [] = NPlusOneQuery.analyze(ast, %{})
+    end
+
+    test "detects N+1 using op_kind metadata (semantic detection)" do
+      # 3-tuple format with op_kind metadata
+      ast =
+        {:collection_op, [op_type: :map],
+         [
+           {:lambda, [params: [{:param, [], "post"}]],
+            [
+              {:function_call,
+               [name: "Repo.get", op_kind: [domain: :db, operation: :retrieve, target: "User"]],
+               [{:variable, [], "User"}, {:variable, [], "id"}]}
+            ]},
+           {:variable, [], "posts"}
+         ]}
+
+      issues = NPlusOneQuery.analyze(ast, %{})
+
+      assert [issue] = issues
+      assert issue.message =~ "N+1 query"
+      assert issue.metadata.collection_operation == :map
+    end
+
+    test "does not flag non-db op_kind operations in map" do
+      # Function with non-db op_kind should not be flagged
+      ast =
+        {:collection_op, [op_type: :map],
+         [
+           {:lambda, [params: [{:param, [], "item"}]],
+            [
+              {:function_call,
+               [name: "HTTPClient.get", op_kind: [domain: :http, operation: :get]],
+               [{:variable, [], "url"}]}
+            ]},
+           {:variable, [], "items"}
+         ]}
 
       assert [] = NPlusOneQuery.analyze(ast, %{})
     end

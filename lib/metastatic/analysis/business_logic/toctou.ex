@@ -335,7 +335,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
     name = Keyword.get(meta, :name, "")
     use_functions = Map.get(@use_functions, check_info.type, [])
 
-    if is_use_function?(name, use_functions) and same_resource?(args, check_info.resources) do
+    if use_function?(name, use_functions) and same_resource?(args, check_info.resources) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
@@ -390,7 +390,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
     full_name = build_method_name(receiver, method_name)
     use_functions = Map.get(@use_functions, check_info.type, [])
 
-    if (is_use_function?(full_name, use_functions) or is_use_function?(method_name, use_functions)) and
+    if (use_function?(full_name, use_functions) or use_function?(method_name, use_functions)) and
          same_resource?([receiver | args], check_info.resources) do
       [
         Analyzer.issue(
@@ -417,7 +417,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
   defp find_use_in_node(_, _check_info, _original_node), do: []
 
   # Check if function name matches use functions
-  defp is_use_function?(name, use_functions) do
+  defp use_function?(name, use_functions) do
     name in use_functions or
       Enum.any?(use_functions, fn func ->
         String.ends_with?(name, func) or String.ends_with?(name, "." <> func)
@@ -475,7 +475,7 @@ defmodule Metastatic.Analysis.BusinessLogic.TOCTOU do
     name = Keyword.get(meta, :name, "")
     use_functions = Map.get(@use_functions, check_info.type, [])
 
-    if is_use_function?(name, use_functions) and same_resource?(args, check_info.resources) do
+    if use_function?(name, use_functions) and same_resource?(args, check_info.resources) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,

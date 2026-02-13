@@ -100,6 +100,7 @@ defmodule Metastatic.Adapters.Elixir do
   @behaviour Metastatic.Adapter
 
   alias Metastatic.Adapters.Elixir.{FromMeta, ToMeta}
+  alias Metastatic.Semantic.Enricher
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -118,7 +119,15 @@ defmodule Metastatic.Adapters.Elixir do
 
   @impl true
   def to_meta(elixir_ast) do
-    ToMeta.transform(elixir_ast)
+    case ToMeta.transform(elixir_ast) do
+      {:ok, meta_ast, metadata} ->
+        # Enrich AST with semantic metadata (op_kind for DB operations, etc.)
+        enriched_ast = Enricher.enrich_tree(meta_ast, :elixir)
+        {:ok, enriched_ast, metadata}
+
+      error ->
+        error
+    end
   end
 
   @impl true

@@ -74,6 +74,7 @@ defmodule Metastatic.Adapters.Ruby do
   @behaviour Metastatic.Adapter
 
   alias Metastatic.Adapters.Ruby.{FromMeta, Subprocess, ToMeta}
+  alias Metastatic.Semantic.Enricher
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -82,7 +83,15 @@ defmodule Metastatic.Adapters.Ruby do
 
   @impl true
   def to_meta(ruby_ast) do
-    ToMeta.transform(ruby_ast)
+    case ToMeta.transform(ruby_ast) do
+      {:ok, meta_ast, metadata} ->
+        # Enrich AST with semantic metadata (op_kind for DB operations, etc.)
+        enriched_ast = Enricher.enrich_tree(meta_ast, :ruby)
+        {:ok, enriched_ast, metadata}
+
+      error ->
+        error
+    end
   end
 
   @impl true
