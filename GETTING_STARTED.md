@@ -9,15 +9,12 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 - **Git** for version control
 
 ### Current Status
-**Phase 6 Partial + Advanced Analysis Complete!** All major analysis features are now operational.
+Metastatic is production-ready with comprehensive analysis capabilities.
 
-- Phase 0: Core Foundation + BEAM/Python Adapters
-- Phase 2: Supplemental Modules
-- Phase 3: Purity Analysis
-- Phase 4: Complexity Metrics
-- Phase 6: Ruby & Haskell Adapters (2/5 additional languages)
-- **NEW:** Advanced Analysis Features (6 analyzers)
-- **Current test count:** 876+ tests passing
+- **Test coverage:** 1764 tests passing (1523 tests + 241 doctests)
+- **Language adapters:** Python, Elixir, Erlang, Ruby, Haskell
+- **Static analyzers:** 9 core analyzers + 32 business logic analyzers
+- **CWE coverage:** 15 CWE Top 25 vulnerabilities detected
 
 **Current Capabilities:**
 - Parse and transform code across Python, Elixir, Erlang, Ruby, and Haskell
@@ -27,17 +24,18 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 - Track unused variables with scope awareness
 - Generate control flow graphs (DOT/D3.js formats)
 - Perform taint analysis for security vulnerabilities
-- Scan for security issues with CWE identifiers
+- Scan for security issues with CWE identifiers (CWE Top 25 coverage)
 - Detect code smells and maintainability issues
+- 32 language-agnostic business logic analyzers
 - Semantic operation detection via OpKind (DB, HTTP, file, cache, auth, queue, external API)
 - 15+ CLI tools for all analysis operations
 
-### Optional (for future adapter development)
-- **Python 3.9+** (Phase 3 - Python adapter)
-- **Node.js 16+** (Phase 4 - JavaScript adapter)
-- **Go 1.19+** (Phase 5 - Additional languages)
-- **Rust 1.65+** (Phase 5 - Additional languages)
-- **Ruby 3.0+** (Phase 5 - Additional languages)
+### Optional (for extended language support)
+- **Python 3.9+** for Python adapter
+- **Node.js 16+** for JavaScript adapter (future)
+- **Go 1.19+** for Go adapter (future)
+- **Rust 1.65+** for Rust adapter (future)
+- **Ruby 3.0+** for Ruby adapter
 
 ## Quick Setup
 
@@ -48,7 +46,7 @@ cd /home/am/Proyectos/Oeditus/metastatic
 # Install dependencies
 mix deps.get
 
-# Run tests (876+ tests, all passing!)
+# Run all tests
 mix test
 
 # Generate documentation
@@ -64,59 +62,57 @@ mix format --check-formatted
 metastatic/
 ├── lib/
 │   └── metastatic/
-│       ├── ast.ex                  # ✅ Core MetaAST type definitions
-│       ├── document.ex             # ✅ Document wrapper with metadata
-│       ├── builder.ex              # ✅ High-level API
-│       ├── adapter.ex              # ✅ Adapter behaviour
-│       ├── validator.ex            # ✅ Conformance validation
-│       ├── adapters/               # ✅ 5 language adapters
-│       │   ├── python/             # ✅ Full Python support
-│       │   ├── elixir/             # ✅ Full Elixir support
-│       │   ├── erlang/             # ✅ Full Erlang support
-│       │   ├── ruby/               # ✅ Full Ruby support
-│       │   └── haskell/            # ✅ Full Haskell support
-│       ├── supplemental/           # ✅ Phase 2 - Cross-language support
-│       │   ├── registry.ex         # ✅ Supplemental module registry
-│       │   ├── transformer.ex      # ✅ Transformation helper
-│       │   └── python/             # ✅ Pykka (actors), Asyncio
-│       ├── semantic/               # ✅ Semantic metadata systems
-│       │   ├── op_kind.ex          # ✅ Operation kind metadata (DB, HTTP, file, etc.)
-│       │   └── enricher.ex         # ✅ Semantic enrichment for AST nodes
-│       ├── analysis/               # ✅ Complete analysis suite
-│       │   ├── purity.ex           # ✅ Purity analyzer
-│       │   ├── purity/             # ✅ Side effect detection
-│       │   ├── complexity.ex       # ✅ Complexity analyzer (6 metrics)
-│       │   ├── complexity/         # ✅ Metric calculators
-│       │   ├── duplication.ex      # ✅ Code duplication detection
-│       │   ├── dead_code.ex        # ✅ Dead code detection
-│       │   ├── unused_variables.ex # ✅ Unused variable analysis
-│       │   ├── control_flow.ex     # ✅ CFG generation
-│       │   ├── taint.ex            # ✅ Taint analysis
-│       │   ├── security.ex         # ✅ Security scanning
-│       │   └── smells.ex           # ✅ Code smell detection
-│       └── mix/tasks/              # ✅ CLI tools (15+ tasks)
+│       ├── ast.ex                  # Core MetaAST type definitions (3-tuple format)
+│       ├── document.ex             # Document wrapper with metadata
+│       ├── builder.ex              # High-level API
+│       ├── adapter.ex              # Adapter behaviour
+│       ├── validator.ex            # Conformance validation
+│       ├── adapters/               # 5 language adapters
+│       │   ├── python/             # Full Python support
+│       │   ├── elixir/             # Full Elixir support
+│       │   ├── erlang/             # Full Erlang support
+│       │   ├── ruby/               # Full Ruby support
+│       │   └── haskell/            # Full Haskell support
+│       ├── supplemental/           # Cross-language construct support
+│       │   ├── registry.ex         # Supplemental module registry
+│       │   ├── transformer.ex      # Transformation helper
+│       │   └── python/             # Pykka (actors), Asyncio
+│       ├── semantic/               # Semantic metadata systems
+│       │   ├── op_kind.ex          # Operation kind metadata (DB, HTTP, file, etc.)
+│       │   └── enricher.ex         # Semantic enrichment for AST nodes
+│       ├── analysis/               # Complete analysis suite
+│       │   ├── purity.ex           # Purity analyzer
+│       │   ├── complexity.ex       # Complexity analyzer (6 metrics)
+│       │   ├── duplication.ex      # Code duplication detection
+│       │   ├── dead_code.ex        # Dead code detection
+│       │   ├── unused_variables.ex # Unused variable analysis
+│       │   ├── control_flow.ex     # CFG generation
+│       │   ├── taint.ex            # Taint analysis
+│       │   ├── security.ex         # Security scanning
+│       │   ├── smells.ex           # Code smell detection
+│       │   └── business_logic/     # 32 language-agnostic analyzers
+│       │       ├── callback_hell.ex
+│       │       ├── sql_injection.ex
+│       │       ├── xss_vulnerability.ex
+│       │       └── ... (32 total)
+│       └── mix/tasks/              # CLI tools (15+ tasks)
 │           ├── metastatic.translate.ex
 │           ├── metastatic.inspect.ex
 │           ├── metastatic.purity_check.ex
 │           ├── metastatic.complexity.ex
-│           ├── metastatic.dead_code.ex
-│           ├── metastatic.unused_vars.ex
-│           ├── metastatic.control_flow.ex
-│           ├── metastatic.taint_check.ex
-│           ├── metastatic.security_scan.ex
-│           └── metastatic.code_smells.ex
+│           └── ... (15+ total)
 ├── test/
-│   └── metastatic/                 # ✅ 876+ tests passing
+│   └── metastatic/                 # 1764 tests (1523 + 241 doctests)
 │       ├── ast_test.exs
-│       ├── adapters/               # ✅ Python, Elixir, Erlang, Ruby, Haskell
-│       ├── supplemental/           # ✅ Supplemental modules
-│       ├── analysis/               # ✅ All analyzers
-│       └── mix/tasks/              # ✅ CLI tools
-├── RESEARCH.md                     # ✅ Research and architecture (826 lines)
-├── THEORETICAL_FOUNDATIONS.md      # ✅ Formal theory (953 lines)
-├── IMPLEMENTATION_PLAN.md          # ✅ Detailed roadmap (840 lines)
-├── GETTING_STARTED.md              # ✅ Developer guide (379 lines)
-└── README.md                       # ✅ Project overview
+│       ├── adapters/               # Python, Elixir, Erlang, Ruby, Haskell
+│       ├── supplemental/           # Supplemental modules
+│       ├── analysis/               # All analyzers
+│       └── mix/tasks/              # CLI tools
+├── RESEARCH.md                     # Research and architecture
+├── THEORETICAL_FOUNDATIONS.md      # Formal theory
+├── IMPLEMENTATION_PLAN.md          # Detailed roadmap
+├── GETTING_STARTED.md              # Developer guide (this file)
+└── README.md                       # Project overview
 ```
 
 ## Development Workflow
@@ -126,14 +122,14 @@ metastatic/
 Before diving in, read these documents in order:
 
 1. **README.md** - High-level overview and current status
-2. **RESEARCH.md** - Deep dive into the MetaAST design decisions (826 lines)
-3. **THEORETICAL_FOUNDATIONS.md** - Formal meta-modeling theory with proofs (953 lines)
-4. **IMPLEMENTATION_PLAN.md** - Roadmap and milestones (Phase 1 complete!)
+2. **RESEARCH.md** - Deep dive into the MetaAST design decisions
+3. **THEORETICAL_FOUNDATIONS.md** - Formal meta-modeling theory with proofs
+4. **IMPLEMENTATION_PLAN.md** - Roadmap and milestones
 
 ### 2. Running Tests
 
 ```bash
-# Run all tests (876+ tests, all passing!)
+# Run all tests (1764 tests: 1523 tests + 241 doctests)
 mix test
 
 # Run specific test file
@@ -206,13 +202,18 @@ end
 
 ## Common Tasks
 
-### Working with MetaAST (Phase 1 - Available Now!)
+### Working with MetaAST
+
+MetaAST uses a uniform 3-tuple format: `{type_atom, keyword_meta, children_or_value}`
 
 ```elixir
 alias Metastatic.{AST, Document, Validator}
 
-# Create a MetaAST manually
-ast = {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+# Create a MetaAST manually (3-tuple format)
+ast = {:binary_op, [category: :arithmetic, operator: :+], [
+  {:variable, [], "x"},
+  {:literal, [subtype: :integer], 5}
+]}
 
 # Check conformance
 AST.conforms?(ast)  # => true
@@ -230,7 +231,7 @@ meta.depth  # => 2
 meta.variables  # => MapSet.new(["x"])
 ```
 
-### Using Language Adapters (Phase 2 - Available Now!)
+### Using Language Adapters
 
 #### Elixir Adapter
 
@@ -242,8 +243,11 @@ alias Metastatic.Builder
 source = "x + 5"
 {:ok, doc} = Builder.from_source(source, ElixirAdapter)
 
-# doc.ast will be:
-# {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+# doc.ast uses the uniform 3-tuple format:
+# {:binary_op, [category: :arithmetic, operator: :+], [
+#   {:variable, [], "x"},
+#   {:literal, [subtype: :integer], 5}
+# ]}
 
 # Convert back to Elixir source
 {:ok, result} = Builder.to_source(doc)
@@ -262,8 +266,11 @@ alias Metastatic.Adapters.Erlang, as: ErlangAdapter
 source = "X + 5."
 {:ok, doc} = Builder.from_source(source, ErlangAdapter)
 
-# Same MetaAST as Elixir!
-# {:binary_op, :arithmetic, :+, {:variable, "X"}, {:literal, :integer, 5}}
+# Same MetaAST structure as Elixir (only variable name differs)!
+# {:binary_op, [category: :arithmetic, operator: :+], [
+#   {:variable, [], "X"},
+#   {:literal, [subtype: :integer], 5}
+# ]}
 
 # Convert to Erlang source
 {:ok, result} = Builder.to_source(doc)
@@ -289,19 +296,19 @@ erlang_vars = erlang_doc.ast |> normalize_vars()
 assert elixir_vars == erlang_vars
 ```
 
-### Using Advanced Analyzers (Available Now!)
+### Using Advanced Analyzers
 
-Metastatic includes six advanced static analysis capabilities:
+Metastatic includes nine core static analysis capabilities:
 
 #### Dead Code Detection
 
 ```elixir
 alias Metastatic.Analysis.DeadCode
 
-# Detect code after return
-ast = {:block, [
-  {:early_return, {:literal, :integer, 42}},
-  {:function_call, "print", [{:literal, :string, "hello"}]}  # unreachable!
+# Detect code after return (3-tuple format)
+ast = {:block, [], [
+  {:early_return, [], [{:literal, [subtype: :integer], 42}]},
+  {:function_call, [name: "print"], [{:literal, [subtype: :string], "hello"}]}  # unreachable!
 ]}
 doc = Document.new(ast, :python)
 {:ok, result} = DeadCode.analyze(doc)
@@ -319,11 +326,14 @@ result.issues          # => [{:code_after_return, :high, "Code after return stat
 ```elixir
 alias Metastatic.Analysis.UnusedVariables
 
-# Track variable usage
-ast = {:block, [
-  {:assignment, {:variable, "x"}, {:literal, :integer, 5}},
-  {:assignment, {:variable, "y"}, {:literal, :integer, 10}},
-  {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 1}}
+# Track variable usage (3-tuple format)
+ast = {:block, [], [
+  {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
+  {:assignment, [], [{:variable, [], "y"}, {:literal, [subtype: :integer], 10}]},
+  {:binary_op, [category: :arithmetic, operator: :+], [
+    {:variable, [], "y"},
+    {:literal, [subtype: :integer], 1}
+  ]}
 ]}
 doc = Document.new(ast, :elixir)
 {:ok, result} = UnusedVariables.analyze(doc)
@@ -343,11 +353,12 @@ result.used         # => MapSet.new(["y"])
 ```elixir
 alias Metastatic.Analysis.ControlFlow
 
-# Build CFG
-ast = {:conditional, {:variable, "x"},
-  {:early_return, {:literal, :integer, 1}},
-  {:literal, :integer, 2}
-}
+# Build CFG (3-tuple format)
+ast = {:conditional, [], [
+  {:variable, [], "x"},
+  {:early_return, [], [{:literal, [subtype: :integer], 1}]},
+  {:literal, [subtype: :integer], 2}
+]}
 doc = Document.new(ast, :python)
 {:ok, result} = ControlFlow.analyze(doc)
 
@@ -374,9 +385,9 @@ json_data = result.to_d3_json()
 ```elixir
 alias Metastatic.Analysis.Taint
 
-# Detect taint vulnerabilities
-ast = {:function_call, "eval", [
-  {:function_call, "input", []}  # Dangerous: eval(input())
+# Detect taint vulnerabilities (3-tuple format)
+ast = {:function_call, [name: "eval"], [
+  {:function_call, [name: "input"], []}  # Dangerous: eval(input())
 ]}
 doc = Document.new(ast, :python)
 {:ok, result} = Taint.analyze(doc)
@@ -394,8 +405,8 @@ result.vulnerabilities       # => [{:code_injection, "eval called with untrusted
 ```elixir
 alias Metastatic.Analysis.Security
 
-# Detect security issues
-ast = {:assignment, {:variable, "password"}, {:literal, :string, "admin123"}}
+# Detect security issues (3-tuple format)
+ast = {:assignment, [], [{:variable, [], "password"}, {:literal, [subtype: :string], "admin123"}]}
 doc = Document.new(ast, :python)
 {:ok, result} = Security.analyze(doc)
 
@@ -416,10 +427,10 @@ vuln.location  # => "Variable: password"
 ```elixir
 alias Metastatic.Analysis.Smells
 
-# Detect code smells (requires complexity metrics first)
-ast = {:block, [
-  {:conditional, {:variable, "a"}, {:literal, :integer, 1}, {:literal, :integer, 2}},
-  {:conditional, {:variable, "b"}, {:literal, :integer, 3}, {:literal, :integer, 4}},
+# Detect code smells (3-tuple format)
+ast = {:block, [], [
+  {:conditional, [], [{:variable, [], "a"}, {:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]},
+  {:conditional, [], [{:variable, [], "b"}, {:literal, [subtype: :integer], 3}, {:literal, [subtype: :integer], 4}]},
   # ... many more statements creating long function and deep nesting
 ]}
 doc = Document.new(ast, :python)
@@ -434,7 +445,42 @@ result.severity     # => :medium or :high
 # mix metastatic.code_smells my_file.ex --format detailed
 ```
 
-### Adding a New Language Adapter (Phase 3+)
+### Business Logic Analyzers (32 analyzers)
+
+Metastatic includes 32 language-agnostic business logic analyzers that detect anti-patterns across all supported languages. These include:
+
+**Security (CWE Top 25 coverage):**
+- SQLInjection (CWE-89), XSSVulnerability (CWE-79), PathTraversal (CWE-22)
+- MissingAuthorization (CWE-862), SSRFVulnerability (CWE-918)
+- SensitiveDataExposure (CWE-200), UnrestrictedFileUpload (CWE-434)
+- MissingAuthentication (CWE-306), MissingCSRFProtection (CWE-352)
+- IncorrectAuthorization (CWE-863), ImproperInputValidation (CWE-20)
+- InsecureDirectObjectReference (CWE-639)
+
+**Anti-patterns:**
+- CallbackHell, MissingErrorHandling, SilentErrorCase, SwallowingException
+- HardcodedValue, NPlusOneQuery, InefficientFilter, UnmanagedTask
+- BlockingInPlug, SyncOverAsync, DirectStructUpdate, MissingPreload
+- InlineJavascript, MissingThrottle, TOCTOU, and more
+
+```elixir
+alias Metastatic.Analysis.Runner
+alias Metastatic.Document
+
+# Run all business logic analyzers
+ast = {:function_call, [name: "execute"], [
+  {:binary_op, [category: :arithmetic, operator: :+], [
+    {:literal, [subtype: :string], "SELECT * FROM users WHERE id = "},
+    {:variable, [], "user_input"}
+  ]}
+]}
+doc = Document.new(ast, :python)
+
+{:ok, issues} = Runner.run(doc)
+# Returns SQLInjection warning about string concatenation in SQL
+```
+
+### Adding a New Language Adapter
 
 See existing Elixir and Erlang adapters as reference implementations.
 
@@ -469,7 +515,11 @@ Test individual transformations and functions:
 test "transforms Elixir addition to MetaAST" do
   elixir_ast = {:+, [], [{:x, [], nil}, 5]}
   {:ok, meta_ast} = Metastatic.Adapters.Elixir.ToMeta.transform(elixir_ast)
-  assert {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}} = meta_ast
+  # 3-tuple format: {type, keyword_meta, children_or_value}
+  assert {:binary_op, [category: :arithmetic, operator: :+], [
+    {:variable, [], "x"},
+    {:literal, [subtype: :integer], 5}
+  ]} = meta_ast
 end
 ```
 
@@ -654,4 +704,4 @@ Before submitting a PR:
 4. **Run tests**: Make sure everything works
 5. **Start coding**: Pick an issue or feature from the roadmap
 
-Welcome aboard! 🚀
+Welcome aboard!
