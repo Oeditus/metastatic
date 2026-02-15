@@ -165,8 +165,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       # &Module.function/arity
       {:/, _, [func_ref, arity]} when is_integer(arity) ->
         func_name = extract_captured_function_name(func_ref)
-        params = for i <- 1..arity, do: {:param, [], "arg_#{i}"}
-        args = for i <- 1..arity, do: {:variable, [], "arg_#{i}"}
+        params = for i <- 1..arity//1, do: {:param, [], "arg_#{i}"}
+        args = for i <- 1..arity//1, do: {:variable, [], "arg_#{i}"}
         body_ast = {:function_call, [name: func_name], args}
         node_meta = [params: params, capture_form: :named_function] ++ build_meta(meta)
         {:lambda, node_meta, [body_ast]}
