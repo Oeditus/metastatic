@@ -221,22 +221,20 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     # Now transform this node
     case classify_op(op) do
       {:arithmetic, operator} ->
-        [left, right] = transformed_args
-
         {{:binary_op, [category: :arithmetic, operator: operator] ++ build_meta(meta),
-          [left, right]}, new_max}
+          transformed_args}, new_max}
 
       {:comparison, operator} ->
-        [left, right] = transformed_args
-
         {{:binary_op, [category: :comparison, operator: operator] ++ build_meta(meta),
-          [left, right]}, new_max}
+          transformed_args}, new_max}
 
       {:boolean, operator} ->
-        [left, right] = transformed_args
-
         {{:binary_op, [category: :boolean, operator: operator] ++ build_meta(meta),
-          [left, right]}, new_max}
+          transformed_args}, new_max}
+
+      {:unary_boolean, operator} ->
+        {{:binary_op, [category: :boolean, operator: operator] ++ build_meta(meta),
+          transformed_args}, new_max}
 
       :function_call ->
         # It's a function call
