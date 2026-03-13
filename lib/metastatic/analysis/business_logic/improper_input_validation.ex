@@ -128,7 +128,7 @@ defmodule Metastatic.Analysis.BusinessLogic.ImproperInputValidation do
   def analyze({:function_call, meta, args} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_sensitive_operation?(func_name) and
+    if sensitive_operation?(func_name) and
          has_direct_input_argument?(args, context) and
          not in_validation_context?(context) do
       [
@@ -176,7 +176,7 @@ defmodule Metastatic.Analysis.BusinessLogic.ImproperInputValidation do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_validation_function?(func_name)
+        validation_function?(func_name)
 
       {:pipe, _meta, stages} when is_list(stages) ->
         Enum.any?(stages, &contains_validation?/1)
@@ -185,7 +185,7 @@ defmodule Metastatic.Analysis.BusinessLogic.ImproperInputValidation do
         Enum.any?(statements, &contains_validation?/1)
 
       {:conditional, _meta, [condition | _branches]} ->
-        is_type_check?(condition) or contains_validation?(condition)
+        type_check?(condition) or contains_validation?(condition)
 
       {:case, _meta, _} ->
         # Case statements often indicate pattern matching validation
@@ -206,7 +206,7 @@ defmodule Metastatic.Analysis.BusinessLogic.ImproperInputValidation do
     end
   end
 
-  defp is_validation_function?(func_name) when is_binary(func_name) do
+  defp validation_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@validation_functions, fn pattern ->
@@ -214,9 +214,9 @@ defmodule Metastatic.Analysis.BusinessLogic.ImproperInputValidation do
     end)
   end
 
-  defp is_validation_function?(_), do: false
+  defp validation_function?(_), do: false
 
-  defp is_type_check?(node) do
+  defp type_check?(node) do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
@@ -240,7 +240,7 @@ defmodule Metastatic.Analysis.BusinessLogic.ImproperInputValidation do
       {:function_call, meta, args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
 
-        is_sensitive_operation?(func_name) and
+        sensitive_operation?(func_name) and
           has_direct_input_argument?(args, context)
 
       {:pipe, _meta, stages} when is_list(stages) ->
@@ -262,12 +262,12 @@ defmodule Metastatic.Analysis.BusinessLogic.ImproperInputValidation do
     end
   end
 
-  defp is_sensitive_operation?(func_name) when is_binary(func_name) do
+  defp sensitive_operation?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
     Enum.any?(@sensitive_operations, &String.contains?(func_lower, &1))
   end
 
-  defp is_sensitive_operation?(_), do: false
+  defp sensitive_operation?(_), do: false
 
   defp has_direct_input_argument?(args, _context) when is_list(args) do
     Enum.any?(args, fn arg ->

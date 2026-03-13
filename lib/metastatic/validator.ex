@@ -158,20 +158,9 @@ defmodule Metastatic.Validator do
     end
   end
 
-  # AST analysis
-
-  defp analyze_ast(ast) do
-    meta = %{
-      level: determine_level(ast),
-      native_constructs: count_native(ast),
-      warnings: generate_warnings(ast),
-      variables: AST.variables(ast),
-      depth: calculate_depth(ast),
-      node_count: count_nodes(ast)
-    }
-
-    {:ok, meta}
-  end
+  # AST analysis - single-pass traversal collecting all metrics at once.
+  # Previous implementation used 7+ separate traversals; this collects
+  # level, native count, variables, depth, and node count in one pass.
 
   # Extended layer types (M2.2 + M2.2s)
   @extended_types [
@@ -193,64 +182,100 @@ defmodule Metastatic.Validator do
   # Native layer types (M2.3)
   @native_types [:language_specific]
 
-  # Determine highest M2 level used
+  defp analyze_ast(ast) do
+    initial_acc = %{
+      native_count: 0,
+      has_extended: false,
+      variables: MapSet.new(),
+      current_depth: 0,
+      max_depth: 0,
+      node_count: 0
+    }
 
-  defp determine_level(ast) do
-    cond do
-      has_native?(ast) -> :native
-      has_extended?(ast) -> :extended
-      true -> :core
-    end
+    {_ast, acc} = AST.traverse(ast, initial_acc, &analyze_pre/2, &analyze_post/2)
+
+    level =
+      cond do
+        acc.native_count > 0 -> :native
+        acc.has_extended -> :extended
+        true -> :core
+      end
+
+    warnings = build_warnings(acc)
+
+    meta = %{
+      level: level,
+      native_constructs: acc.native_count,
+      warnings: warnings,
+      variables: acc.variables,
+      depth: acc.max_depth,
+      node_count: acc.node_count
+    }
+
+    {:ok, meta}
   end
 
-  defp has_native?(ast) do
-    count_native(ast) > 0
+  # Pre: entering a node - track depth, count nodes, classify type, collect variables
+  defp analyze_pre({type, meta, _children} = node, acc)
+       when is_atom(type) and is_list(meta) do
+    new_depth = acc.current_depth + 1
+
+    acc =
+      acc
+      |> Map.update!(:current_depth, fn _ -> new_depth end)
+      |> Map.update!(:max_depth, &max(&1, new_depth))
+      |> Map.update!(:node_count, &(&1 + 1))
+
+    # Classify node type
+    acc =
+      cond do
+        type in @native_types -> Map.update!(acc, :native_count, &(&1 + 1))
+        type in @extended_types -> Map.put(acc, :has_extended, true)
+        true -> acc
+      end
+
+    # Collect variables
+    acc =
+      if type == :variable and is_binary(elem(node, 2)) do
+        Map.update!(acc, :variables, &MapSet.put(&1, elem(node, 2)))
+      else
+        acc
+      end
+
+    {node, acc}
   end
 
-  defp has_extended?(ast) do
-    {_ast, found} =
-      AST.traverse(ast, false, fn node, acc -> {node, acc} end, fn
-        {type, _meta, _children}, _acc when type in @extended_types -> {nil, true}
-        node, acc -> {node, acc}
-      end)
+  defp analyze_pre(node, acc), do: {node, acc}
 
-    found
+  # Post: leaving a node - decrement depth
+  defp analyze_post({type, meta, _children} = node, acc)
+       when is_atom(type) and is_list(meta) do
+    {node, Map.update!(acc, :current_depth, &max(0, &1 - 1))}
   end
 
-  # Count M2.3 native constructs
+  defp analyze_post(node, acc), do: {node, acc}
 
-  defp count_native(ast) do
-    {_ast, count} =
-      AST.traverse(ast, 0, fn node, acc -> {node, acc} end, fn
-        {type, _meta, _children}, acc when type in @native_types -> {nil, acc + 1}
-        node, acc -> {node, acc}
-      end)
-
-    count
-  end
-
-  # Generate validation warnings
-
-  defp generate_warnings(ast) do
+  # Build warnings from accumulated metrics
+  defp build_warnings(acc) do
     warnings = []
 
     warnings =
-      if has_native?(ast) do
-        [{:native_constructs_present, count_native(ast)} | warnings]
+      if acc.native_count > 0 do
+        [{:native_constructs_present, acc.native_count} | warnings]
       else
         warnings
       end
 
     warnings =
-      if calculate_depth(ast) > 100 do
-        [{:deep_nesting, calculate_depth(ast)} | warnings]
+      if acc.max_depth > 100 do
+        [{:deep_nesting, acc.max_depth} | warnings]
       else
         warnings
       end
 
     warnings =
-      if count_nodes(ast) > 1000 do
-        [{:large_ast, count_nodes(ast)} | warnings]
+      if acc.node_count > 1000 do
+        [{:large_ast, acc.node_count} | warnings]
       else
         warnings
       end
@@ -293,47 +318,5 @@ defmodule Metastatic.Validator do
     else
       :ok
     end
-  end
-
-  # AST traversal utilities using the new 3-tuple format
-
-  # Calculate depth using AST.traverse
-  # Tracks {current_depth, max_depth_seen} during traversal
-  defp calculate_depth(ast) do
-    {_ast, {_current, max_depth}} =
-      AST.traverse(ast, {0, 0}, &depth_pre/2, &depth_post/2)
-
-    max_depth
-  end
-
-  # Pre: increment current depth when entering a node
-  defp depth_pre({type, meta, _children} = node, {current, max_depth})
-       when is_atom(type) and is_list(meta) do
-    new_current = current + 1
-    {node, {new_current, max(max_depth, new_current)}}
-  end
-
-  defp depth_pre(node, acc), do: {node, acc}
-
-  # Post: decrement current depth when leaving a node
-  defp depth_post({type, meta, _children} = node, {current, max_depth})
-       when is_atom(type) and is_list(meta) do
-    {node, {max(0, current - 1), max_depth}}
-  end
-
-  defp depth_post(node, acc), do: {node, acc}
-
-  # Count nodes using AST.traverse
-  defp count_nodes(ast) do
-    {_ast, count} =
-      AST.traverse(ast, 0, fn node, acc -> {node, acc} end, fn
-        {type, meta, _children}, acc when is_atom(type) and is_list(meta) ->
-          {nil, acc + 1}
-
-        node, acc ->
-          {node, acc}
-      end)
-
-    count
   end
 end

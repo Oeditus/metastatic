@@ -185,6 +185,41 @@ defmodule Metastatic.Adapters.ElixirTest do
       assert {:ok, result, %{}} = ToMeta.transform(ast)
       assert binary_op?(result, :arithmetic, :<>)
     end
+
+    test "normalizes && to :and" do
+      ast = {:&&, [], [true, false]}
+      assert {:ok, {:binary_op, meta, _children}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :category) == :boolean
+      assert Keyword.get(meta, :operator) == :and
+      assert Keyword.get(meta, :original_op) == :&&
+    end
+
+    test "normalizes || to :or" do
+      ast = {:||, [], [true, false]}
+      assert {:ok, {:binary_op, meta, _children}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :category) == :boolean
+      assert Keyword.get(meta, :operator) == :or
+      assert Keyword.get(meta, :original_op) == :||
+    end
+
+    test ":and and :or do not get original_op metadata" do
+      and_ast = {:and, [], [true, false]}
+      assert {:ok, {:binary_op, meta, _}, %{}} = ToMeta.transform(and_ast)
+      assert Keyword.get(meta, :operator) == :and
+      assert Keyword.get(meta, :original_op) == nil
+
+      or_ast = {:or, [], [true, false]}
+      assert {:ok, {:binary_op, meta, _}, %{}} = ToMeta.transform(or_ast)
+      assert Keyword.get(meta, :operator) == :or
+      assert Keyword.get(meta, :original_op) == nil
+    end
+
+    test "&& round-trips back to &&" do
+      ast = {:&&, [line: 1], [true, false]}
+      assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
+      assert {:ok, back} = FromMeta.transform(meta_ast, metadata)
+      assert {:&&, _, [true, false]} = back
+    end
   end
 
   describe "ToMeta - unary operators" do
@@ -406,27 +441,178 @@ defmodule Metastatic.Adapters.ElixirTest do
     end
   end
 
-  describe "ToMeta - Native layer constructs" do
-    test "transforms pipe operator as function_call" do
-      # The |> operator is handled as a regular function call because it's not
-      # in the exclusion list for the local function call handler
+  describe "ToMeta - Pipe operator desugaring" do
+    test "desugars simple pipe to function call" do
+      # x |> f()
       ast = {:|>, [], [{:x, [], nil}, {:f, [], []}]}
 
-      assert {:ok, {:function_call, meta, [left, right]}, _metadata} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :name) == "|>"
+      assert {:ok, {:function_call, meta, [left]}, _metadata} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :name) == "f"
+      assert Keyword.get(meta, :pipe) == true
       assert variable?(left, "x")
-      assert match?({:function_call, _, _}, right)
     end
 
-    test "transforms with expression as language_specific" do
-      pattern = {:ok, {:x, [], nil}}
+    test "desugars pipe with arguments" do
+      # x |> f(y)
+      ast = {:|>, [], [{:x, [], nil}, {:f, [], [{:y, [], nil}]}]}
+
+      assert {:ok, {:function_call, meta, [left, right]}, _metadata} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :name) == "f"
+      assert Keyword.get(meta, :pipe) == true
+      assert variable?(left, "x")
+      assert variable?(right, "y")
+    end
+
+    test "desugars chained pipes" do
+      # x |> f() |> g(y)
+      inner_pipe = {:|>, [], [{:x, [], nil}, {:f, [], []}]}
+      ast = {:|>, [], [inner_pipe, {:g, [], [{:y, [], nil}]}]}
+
+      assert {:ok, {:function_call, outer_meta, [inner_call, y_var]}, _metadata} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(outer_meta, :name) == "g"
+      assert Keyword.get(outer_meta, :pipe) == true
+      assert variable?(y_var, "y")
+
+      # Inner pipe was also desugared
+      assert {:function_call, inner_meta, [x_var]} = inner_call
+      assert Keyword.get(inner_meta, :name) == "f"
+      assert Keyword.get(inner_meta, :pipe) == true
+      assert variable?(x_var, "x")
+    end
+
+    test "desugars pipe to remote call" do
+      # x |> Enum.map(fn y -> y end)
+      lambda = {:fn, [], [{:->, [], [[{:y, [], nil}], {:y, [], nil}]}]}
+      remote = {{:., [], [{:__aliases__, [alias: false], [:Enum]}, :map]}, [], [lambda]}
+      ast = {:|>, [], [{:x, [], nil}, remote]}
+
+      assert {:ok, {:function_call, meta, [x_var, lambda_node]}, _metadata} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :name) == "Enum.map"
+      assert Keyword.get(meta, :pipe) == true
+      assert variable?(x_var, "x")
+      assert {:lambda, _, _} = lambda_node
+    end
+
+    test "desugars pipe without parens (variable on right)" do
+      # x |> f (no parens - f appears as variable in AST)
+      ast = {:|>, [], [{:x, [], nil}, {:f, [], nil}]}
+
+      assert {:ok, {:function_call, meta, [left]}, _metadata} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :name) == "f"
+      assert Keyword.get(meta, :pipe) == true
+      assert variable?(left, "x")
+    end
+
+    test "desugars pipe with multiple arguments" do
+      # x |> String.replace("a", "b")
+      remote =
+        {{:., [], [{:__aliases__, [alias: false], [:String]}, :replace]}, [], ["a", "b"]}
+
+      ast = {:|>, [], [{:x, [], nil}, remote]}
+
+      assert {:ok, {:function_call, meta, [x_var, a_lit, b_lit]}, _metadata} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :name) == "String.replace"
+      assert Keyword.get(meta, :pipe) == true
+      assert variable?(x_var, "x")
+      assert literal?(a_lit, :string, "a")
+      assert literal?(b_lit, :string, "b")
+    end
+  end
+
+  describe "ToMeta - with expression" do
+    test "transforms simple with to block of inline_matches" do
+      # with {:ok, x} <- result, do: x
+      pattern = {:{}, [], [:ok, {:x, [], nil}]}
       expr = {:result, [], nil}
       body = {:x, [], nil}
       ast = {:with, [], [{:<-, [], [pattern, expr]}, [do: body]]}
 
-      assert {:ok, {:language_specific, meta, _children}, %{}} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :language) == :elixir
-      assert Keyword.get(meta, :hint) == :with
+      assert {:ok, {:block, meta, [clause, body_ast]}, _ctx} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :original_form) == :with
+
+      # Clause is inline_match with original_form: :with_clause
+      assert {:inline_match, clause_meta, [pattern_ast, expr_ast]} = clause
+      assert Keyword.get(clause_meta, :original_form) == :with_clause
+      assert {:tuple, _, _} = pattern_ast
+      assert {:variable, _, "result"} = expr_ast
+
+      # Body is the result expression
+      assert {:variable, _, "x"} = body_ast
+    end
+
+    test "transforms with + else to block with pattern_match" do
+      # with {:ok, x} <- result do
+      #   x
+      # else
+      #   {:error, reason} -> reason
+      # end
+      pattern = {:{}, [], [:ok, {:x, [], nil}]}
+      expr = {:result, [], nil}
+      body = {:x, [], nil}
+      error_pattern = {:{}, [], [:error, {:reason, [], nil}]}
+      error_body = {:reason, [], nil}
+
+      ast =
+        {:with, [],
+         [
+           {:<-, [], [pattern, expr]},
+           [do: body, else: [{:->, [], [[error_pattern], error_body]}]]
+         ]}
+
+      assert {:ok, {:block, meta, [clause, body_ast, else_node]}, _ctx} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :original_form) == :with
+
+      # Clause
+      assert {:inline_match, _, _} = clause
+      assert {:variable, _, "x"} = body_ast
+
+      # Else is a pattern_match
+      assert {:pattern_match, else_meta, [scrutinee | arms]} = else_node
+      assert Keyword.get(else_meta, :original_form) == :with_else
+      assert {:variable, _, "_with_result"} = scrutinee
+      assert [_] = arms
+    end
+
+    test "transforms with multiple clauses" do
+      # with {:ok, a} <- foo(), {:ok, b} <- bar(a), do: a + b
+      clause1 = {:<-, [], [{:{}, [], [:ok, {:a, [], nil}]}, {:foo, [], []}]}
+      clause2 = {:<-, [], [{:{}, [], [:ok, {:b, [], nil}]}, {:bar, [], [{:a, [], nil}]}]}
+      body = {:+, [], [{:a, [], nil}, {:b, [], nil}]}
+      ast = {:with, [], [clause1, clause2, [do: body]]}
+
+      assert {:ok, {:block, meta, [match1, match2, body_ast]}, _ctx} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :original_form) == :with
+      assert {:inline_match, _, _} = match1
+      assert {:inline_match, _, _} = match2
+      assert {:binary_op, _, _} = body_ast
+    end
+
+    test "with clause with = (regular match) produces inline_match" do
+      # with {:ok, x} <- result, y = process(x), do: y
+      clause1 = {:<-, [], [{:{}, [], [:ok, {:x, [], nil}]}, {:result, [], nil}]}
+      clause2 = {:=, [], [{:y, [], nil}, {:process, [], [{:x, [], nil}]}]}
+      body = {:y, [], nil}
+      ast = {:with, [], [clause1, clause2, [do: body]]}
+
+      assert {:ok, {:block, _, [match1, match2, _body]}, _ctx} = ToMeta.transform(ast)
+      assert {:inline_match, meta1, _} = match1
+      assert Keyword.get(meta1, :original_form) == :with_clause
+      # Regular match clause doesn't have :with_clause marker
+      assert {:inline_match, meta2, _} = match2
+      refute Keyword.get(meta2, :original_form) == :with_clause
+    end
+
+    test "with node conforms to M2" do
+      # The output is a block of inline_matches, which are valid M2 nodes
+      ast = {:with, [], [{:<-, [], [{:x, [], nil}, {:foo, [], []}]}, [do: {:x, [], nil}]]}
+      assert {:ok, meta_ast, _ctx} = ToMeta.transform(ast)
+      assert Metastatic.AST.conforms?(meta_ast)
     end
   end
 
@@ -722,6 +908,128 @@ defmodule Metastatic.Adapters.ElixirTest do
       }
 
       assert {:ok, "42"} = Metastatic.Adapter.reify(ElixirAdapter, doc)
+    end
+  end
+
+  describe "ToMeta - Import Directives" do
+    test "transforms import to :import node" do
+      source = "import Enum"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "Enum"
+      assert Keyword.get(meta, :import_type) == :import
+      assert Keyword.get(meta, :language) == :elixir
+    end
+
+    test "transforms use to :import node" do
+      source = "use GenServer"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "GenServer"
+      assert Keyword.get(meta, :import_type) == :use
+      assert Keyword.get(meta, :language) == :elixir
+    end
+
+    test "transforms require to :import node" do
+      source = "require Logger"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "Logger"
+      assert Keyword.get(meta, :import_type) == :require
+      assert Keyword.get(meta, :language) == :elixir
+    end
+
+    test "transforms alias to :import node" do
+      source = "alias MyApp.User"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "MyApp.User"
+      assert Keyword.get(meta, :import_type) == :alias
+      assert Keyword.get(meta, :language) == :elixir
+    end
+
+    test "transforms import with options" do
+      source = "import Enum, only: [map: 2]"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "Enum"
+      assert Keyword.get(meta, :import_type) == :import
+    end
+
+    test "import nodes conform to M2" do
+      import_node = {:import, [source: "Enum", import_type: :import, language: :elixir], []}
+      assert Metastatic.AST.conforms?(import_node)
+    end
+
+    test "import node has structural layer" do
+      assert Metastatic.AST.layer(:import) == :structural
+    end
+  end
+
+  describe "FromMeta - Import Directives" do
+    test "transforms :import back to import" do
+      meta_ast = {:import, [source: "Enum", import_type: :import], []}
+
+      assert {:ok, {:import, _, [{:__aliases__, [], [:Enum]}]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms :import with use type back to use" do
+      meta_ast = {:import, [source: "GenServer", import_type: :use], []}
+
+      assert {:ok, {:use, _, [{:__aliases__, [], [:GenServer]}]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms :import with require type back to require" do
+      meta_ast = {:import, [source: "Logger", import_type: :require], []}
+
+      assert {:ok, {:require, _, [{:__aliases__, [], [:Logger]}]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "transforms :import with alias type back to alias" do
+      meta_ast = {:import, [source: "MyApp.User", import_type: :alias], []}
+
+      assert {:ok, {:alias, _, [{:__aliases__, [], [:MyApp, :User]}]}} =
+               FromMeta.transform(meta_ast, %{})
+    end
+
+    test "round-trips import directive" do
+      source = "import Enum"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, metadata} = ToMeta.transform(ast)
+      {:ok, ast2} = FromMeta.transform(meta_ast, metadata)
+      {:ok, source2} = ElixirAdapter.unparse(ast2)
+      assert source == source2
+    end
+
+    test "round-trips use directive" do
+      source = "use GenServer"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, metadata} = ToMeta.transform(ast)
+      {:ok, ast2} = FromMeta.transform(meta_ast, metadata)
+      {:ok, source2} = ElixirAdapter.unparse(ast2)
+      assert source == source2
+    end
+
+    test "round-trips require directive" do
+      source = "require Logger"
+      {:ok, ast} = ElixirAdapter.parse(source)
+      {:ok, meta_ast, metadata} = ToMeta.transform(ast)
+      {:ok, ast2} = FromMeta.transform(meta_ast, metadata)
+      {:ok, source2} = ElixirAdapter.unparse(ast2)
+      assert source == source2
     end
   end
 

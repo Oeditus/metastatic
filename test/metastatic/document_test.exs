@@ -84,6 +84,68 @@ defmodule Metastatic.DocumentTest do
     end
   end
 
+  describe "equivalent?/2" do
+    test "same ASTs from different languages are equivalent" do
+      ast = literal(:integer, 42)
+      doc1 = Document.new(ast, :python)
+      doc2 = Document.new(ast, :javascript)
+
+      assert Document.equivalent?(doc1, doc2)
+    end
+
+    test "different ASTs are not equivalent" do
+      doc1 = Document.new(literal(:integer, 42), :python)
+      doc2 = Document.new(literal(:string, "42"), :python)
+
+      refute Document.equivalent?(doc1, doc2)
+    end
+
+    test "ignores line numbers in metadata" do
+      ast1 =
+        {:binary_op, [category: :arithmetic, operator: :+, line: 1],
+         [{:variable, [line: 1], "x"}, {:literal, [subtype: :integer, line: 1], 5}]}
+
+      ast2 =
+        {:binary_op, [category: :arithmetic, operator: :+, line: 99],
+         [{:variable, [line: 99], "x"}, {:literal, [subtype: :integer, line: 99], 5}]}
+
+      doc1 = Document.new(ast1, :python)
+      doc2 = Document.new(ast2, :elixir)
+
+      assert Document.equivalent?(doc1, doc2)
+    end
+
+    test "ignores original_meta in metadata" do
+      ast1 = {:variable, [original_meta: [line: 1, counter: 0]], "x"}
+      ast2 = {:variable, [original_meta: [line: 50, counter: 5]], "x"}
+
+      doc1 = Document.new(ast1, :elixir)
+      doc2 = Document.new(ast2, :elixir)
+
+      assert Document.equivalent?(doc1, doc2)
+    end
+
+    test "distinguishes different operators" do
+      ast1 =
+        {:binary_op, [category: :arithmetic, operator: :+], [variable("x"), literal(:integer, 1)]}
+
+      ast2 =
+        {:binary_op, [category: :arithmetic, operator: :-], [variable("x"), literal(:integer, 1)]}
+
+      doc1 = Document.new(ast1, :python)
+      doc2 = Document.new(ast2, :python)
+
+      refute Document.equivalent?(doc1, doc2)
+    end
+
+    test "distinguishes different variable names" do
+      doc1 = Document.new(variable("x"), :python)
+      doc2 = Document.new(variable("y"), :python)
+
+      refute Document.equivalent?(doc1, doc2)
+    end
+  end
+
   describe "variables/1" do
     test "extracts variables from AST" do
       ast = binary_op(:arithmetic, :+, variable("x"), variable("y"))

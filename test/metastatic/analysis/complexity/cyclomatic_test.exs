@@ -217,12 +217,10 @@ defmodule Metastatic.Analysis.Complexity.CyclomaticTest do
         {:pattern_match, [],
          [
            {:variable, [], "value"},
-           [
-             {:pair, [],
-              [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}]},
-             {:pair, [],
-              [{:literal, [subtype: :integer], 2}, {:literal, [subtype: :string], "two"}]}
-           ]
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [{:literal, [subtype: :string], "one"}]},
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 2}],
+            [{:literal, [subtype: :string], "two"}]}
          ]}
 
       assert Cyclomatic.calculate(ast) == 3
@@ -233,14 +231,12 @@ defmodule Metastatic.Analysis.Complexity.CyclomaticTest do
         {:pattern_match, [],
          [
            {:variable, [], "value"},
-           [
-             {:pair, [],
-              [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}]},
-             {:pair, [],
-              [{:literal, [subtype: :integer], 2}, {:literal, [subtype: :string], "two"}]},
-             {:pair, [],
-              [{:literal, [subtype: :integer], 3}, {:literal, [subtype: :string], "three"}]}
-           ]
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [{:literal, [subtype: :string], "one"}]},
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 2}],
+            [{:literal, [subtype: :string], "two"}]},
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 3}],
+            [{:literal, [subtype: :string], "three"}]}
          ]}
 
       assert Cyclomatic.calculate(ast) == 4
@@ -280,7 +276,7 @@ defmodule Metastatic.Analysis.Complexity.CyclomaticTest do
   describe "calculate/1 - collections and lambdas" do
     test "lambda body adds its complexity" do
       ast =
-        {:lambda, [params: ["x"], captures: []],
+        {:lambda, [params: [{:param, [], "x"}], captures: []],
          [
            {:conditional, [],
             [
@@ -297,7 +293,7 @@ defmodule Metastatic.Analysis.Complexity.CyclomaticTest do
       ast =
         {:collection_op, [op_type: :map],
          [
-           {:lambda, [params: ["x"], captures: []],
+           {:lambda, [params: [{:param, [], "x"}], captures: []],
             [
               {:conditional, [],
                [

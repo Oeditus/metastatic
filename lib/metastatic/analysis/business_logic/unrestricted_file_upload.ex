@@ -160,7 +160,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
   def analyze({:function_call, meta, args} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_file_save_function?(func_name) and involves_upload?(args, context) and
+    if file_save_function?(func_name) and involves_upload?(args, context) and
          not in_validation_context?(context) do
       [
         Analyzer.issue(
@@ -209,7 +209,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
 
   defp has_upload_param?(_), do: false
 
-  defp is_file_save_function?(func_name) when is_binary(func_name) do
+  defp file_save_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@file_save_functions, fn pattern ->
@@ -217,7 +217,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
     end)
   end
 
-  defp is_file_save_function?(_), do: false
+  defp file_save_function?(_), do: false
 
   defp has_upload_validation?(body) when is_list(body) do
     Enum.any?(body, &contains_validation?/1)
@@ -227,7 +227,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_validation_function?(func_name)
+        validation_function?(func_name)
 
       {:conditional, _meta, [condition | _branches]} ->
         contains_validation?(condition) or involves_size_or_type_check?(condition)
@@ -261,7 +261,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
     end
   end
 
-  defp is_validation_function?(func_name) when is_binary(func_name) do
+  defp validation_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@validation_indicators, fn ind ->
@@ -269,7 +269,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
     end)
   end
 
-  defp is_validation_function?(_), do: false
+  defp validation_function?(_), do: false
 
   defp involves_size_or_type_check?(node) do
     case node do
@@ -297,7 +297,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
 
       {:function_call, meta, _} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_validation_function?(func_name)
+        validation_function?(func_name)
 
       {:attribute_access, _meta, children} when is_list(children) ->
         Enum.any?(children, fn
@@ -322,7 +322,7 @@ defmodule Metastatic.Analysis.BusinessLogic.UnrestrictedFileUpload do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_file_save_function?(func_name)
+        file_save_function?(func_name)
 
       {:pipe, _meta, stages} when is_list(stages) ->
         Enum.any?(stages, &contains_file_save?/1)

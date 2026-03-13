@@ -89,12 +89,14 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
   def analyze({:function_def, meta, body} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_critical_action?(func_name) and in_handler_context?(context) do
+    if critical_action?(func_name) and in_handler_context?(context) do
       body_list = if is_list(body), do: body, else: [body]
 
       has_auth? = has_authentication_check?(body_list) or module_has_auth?(context)
 
-      if not has_auth? do
+      if has_auth? do
+        []
+      else
         [
           Analyzer.issue(
             analyzer: __MODULE__,
@@ -110,8 +112,6 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
             }
           )
         ]
-      else
-        []
       end
     else
       []
@@ -122,7 +122,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
   def analyze({:container, meta, body} = node, _context) when is_list(meta) do
     container_name = Keyword.get(meta, :name, "")
 
-    if is_controller_module?(container_name) do
+    if controller_module?(container_name) do
       body_list = if is_list(body), do: body, else: [body]
 
       has_module_auth? = has_module_level_auth?(body_list)
@@ -156,14 +156,14 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
 
   # ----- Private Helpers -----
 
-  defp is_critical_action?(func_name) when is_binary(func_name) do
+  defp critical_action?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
     Enum.any?(@critical_action_names, &String.contains?(func_lower, &1))
   end
 
-  defp is_critical_action?(_), do: false
+  defp critical_action?(_), do: false
 
-  defp is_controller_module?(name) when is_binary(name) do
+  defp controller_module?(name) when is_binary(name) do
     name_lower = String.downcase(name)
 
     String.contains?(name_lower, "controller") or
@@ -173,18 +173,18 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
       String.contains?(name_lower, "view")
   end
 
-  defp is_controller_module?(_), do: false
+  defp controller_module?(_), do: false
 
   defp in_handler_context?(context) do
     module_name = Map.get(context, :module_name, "")
-    is_controller_module?(module_name)
+    controller_module?(module_name)
   end
 
   defp module_has_auth?(context) do
     module_plugs = Map.get(context, :module_plugs, [])
     module_decorators = Map.get(context, :decorators, [])
 
-    Enum.any?(module_plugs ++ module_decorators, &is_auth_indicator?/1)
+    Enum.any?(module_plugs ++ module_decorators, &auth_indicator?/1)
   end
 
   defp has_authentication_check?(body) when is_list(body) do
@@ -195,7 +195,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_auth_indicator?(func_name)
+        auth_indicator?(func_name)
 
       {:conditional, _meta, [condition | _branches]} ->
         involves_auth?(condition)
@@ -217,7 +217,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
     end
   end
 
-  defp is_auth_indicator?(name) when is_binary(name) do
+  defp auth_indicator?(name) when is_binary(name) do
     name_lower = String.downcase(name)
 
     Enum.any?(@authentication_indicators, fn ind ->
@@ -225,7 +225,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
     end)
   end
 
-  defp is_auth_indicator?(_), do: false
+  defp auth_indicator?(_), do: false
 
   defp involves_auth?(node) do
     case node do
@@ -235,7 +235,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
 
       {:function_call, meta, _} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_auth_indicator?(func_name)
+        auth_indicator?(func_name)
 
       {:attribute_access, _meta, children} when is_list(children) ->
         Enum.any?(children, &involves_auth?/1)
@@ -256,7 +256,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
           String.contains?(func_lower, "plug") or
             String.contains?(func_lower, "before_action") or
             String.contains?(func_lower, "use") or
-            is_auth_indicator?(func_name)
+            auth_indicator?(func_name)
 
         _ ->
           false
@@ -269,7 +269,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthentication do
       case node do
         {:function_def, meta, _} when is_list(meta) ->
           func_name = Keyword.get(meta, :name, "")
-          is_critical_action?(func_name)
+          critical_action?(func_name)
 
         _ ->
           false

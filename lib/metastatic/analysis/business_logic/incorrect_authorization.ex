@@ -81,7 +81,7 @@ defmodule Metastatic.Analysis.BusinessLogic.IncorrectAuthorization do
 
   # Detect role-only checks without resource verification
   def analyze({:conditional, _meta, [condition | _branches]} = node, context) do
-    if is_role_only_check?(condition) and in_sensitive_context?(context) do
+    if role_only_check?(condition) and in_sensitive_context?(context) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
@@ -111,12 +111,12 @@ defmodule Metastatic.Analysis.BusinessLogic.IncorrectAuthorization do
                                                                             {issues, state} ->
         cond do
           # Sensitive operation seen
-          is_sensitive_operation?(stmt) and not state.auth_seen ->
+          sensitive_operation?(stmt) and not state.auth_seen ->
             # Operation before auth - might be a problem
             {issues, %{state | op_seen: true}}
 
           # Authorization check seen
-          is_authorization_check?(stmt) ->
+          authorization_check?(stmt) ->
             if state.op_seen do
               # Auth after operation - this is wrong!
               issue =
@@ -146,7 +146,7 @@ defmodule Metastatic.Analysis.BusinessLogic.IncorrectAuthorization do
     issues
   end
 
-  defp is_sensitive_operation?(node) do
+  defp sensitive_operation?(node) do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
@@ -154,14 +154,14 @@ defmodule Metastatic.Analysis.BusinessLogic.IncorrectAuthorization do
         Enum.any?(@sensitive_operations, &String.contains?(func_lower, &1))
 
       {:pipe, _meta, stages} when is_list(stages) ->
-        Enum.any?(stages, &is_sensitive_operation?/1)
+        Enum.any?(stages, &sensitive_operation?/1)
 
       _ ->
         false
     end
   end
 
-  defp is_authorization_check?(node) do
+  defp authorization_check?(node) do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
@@ -195,7 +195,7 @@ defmodule Metastatic.Analysis.BusinessLogic.IncorrectAuthorization do
     end
   end
 
-  defp is_role_only_check?(condition) do
+  defp role_only_check?(condition) do
     has_role_check?(condition) and not has_resource_check?(condition)
   end
 

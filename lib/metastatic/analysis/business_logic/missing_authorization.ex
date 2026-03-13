@@ -114,7 +114,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
   def analyze({:function_def, meta, body} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_sensitive_action?(func_name) do
+    if sensitive_action?(func_name) do
       body_list = if is_list(body), do: body, else: [body]
 
       has_auth? = has_authorization_check?(body_list, context)
@@ -148,7 +148,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
   def analyze({:function_call, meta, args} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_sensitive_function?(func_name) and
+    if sensitive_function?(func_name) and
          has_user_supplied_id?(args, context) and
          not in_authorization_context?(context) do
       [
@@ -174,14 +174,14 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
 
   # ----- Private Helpers -----
 
-  defp is_sensitive_action?(func_name) when is_binary(func_name) do
+  defp sensitive_action?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
     Enum.any?(@action_names, &String.contains?(func_lower, &1))
   end
 
-  defp is_sensitive_action?(_), do: false
+  defp sensitive_action?(_), do: false
 
-  defp is_sensitive_function?(func_name) when is_binary(func_name) do
+  defp sensitive_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@sensitive_operations, fn op ->
@@ -189,7 +189,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
     end)
   end
 
-  defp is_sensitive_function?(_), do: false
+  defp sensitive_function?(_), do: false
 
   defp has_authorization_check?(body, _context) when is_list(body) do
     Enum.any?(body, &contains_authorization?/1)
@@ -201,7 +201,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_auth_function?(func_name)
+        auth_function?(func_name)
 
       {:conditional, _meta, [condition | _branches]} ->
         contains_authorization?(condition)
@@ -238,7 +238,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
     end
   end
 
-  defp is_auth_function?(func_name) when is_binary(func_name) do
+  defp auth_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@authorization_indicators, fn ind ->
@@ -246,7 +246,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
     end)
   end
 
-  defp is_auth_function?(_), do: false
+  defp auth_function?(_), do: false
 
   defp involves_auth_variable?({:variable, _meta, name}) when is_binary(name) do
     name_lower = String.downcase(name)
@@ -274,7 +274,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingAuthorization do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_sensitive_function?(func_name)
+        sensitive_function?(func_name)
 
       {:pipe, _meta, stages} when is_list(stages) ->
         Enum.any?(stages, &contains_sensitive_operation?/1)

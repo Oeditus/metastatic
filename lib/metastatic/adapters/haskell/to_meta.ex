@@ -94,7 +94,9 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
            %{}}
 
         is_boolean_op?(op_atom) ->
-          {:ok, {:binary_op, [category: :boolean, operator: op_atom], [left_meta, right_meta]},
+          normalized = normalize_bool_op(op_atom)
+
+          {:ok, {:binary_op, [category: :boolean, operator: normalized], [left_meta, right_meta]},
            %{}}
 
         true ->
@@ -146,7 +148,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   def transform(%{"type" => "tuple", "elements" => elements}) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:list, [collection_type: :tuple], elements_meta}, %{collection_type: :tuple}}
+      {:ok, {:tuple, [], elements_meta}, %{}}
     end
   end
 
@@ -154,9 +156,8 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
 
   def transform(%{"type" => "case", "scrutinee" => scrutinee, "alternatives" => alts}) do
     with {:ok, scrutinee_meta, _} <- transform(scrutinee),
-         {:ok, branches_meta} <- transform_case_alts(alts) do
-      # No explicit else in Haskell case - last pattern is typically catch-all
-      {:ok, {:pattern_match, [], [scrutinee_meta, branches_meta, nil]}, %{}}
+         {:ok, arms} <- transform_case_alts(alts) do
+      {:ok, {:pattern_match, [], [scrutinee_meta | arms]}, %{}}
     end
   end
 
@@ -297,8 +298,8 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp extract_lambda_params(patterns) when is_list(patterns) do
     params =
       Enum.map(patterns, fn
-        %{"type" => "var_pat", "name" => name} -> name
-        _ -> "_"
+        %{"type" => "var_pat", "name" => name} -> {:param, [], name}
+        _ -> {:param, [], "_"}
       end)
 
     {:ok, params}
@@ -347,7 +348,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp transform_case_alt(%{"pattern" => pat, "rhs" => rhs}) do
     with {:ok, pat_meta} <- transform_pattern(pat),
          {:ok, rhs_meta, _} <- transform(rhs) do
-      {:ok, {:pair, [], [pat_meta, rhs_meta]}}
+      {:ok, {:match_arm, [pattern: pat_meta], [rhs_meta]}}
     end
   end
 
@@ -436,6 +437,11 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp normalize_op(op) when is_binary(op), do: String.to_atom(op)
   defp normalize_op(op) when is_atom(op), do: op
 
+  # Normalize boolean operator variants to canonical :and/:or
+  defp normalize_bool_op(:&&), do: :and
+  defp normalize_bool_op(:||), do: :or
+  defp normalize_bool_op(op), do: op
+
   defp is_arithmetic_op?(op) when is_atom(op) do
     op in [:+, :-, :*, :/, :div, :mod, :^, :**]
   end
@@ -488,8 +494,8 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp extract_match_params(patterns) when is_list(patterns) do
     params =
       Enum.map(patterns, fn
-        %{"type" => "var_pat", "name" => name} -> name
-        _ -> "_"
+        %{"type" => "var_pat", "name" => name} -> {:param, [], name}
+        _ -> {:param, [], "_"}
       end)
 
     {:ok, params}

@@ -47,6 +47,39 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Boolean operators
   @boolean_ops [:and, :or, :&&, :||]
 
+  # All MetaAST node types recognized during transformation.
+  # Referenced in: post_transform pass-through, 2-tuple guard, meta_ast_node?/1
+  @meta_ast_types [
+    :literal,
+    :variable,
+    :binary_op,
+    :unary_op,
+    :function_call,
+    :conditional,
+    :block,
+    :list,
+    :map,
+    :pair,
+    :tuple,
+    :inline_match,
+    :assignment,
+    :container,
+    :function_def,
+    :lambda,
+    :pattern_match,
+    :match_arm,
+    :early_return,
+    :attribute_access,
+    :language_specific,
+    :collection_op,
+    :loop,
+    :exception_handling,
+    :async_operation,
+    :property,
+    :augmented_assignment,
+    :import
+  ]
+
   @map {:__aliases__, [alias: false], [:Map]}
 
   @doc """
@@ -142,6 +175,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # before children get transformed. We store the original and return a marker.
   defp pre_transform({:try, _meta, [[{:do, _} | _] = _clauses]} = ast, ctx) do
     {{:__try_marker__, [], nil}, Map.put(ctx, :pending_try, ast)}
+  end
+
+  # Handle with expressions in pre_transform to preserve clause structure
+  # (especially `<-` operators) before children get transformed.
+  defp pre_transform({:with, _meta, _args} = ast, ctx) do
+    {{:__with_marker__, [], nil}, Map.put(ctx, :pending_with, ast)}
   end
 
   # Default: pass through
@@ -394,33 +433,34 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
+  # Handle __with_marker__ - retrieve original with expression and transform it
+  defp post_transform({:__with_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_with) do
+      {{:with, meta, args}, new_ctx} ->
+        result = transform_with(args, meta)
+        {result, new_ctx}
+
+      {nil, ctx} ->
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
+  # ----- Import Directives (import/use/require/alias) -----
+  # Must come BEFORE the general MetaAST pass-through since :import
+  # is both an Elixir AST atom and a MetaAST type.
+  defp post_transform({directive, meta, [module | _rest]}, ctx)
+       when directive in [:import, :use, :require, :alias] do
+    module_name = extract_module_name(module)
+
+    node_meta =
+      [source: module_name, import_type: directive, language: :elixir] ++ build_meta(meta)
+
+    {{:import, node_meta, []}, ctx}
+  end
+
   # Already transformed nodes - pass through
   defp post_transform({type, meta, _children} = ast, ctx)
-       when is_atom(type) and is_list(meta) and
-              type in [
-                :literal,
-                :variable,
-                :binary_op,
-                :unary_op,
-                :function_call,
-                :conditional,
-                :block,
-                :list,
-                :map,
-                :pair,
-                :tuple,
-                :inline_match,
-                :assignment,
-                :container,
-                :function_def,
-                :lambda,
-                :pattern_match,
-                :match_arm,
-                :early_return,
-                :attribute_access,
-                :language_specific,
-                :collection_op
-              ] do
+       when is_atom(type) and is_list(meta) and type in @meta_ast_types do
     {ast, ctx}
   end
 
@@ -514,9 +554,11 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {{:binary_op, node_meta, [left, right]}, ctx}
   end
 
-  # Boolean operators
+  # Boolean operators (normalize && -> :and, || -> :or for cross-language consistency)
   defp post_transform({op, meta, [left, right]}, ctx) when op in @boolean_ops do
-    node_meta = [category: :boolean, operator: op] ++ build_meta(meta)
+    normalized = normalize_bool_op(op)
+    original_meta = if normalized != op, do: [original_op: op], else: []
+    node_meta = [category: :boolean, operator: normalized] ++ original_meta ++ build_meta(meta)
     {{:binary_op, node_meta, [left, right]}, ctx}
   end
 
@@ -589,36 +631,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # 2-element tuple shorthand
   defp post_transform({left, right}, ctx)
-       when not is_atom(left) or
-              left not in [
-                :literal,
-                :variable,
-                :binary_op,
-                :unary_op,
-                :function_call,
-                :conditional,
-                :block,
-                :list,
-                :map,
-                :pair,
-                :tuple,
-                :inline_match,
-                :assignment,
-                :container,
-                :function_def,
-                :lambda,
-                :pattern_match,
-                :match_arm,
-                :early_return,
-                :attribute_access,
-                :language_specific,
-                :collection_op,
-                :loop,
-                :exception_handling,
-                :async_operation,
-                :property,
-                :augmented_assignment
-              ] do
+       when not is_atom(left) or left not in @meta_ast_types do
     {{:tuple, [], [ensure_meta_ast(left), ensure_meta_ast(right)]}, ctx}
   end
 
@@ -757,7 +770,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
                 :quote,
                 :unquote,
                 :@,
-                :&
+                :&,
+                :|>,
+                :import,
+                :use,
+                :require,
+                :alias
               ] do
     node_meta = [name: Atom.to_string(func)] ++ build_meta(meta)
     {{:function_call, node_meta, args}, ctx}
@@ -894,17 +912,29 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # ----- Pipe Operator -----
 
+  # Desugar a |> f(b) to f(a, b) — prepend left as first argument
   defp post_transform({:|>, meta, [left, right]}, ctx) do
-    node_meta = [language: :elixir, hint: :pipe] ++ build_meta(meta)
-    {{:language_specific, node_meta, {:|>, meta, [left, right]}}, ctx}
+    case right do
+      # x |> f(args...) → f(x, args...)
+      {:function_call, func_meta, args} ->
+        func_name = Keyword.get(func_meta, :name, "unknown")
+        node_meta = [name: func_name, pipe: true] ++ build_meta(meta)
+        {{:function_call, node_meta, [left | args]}, ctx}
+
+      # x |> f (no parens) — variable becomes zero-arity call: f(x)
+      {:variable, _var_meta, name} ->
+        node_meta = [name: name, pipe: true] ++ build_meta(meta)
+        {{:function_call, node_meta, [left]}, ctx}
+
+      # Can't desugar — keep as language_specific
+      _ ->
+        node_meta = [language: :elixir, hint: :pipe] ++ build_meta(meta)
+        {{:language_specific, node_meta, {:|>, meta, [left, right]}}, ctx}
+    end
   end
 
   # ----- With Expression -----
-
-  defp post_transform({:with, meta, _args} = ast, ctx) do
-    node_meta = [language: :elixir, hint: :with] ++ build_meta(meta)
-    {{:language_specific, node_meta, ast}, ctx}
-  end
+  # Note: with expressions are now handled via __with_marker__ in pre/post_transform.
 
   # ----- For Comprehension -----
 
@@ -974,9 +1004,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp extract_func_name(func) when is_atom(func), do: func
   defp extract_func_name(_), do: :unknown
 
-  # Build metadata keyword list from Elixir AST meta
+  # Build metadata keyword list from Elixir AST meta.
+  # Promotes :line and :column to top-level keys and strips them from
+  # original_meta to avoid duplication.
   defp build_meta(elixir_meta) when is_list(elixir_meta) do
-    base = [original_meta: elixir_meta]
+    stripped = Keyword.drop(elixir_meta, [:line, :column])
+    base = if stripped == [], do: [], else: [original_meta: stripped]
 
     base
     |> maybe_add(:line, Keyword.get(elixir_meta, :line))
@@ -990,36 +1023,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Check if a value is already a MetaAST node
   defp meta_ast_node?({type, meta, _children})
-       when is_atom(type) and is_list(meta) and
-              type in [
-                :literal,
-                :variable,
-                :binary_op,
-                :unary_op,
-                :function_call,
-                :conditional,
-                :block,
-                :list,
-                :map,
-                :pair,
-                :tuple,
-                :inline_match,
-                :assignment,
-                :container,
-                :function_def,
-                :lambda,
-                :pattern_match,
-                :match_arm,
-                :early_return,
-                :attribute_access,
-                :language_specific,
-                :collection_op,
-                :loop,
-                :exception_handling,
-                :async_operation,
-                :property,
-                :augmented_assignment
-              ] do
+       when is_atom(type) and is_list(meta) and type in @meta_ast_types do
     true
   end
 
@@ -1256,6 +1260,68 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   defp cond_to_nested_conditional(_), do: {:literal, [subtype: :null], nil}
+
+  # ----- With Expression transformation (called from pre_transform marker) -----
+
+  defp transform_with(args, meta) do
+    # Split: all but last are clauses, last is keyword opts [do: body, else: ...]
+    {clauses, [opts]} = Enum.split(args, -1)
+    body = Keyword.get(opts, :do)
+    else_clauses = Keyword.get(opts, :else, [])
+
+    # Transform each with clause to inline_match
+    inline_matches = Enum.map(clauses, &transform_with_clause/1)
+
+    # Transform body
+    {:ok, body_ast, _} = transform(body)
+
+    # Build statements: clauses + body
+    statements = inline_matches ++ flatten_body_ast(body_ast)
+
+    if else_clauses == [] do
+      # Simple with (no else): block of inline_matches + body
+      node_meta = [original_form: :with] ++ build_meta(meta)
+      {:block, node_meta, statements}
+    else
+      # With + else: append pattern_match for else clauses
+      else_arms =
+        Enum.map(else_clauses, fn {:->, clause_meta, [[pattern], clause_body]} ->
+          {:ok, pattern_ast, _} = transform(pattern)
+          {:ok, _clause_body_ast, _} = transform(clause_body)
+
+          {:match_arm, [pattern: pattern_ast] ++ build_meta(clause_meta),
+           flatten_body(clause_body)}
+        end)
+
+      # Placeholder scrutinee for the else pattern match
+      scrutinee = {:variable, [], "_with_result"}
+
+      else_node =
+        {:pattern_match, [original_form: :with_else] ++ build_meta(meta), [scrutinee | else_arms]}
+
+      node_meta = [original_form: :with] ++ build_meta(meta)
+      {:block, node_meta, statements ++ [else_node]}
+    end
+  end
+
+  defp transform_with_clause({:<-, clause_meta, [pattern, expr]}) do
+    {:ok, pattern_ast, _} = transform(pattern)
+    {:ok, expr_ast, _} = transform(expr)
+
+    {:inline_match, [original_form: :with_clause] ++ build_meta(clause_meta),
+     [pattern_ast, expr_ast]}
+  end
+
+  defp transform_with_clause({:=, clause_meta, [pattern, expr]}) do
+    {:ok, pattern_ast, _} = transform(pattern)
+    {:ok, expr_ast, _} = transform(expr)
+    {:inline_match, build_meta(clause_meta), [pattern_ast, expr_ast]}
+  end
+
+  defp transform_with_clause(other) do
+    {:ok, ast, _} = transform(other)
+    ast
+  end
 
   # Transform rescue/catch clauses
   defp transform_rescue_clauses(clauses) do

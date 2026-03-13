@@ -223,12 +223,10 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
         {:pattern_match, [],
          [
            {:variable, [], "value"},
-           [
-             {:pair, [],
-              [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}]},
-             {:pair, [],
-              [{:literal, [subtype: :integer], 2}, {:literal, [subtype: :string], "two"}]}
-           ]
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [{:literal, [subtype: :string], "one"}]},
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 2}],
+            [{:literal, [subtype: :string], "two"}]}
          ]}
 
       # Two branches, each +1 = 2
@@ -240,25 +238,17 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
         {:pattern_match, [],
          [
            {:variable, [], "outer"},
-           [
-             {:pair, [],
-              [
-                {:literal, [subtype: :integer], 1},
-                {:pattern_match, [],
-                 [
-                   {:variable, [], "inner"},
-                   [
-                     {:pair, [],
-                      [{:literal, [subtype: :integer], 10}, {:literal, [subtype: :string], "ten"}]},
-                     {:pair, [],
-                      [
-                        {:literal, [subtype: :integer], 20},
-                        {:literal, [subtype: :string], "twenty"}
-                      ]}
-                   ]
-                 ]}
-              ]}
-           ]
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [
+              {:pattern_match, [],
+               [
+                 {:variable, [], "inner"},
+                 {:match_arm, [pattern: {:literal, [subtype: :integer], 10}],
+                  [{:literal, [subtype: :string], "ten"}]},
+                 {:match_arm, [pattern: {:literal, [subtype: :integer], 20}],
+                  [{:literal, [subtype: :string], "twenty"}]}
+               ]}
+            ]}
          ]}
 
       # Outer branch: +1
@@ -325,7 +315,7 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
   describe "calculate/1 - lambdas and collections" do
     test "lambda increases nesting for body" do
       ast =
-        {:lambda, [params: ["x"], captures: []],
+        {:lambda, [params: [{:param, [], "x"}], captures: []],
          [
            {:conditional, [],
             [
@@ -343,7 +333,7 @@ defmodule Metastatic.Analysis.Complexity.CognitiveTest do
       ast =
         {:collection_op, [op_type: :map],
          [
-           {:lambda, [params: ["x"], captures: []],
+           {:lambda, [params: [{:param, [], "x"}], captures: []],
             [
               {:conditional, [],
                [

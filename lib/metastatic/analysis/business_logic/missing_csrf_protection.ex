@@ -80,12 +80,14 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingCSRFProtection do
   def analyze({:function_def, meta, body} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_state_changing_action?(func_name) and in_web_context?(context) do
+    if state_changing_action?(func_name) and in_web_context?(context) do
       body_list = if is_list(body), do: body, else: [body]
 
       has_csrf? = has_csrf_check?(body_list) or module_has_csrf?(context)
 
-      if not has_csrf? do
+      if has_csrf? do
+        []
+      else
         [
           Analyzer.issue(
             analyzer: __MODULE__,
@@ -100,8 +102,6 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingCSRFProtection do
             }
           )
         ]
-      else
-        []
       end
     else
       []
@@ -137,12 +137,12 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingCSRFProtection do
 
   # ----- Private Helpers -----
 
-  defp is_state_changing_action?(func_name) when is_binary(func_name) do
+  defp state_changing_action?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
     Enum.any?(@state_changing_actions, &String.contains?(func_lower, &1))
   end
 
-  defp is_state_changing_action?(_), do: false
+  defp state_changing_action?(_), do: false
 
   defp in_web_context?(context) do
     module_name = Map.get(context, :module_name, "")
@@ -158,7 +158,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingCSRFProtection do
     module_plugs = Map.get(context, :module_plugs, [])
     module_middleware = Map.get(context, :middleware, [])
 
-    Enum.any?(module_plugs ++ module_middleware, &is_csrf_indicator?/1)
+    Enum.any?(module_plugs ++ module_middleware, &csrf_indicator?/1)
   end
 
   defp has_csrf_check?(body) when is_list(body) do
@@ -169,7 +169,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingCSRFProtection do
     case node do
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_csrf_indicator?(func_name)
+        csrf_indicator?(func_name)
 
       {:block, _meta, statements} when is_list(statements) ->
         Enum.any?(statements, &contains_csrf_check?/1)
@@ -185,7 +185,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingCSRFProtection do
     end
   end
 
-  defp is_csrf_indicator?(name) when is_binary(name) do
+  defp csrf_indicator?(name) when is_binary(name) do
     name_lower = String.downcase(name)
 
     Enum.any?(@csrf_indicators, fn ind ->
@@ -193,7 +193,7 @@ defmodule Metastatic.Analysis.BusinessLogic.MissingCSRFProtection do
     end)
   end
 
-  defp is_csrf_indicator?(_), do: false
+  defp csrf_indicator?(_), do: false
 
   defp in_csrf_context?(context) do
     parent_stack = Map.get(context, :parent_stack, [])

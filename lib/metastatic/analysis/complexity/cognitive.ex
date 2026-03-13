@@ -151,22 +151,13 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   end
 
   # Pattern match (3-tuple): +1 +nesting_level per branch
-  defp walk({:pattern_match, _meta, [value, branches | _]}, nesting, acc) do
-    acc = walk(value, nesting, acc)
-    branches_list = if is_list(branches), do: branches, else: []
+  defp walk({:pattern_match, _meta, [scrutinee | arms]}, nesting, acc) when is_list(arms) do
+    acc = walk(scrutinee, nesting, acc)
 
-    Enum.reduce(branches_list, acc, fn
-      {:match_arm, _, [_pattern, _guard, body]}, a ->
+    Enum.reduce(arms, acc, fn
+      {:match_arm, _meta, body_list}, a ->
         a = a + 1 + nesting
-        walk(body, nesting + 1, a)
-
-      {:pair, _, [_pattern, branch]}, a ->
-        a = a + 1 + nesting
-        walk(branch, nesting + 1, a)
-
-      {_pattern, branch}, a ->
-        a = a + 1 + nesting
-        walk(branch, nesting + 1, a)
+        Enum.reduce(body_list, a, fn child, inner -> walk(child, nesting + 1, inner) end)
 
       other, a ->
         walk(other, nesting, a)
@@ -174,9 +165,8 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   end
 
   # Match arm (3-tuple)
-  defp walk({:match_arm, _meta, [_pattern, guard, body]}, nesting, acc) do
-    acc = if guard, do: walk(guard, nesting, acc), else: acc
-    walk(body, nesting + 1, acc)
+  defp walk({:match_arm, _meta, body_list}, nesting, acc) when is_list(body_list) do
+    Enum.reduce(body_list, acc, fn child, a -> walk(child, nesting + 1, a) end)
   end
 
   # Block (3-tuple): walk statements at same nesting level

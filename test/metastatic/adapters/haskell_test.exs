@@ -138,7 +138,8 @@ defmodule Metastatic.Adapters.HaskellTest do
         "right" => %{"type" => "var", "name" => "b"}
       }
 
-      assert {:ok, {:binary_op, [category: :boolean, operator: :&&], _children}, %{}} =
+      # && is normalized to :and at M2 level
+      assert {:ok, {:binary_op, [category: :boolean, operator: :and], _children}, %{}} =
                ToMeta.transform(ast)
     end
 
@@ -201,7 +202,9 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:lambda, [params: ["x"], captures: []], [body]}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:lambda, [params: [{:param, [], "x"}], captures: []], [body]}, %{}} =
+               ToMeta.transform(ast)
+
       assert {:binary_op, [category: :arithmetic, operator: :+], _children} = body
     end
 
@@ -220,7 +223,9 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:lambda, [params: ["x", "y"], captures: []], [body]}, %{}} =
+      assert {:ok,
+              {:lambda, [params: [{:param, [], "x"}, {:param, [], "y"}], captures: []], [body]},
+              %{}} =
                ToMeta.transform(ast)
 
       assert {:binary_op, [category: :arithmetic, operator: :+], _children} = body
@@ -317,11 +322,11 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      # Haskell tuples are represented as lists with collection_type: :tuple
-      assert {:ok, {:list, [collection_type: :tuple], elements}, %{collection_type: :tuple}} =
-               ToMeta.transform(ast)
+      # Haskell tuples use the proper :tuple M2 type
+      assert {:ok, {:tuple, [], elements}, %{}} = ToMeta.transform(ast)
 
-      assert [_, _] = elements
+      assert [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "hello"}] =
+               elements
     end
   end
 
@@ -351,10 +356,10 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      # Haskell case produces [scrutinee, branches, nil] (nil = no else)
-      assert {:ok, {:pattern_match, [], [scrutinee, branches, nil]}, %{}} = ToMeta.transform(ast)
+      # Haskell case produces [scrutinee | match_arm_nodes]
+      assert {:ok, {:pattern_match, [], [scrutinee | arms]}, %{}} = ToMeta.transform(ast)
       assert {:variable, [], "x"} = scrutinee
-      assert [_, _] = branches
+      assert [{:match_arm, _, _}, {:match_arm, _, _}] = arms
     end
   end
 
@@ -430,7 +435,7 @@ defmodule Metastatic.Adapters.HaskellTest do
     test "parses and transforms lambda" do
       {:ok, ast} = Haskell.parse("\\x -> x + 1")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:lambda, [params: ["x"], captures: []], _body} = meta_ast
+      assert {:lambda, [params: [{:param, [], "x"}], captures: []], _body} = meta_ast
     end
   end
 
@@ -461,13 +466,32 @@ defmodule Metastatic.Adapters.HaskellTest do
     end
 
     test "transforms tuples" do
-      # Haskell tuples are represented as lists with collection_type: :tuple
+      # Tuples use the proper :tuple M2 type
       meta_ast =
-        {:list, [collection_type: :tuple],
+        {:tuple, [],
          [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "hello"}]}
 
-      assert {:ok, ast} = FromMeta.transform(meta_ast, %{collection_type: :tuple})
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
       assert ast["type"] == "tuple"
+      assert [_, _] = ast["elements"]
+    end
+
+    test "transforms tuples round-trip" do
+      # Haskell AST -> MetaAST -> Haskell AST
+      haskell_ast = %{
+        "type" => "tuple",
+        "elements" => [
+          %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 1}},
+          %{"type" => "literal", "value" => %{"literalType" => "string", "value" => "hi"}}
+        ]
+      }
+
+      {:ok, meta_ast, metadata} = ToMeta.transform(haskell_ast)
+      assert {:tuple, [], [_, _]} = meta_ast
+
+      {:ok, back} = FromMeta.transform(meta_ast, metadata)
+      assert back["type"] == "tuple"
+      assert [_, _] = back["elements"]
     end
 
     test "transforms let bindings" do
@@ -485,17 +509,14 @@ defmodule Metastatic.Adapters.HaskellTest do
     end
 
     test "transforms case expressions" do
-      # Haskell case has [scrutinee, branches, nil] format with {:pair, [], [pattern, body]} branches
+      # Standard format: [scrutinee | match_arm_nodes]
       meta_ast =
         {:pattern_match, [],
          [
            {:variable, [], "x"},
-           [
-             {:pair, [],
-              [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}]},
-             {:pair, [], [:_, {:literal, [subtype: :string], "other"}]}
-           ],
-           nil
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [{:literal, [subtype: :string], "one"}]},
+           {:match_arm, [pattern: :_], [{:literal, [subtype: :string], "other"}]}
          ]}
 
       assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
@@ -623,10 +644,69 @@ defmodule Metastatic.Adapters.HaskellTest do
               {:assignment, [],
                [
                  {:variable, [], "factorial"},
-                 {:lambda, [params: ["n"], captures: []], [{:variable, [], "n"}]}
+                 {:lambda, [params: [{:param, [], "n"}], captures: []], [{:variable, [], "n"}]}
                ]}, %{construct: :function_binding}} = ToMeta.transform(ast)
     end
+  end
 
+  describe "to_meta/1 enrichment" do
+    test "enriches function calls through Enricher pipeline" do
+      ast = %{
+        "type" => "app",
+        "function" => %{"type" => "var", "name" => "f"},
+        "argument" => %{"type" => "var", "name" => "x"}
+      }
+
+      {:ok, meta_ast, _metadata} = Haskell.to_meta(ast)
+
+      # Should produce a function_call (enricher traverses without error)
+      assert {:function_call, meta, [_]} = meta_ast
+      assert Keyword.get(meta, :name) == "f"
+    end
+
+    test "enrichment does not alter non-matching nodes" do
+      ast = %{
+        "type" => "literal",
+        "value" => %{"literalType" => "int", "value" => 42}
+      }
+
+      {:ok, meta_ast, _metadata} = Haskell.to_meta(ast)
+
+      # Literal should pass through enricher unchanged
+      assert {:literal, [subtype: :integer], 42} = meta_ast
+    end
+
+    test "enriches nested structures" do
+      # if cond then f(x) else g(y)
+      ast = %{
+        "type" => "if",
+        "condition" => %{"type" => "var", "name" => "cond"},
+        "then" => %{
+          "type" => "app",
+          "function" => %{"type" => "var", "name" => "f"},
+          "argument" => %{"type" => "var", "name" => "x"}
+        },
+        "else" => %{
+          "type" => "app",
+          "function" => %{"type" => "var", "name" => "g"},
+          "argument" => %{"type" => "var", "name" => "y"}
+        }
+      }
+
+      {:ok, meta_ast, _metadata} = Haskell.to_meta(ast)
+
+      assert {:conditional, [], [_cond, then_branch, else_branch]} = meta_ast
+      assert {:function_call, _, _} = then_branch
+      assert {:function_call, _, _} = else_branch
+    end
+
+    test "propagates errors from ToMeta through enrichment" do
+      result = Haskell.to_meta(%{"type" => "unsupported_xyzzy"})
+      assert {:error, _} = result
+    end
+  end
+
+  describe "M2.3 Native Layer" do
     test "transforms module with declarations" do
       ast = %{
         "type" => "module",

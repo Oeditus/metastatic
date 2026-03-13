@@ -787,7 +787,7 @@ defmodule Metastatic.Adapters.PythonTest do
       }
 
       assert {:ok, {:lambda, meta, [body]}, %{}} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :params) == ["x"]
+      assert Keyword.get(meta, :params) == [{:param, [], "x"}]
       assert {:binary_op, [category: :arithmetic, operator: :*], _} = body
     end
 
@@ -804,7 +804,7 @@ defmodule Metastatic.Adapters.PythonTest do
       }
 
       assert {:ok, {:lambda, meta, [body]}, %{}} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :params) == ["x", "y"]
+      assert Keyword.get(meta, :params) == [{:param, [], "x"}, {:param, [], "y"}]
       assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
     end
   end
@@ -836,7 +836,7 @@ defmodule Metastatic.Adapters.PythonTest do
 
       # Lambda in 3-tuple format
       assert {:lambda, lambda_meta, [body]} = lambda
-      assert Keyword.get(lambda_meta, :params) == ["x"]
+      assert Keyword.get(lambda_meta, :params) == [{:param, [], "x"}]
       assert {:binary_op, body_meta, _} = body
       assert Keyword.get(body_meta, :category) == :arithmetic
       assert Keyword.get(body_meta, :operator) == :*
@@ -930,7 +930,7 @@ defmodule Metastatic.Adapters.PythonTest do
   describe "FromMeta - Extended Layer: Lambdas" do
     test "transforms lambda back" do
       meta_ast =
-        {:lambda, [params: ["x"], captures: []],
+        {:lambda, [params: [{:param, [], "x"}], captures: []],
          [
            {:binary_op, [category: :arithmetic, operator: :*],
             [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]}
@@ -942,7 +942,7 @@ defmodule Metastatic.Adapters.PythonTest do
 
     test "transforms lambda with multiple parameters back" do
       meta_ast =
-        {:lambda, [params: ["x", "y"], captures: []],
+        {:lambda, [params: [{:param, [], "x"}, {:param, [], "y"}], captures: []],
          [
            {:binary_op, [category: :arithmetic, operator: :+],
             [{:variable, [], "x"}, {:variable, [], "y"}]}
@@ -961,7 +961,7 @@ defmodule Metastatic.Adapters.PythonTest do
       meta_ast =
         {:collection_op, [op_type: :map],
          [
-           {:lambda, [params: ["x"], captures: []],
+           {:lambda, [params: [{:param, [], "x"}], captures: []],
             [
               {:binary_op, [category: :arithmetic, operator: :*],
                [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]}
@@ -977,7 +977,7 @@ defmodule Metastatic.Adapters.PythonTest do
       meta_ast =
         {:collection_op, [op_type: :filter],
          [
-           {:lambda, [params: ["x"], captures: []], [{:variable, [], "x"}]},
+           {:lambda, [params: [{:param, [], "x"}], captures: []], [{:variable, [], "x"}]},
            {:variable, [], "items"}
          ]}
 
@@ -989,7 +989,7 @@ defmodule Metastatic.Adapters.PythonTest do
       meta_ast =
         {:collection_op, [op_type: :reduce],
          [
-           {:lambda, [params: ["acc", "x"], captures: []],
+           {:lambda, [params: [{:param, [], "acc"}, {:param, [], "x"}], captures: []],
             [
               {:binary_op, [category: :arithmetic, operator: :+],
                [{:variable, [], "acc"}, {:variable, [], "x"}]}
@@ -1063,7 +1063,7 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
       # 3-tuple format
       assert {:lambda, meta, [_body]} = meta_ast
-      assert Keyword.get(meta, :params) == ["x"]
+      assert Keyword.get(meta, :params) == [{:param, [], "x"}]
 
       assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
       assert {:ok, result} = Python.unparse(ast2)
@@ -1124,7 +1124,7 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:language_specific, meta, node} = meta_ast
       assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :class
+      assert Keyword.get(meta, :hint) == :class_with_decorators
       assert node["_type"] == "ClassDef"
       assert node["name"] == "Point"
       assert [%{"_type" => "Name", "id" => "dataclass"}] = node["decorator_list"]
@@ -1181,31 +1181,175 @@ defmodule Metastatic.Adapters.PythonTest do
     end
   end
 
-  describe "ToMeta - Native Layer: Classes" do
-    test "preserves class definition as language_specific" do
+  describe "ToMeta - M2.2s Structural Layer: Classes" do
+    test "transforms class definition to container" do
       source = "class MyClass:\n    def method(self):\n        pass"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:language_specific, meta, node} = meta_ast
+      assert {:container, meta, body} = meta_ast
+      assert Keyword.get(meta, :container_type) == :class
+      assert Keyword.get(meta, :name) == "MyClass"
       assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :class
-      assert node["_type"] == "ClassDef"
-      assert node["name"] == "MyClass"
+
+      # Body contains the method as function_def
+      assert [method] = body
+      assert {:function_def, method_meta, _} = method
+      assert Keyword.get(method_meta, :name) == "method"
+      assert [{:param, [], "self"}] = Keyword.get(method_meta, :params)
     end
 
-    test "preserves class with inheritance as language_specific" do
+    test "transforms class with inheritance to container with bases" do
       source = "class Child(Parent):\n    pass"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:language_specific, meta, node} = meta_ast
+      assert {:container, meta, _body} = meta_ast
+      assert Keyword.get(meta, :container_type) == :class
+      assert Keyword.get(meta, :name) == "Child"
+      assert Keyword.get(meta, :bases) == ["Parent"]
+    end
+
+    test "transforms class with multiple inheritance" do
+      source = "class MyClass(Base1, Base2):\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:container, meta, _body} = meta_ast
+      assert Keyword.get(meta, :container_type) == :class
+      assert Keyword.get(meta, :bases) == ["Base1", "Base2"]
+    end
+
+    test "class without bases has no bases key" do
+      source = "class Simple:\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:container, meta, _body} = meta_ast
+      assert Keyword.get(meta, :bases) == nil
+    end
+  end
+
+  describe "ToMeta - M2.2s Structural Layer: Functions" do
+    test "transforms simple function to function_def" do
+      source = "def greet(name):\n    return name"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:function_def, meta, body} = meta_ast
+      assert Keyword.get(meta, :name) == "greet"
+      assert Keyword.get(meta, :visibility) == :public
+      assert Keyword.get(meta, :arity) == 1
       assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :class
-      assert node["_type"] == "ClassDef"
-      assert [%{"_type" => "Name", "id" => "Parent"}] = node["bases"]
+      assert [{:param, [], "name"}] = Keyword.get(meta, :params)
+      assert [_return_stmt] = body
+    end
+
+    test "transforms function with multiple params" do
+      source = "def add(x, y):\n    return x + y"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:function_def, meta, _body} = meta_ast
+      assert Keyword.get(meta, :name) == "add"
+      assert Keyword.get(meta, :arity) == 2
+      assert [{:param, [], "x"}, {:param, [], "y"}] = Keyword.get(meta, :params)
+    end
+
+    test "transforms function with *args and **kwargs" do
+      source = "def variadic(a, *args, **kwargs):\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:function_def, meta, _body} = meta_ast
+      assert Keyword.get(meta, :name) == "variadic"
+
+      params = Keyword.get(meta, :params)
+
+      assert [
+               {:param, [], "a"},
+               {:param, [splat: :args], "*args"},
+               {:param, [splat: :kwargs], "**kwargs"}
+             ] = params
+    end
+
+    test "transforms function with no params" do
+      source = "def noop():\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:function_def, meta, _body} = meta_ast
+      assert Keyword.get(meta, :name) == "noop"
+      assert Keyword.get(meta, :arity) == 0
+      assert Keyword.get(meta, :params) == []
+    end
+
+    test "preserves line info in function_def" do
+      source = "def foo():\n    return 1"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:function_def, meta, _} = meta_ast
+      assert Keyword.get(meta, :line) == 1
+    end
+  end
+
+  describe "round-trip transformations - M2.2s Structural Layer" do
+    test "round-trips simple function definition" do
+      source = "def greet(name):\n    return name"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:function_def, _, _} = meta_ast
+
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert ast2["_type"] == "FunctionDef"
+      assert ast2["name"] == "greet"
+      assert [%{"arg" => "name"}] = ast2["args"]["args"]
+    end
+
+    test "round-trips class definition" do
+      source = "class MyClass:\n    def method(self):\n        pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:container, _, _} = meta_ast
+
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert ast2["_type"] == "ClassDef"
+      assert ast2["name"] == "MyClass"
+    end
+
+    test "round-trips class with inheritance" do
+      source = "class Child(Parent):\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert ast2["_type"] == "ClassDef"
+      assert [%{"_type" => "Name", "id" => "Parent"}] = ast2["bases"]
+    end
+
+    test "round-trips function with *args and **kwargs" do
+      source = "def f(a, *args, **kwargs):\n    pass"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert ast2["_type"] == "FunctionDef"
+      assert ast2["args"]["vararg"]["arg"] == "args"
+      assert ast2["args"]["kwarg"]["arg"] == "kwargs"
     end
   end
 
@@ -1248,32 +1392,114 @@ defmodule Metastatic.Adapters.PythonTest do
     end
   end
 
-  describe "ToMeta - Native Layer: Imports" do
-    test "preserves import statement as language_specific" do
+  describe "ToMeta - Structural Layer: Imports" do
+    test "transforms import statement to :import node" do
       source = "import os"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:language_specific, meta, node} = meta_ast
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "os"
+      assert Keyword.get(meta, :import_type) == :module
       assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :import
-      assert node["_type"] == "Import"
-      assert [%{"name" => "os"}] = node["names"]
     end
 
-    test "preserves from import statement as language_specific" do
+    test "transforms from import statement to :import node with names" do
       source = "from os import path"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:language_specific, meta, node} = meta_ast
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "os"
+      assert Keyword.get(meta, :names) == ["path"]
+      assert Keyword.get(meta, :import_type) == :from
       assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :import_from
-      assert node["_type"] == "ImportFrom"
-      assert node["module"] == "os"
-      assert [%{"name" => "path"}] = node["names"]
+    end
+
+    test "transforms from import with multiple names" do
+      source = "from typing import List, Dict"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "typing"
+      assert Keyword.get(meta, :names) == ["List", "Dict"]
+      assert Keyword.get(meta, :import_type) == :from
+    end
+
+    test "transforms import with alias" do
+      source = "import numpy as np"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == "numpy"
+      assert Keyword.get(meta, :alias) == "np"
+      assert Keyword.get(meta, :import_type) == :module
+    end
+
+    test "transforms multi-module import to block of imports" do
+      source = "import os, sys"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:block, [], [import1, import2]} = meta_ast
+      assert {:import, meta1, []} = import1
+      assert Keyword.get(meta1, :source) == "os"
+      assert {:import, meta2, []} = import2
+      assert Keyword.get(meta2, :source) == "sys"
+    end
+
+    test "transforms relative import with level" do
+      source = "from . import utils"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
+
+      assert {:import, meta, []} = meta_ast
+      assert Keyword.get(meta, :source) == ""
+      assert Keyword.get(meta, :names) == ["utils"]
+      assert Keyword.get(meta, :relative_level) == 1
+    end
+
+    test "import node conforms to M2" do
+      import_node = {:import, [source: "os", import_type: :module, language: :python], []}
+      assert Metastatic.AST.conforms?(import_node)
+    end
+
+    test "import node with names conforms to M2" do
+      import_node =
+        {:import, [source: "os.path", names: ["join", "exists"], import_type: :from], []}
+
+      assert Metastatic.AST.conforms?(import_node)
+    end
+
+    test "round-trips simple import" do
+      source = "import os"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:ok, py_ast} = Python.from_meta(meta_ast, metadata)
+
+      assert py_ast["_type"] == "Import"
+      assert [%{"name" => "os"}] = py_ast["names"]
+    end
+
+    test "round-trips from import" do
+      source = "from os import path"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:ok, py_ast} = Python.from_meta(meta_ast, metadata)
+
+      assert py_ast["_type"] == "ImportFrom"
+      assert py_ast["module"] == "os"
+      assert [%{"name" => "path"}] = py_ast["names"]
     end
   end
 
@@ -1863,7 +2089,7 @@ defmodule Metastatic.Adapters.PythonTest do
              end)
     end
 
-    test "parses classes fixture as language_specific" do
+    test "parses classes fixture as container nodes" do
       fixture_path = Path.join([__DIR__, "../../fixtures/python/native/classes.py"])
       {:ok, source} = File.read(fixture_path)
 
@@ -1872,9 +2098,10 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:block, [], statements} = meta_ast
 
+      # Classes are now M2.2s container nodes, not language_specific
       assert Enum.any?(statements, fn
-               {:language_specific, meta, _} when is_list(meta) ->
-                 Keyword.get(meta, :language) == :python and Keyword.get(meta, :hint) == :class
+               {:container, meta, _} when is_list(meta) ->
+                 Keyword.get(meta, :container_type) == :class
 
                _ ->
                  false
@@ -1899,7 +2126,7 @@ defmodule Metastatic.Adapters.PythonTest do
              end)
     end
 
-    test "parses imports fixture as language_specific" do
+    test "parses imports fixture as :import nodes" do
       fixture_path = Path.join([__DIR__, "../../fixtures/python/native/imports.py"])
       {:ok, source} = File.read(fixture_path)
 
@@ -1908,8 +2135,9 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:block, [], statements} = meta_ast
 
+      # Imports are now M2.2s :import nodes, not language_specific
       assert Enum.any?(statements, fn
-               {:language_specific, meta, _} when is_list(meta) ->
+               {:import, meta, []} when is_list(meta) ->
                  Keyword.get(meta, :language) == :python
 
                _ ->

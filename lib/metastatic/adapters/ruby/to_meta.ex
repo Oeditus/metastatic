@@ -933,9 +933,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp extract_lambda_params(%{"type" => "args", "children" => args}) do
     params =
       Enum.map(args, fn
-        %{"type" => "arg", "children" => [name]} when is_binary(name) -> name
-        %{"type" => "arg", "children" => [name]} when is_atom(name) -> Atom.to_string(name)
-        _ -> nil
+        %{"type" => "arg", "children" => [name]} when is_binary(name) ->
+          {:param, [], name}
+
+        %{"type" => "arg", "children" => [name]} when is_atom(name) ->
+          {:param, [], Atom.to_string(name)}
+
+        _ ->
+          nil
       end)
       |> Enum.reject(&is_nil/1)
 
@@ -1228,9 +1233,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp extract_method_params(%{"type" => "args", "children" => args}) do
     params =
       Enum.map(args, fn
-        %{"type" => "arg", "children" => [name]} when is_binary(name) -> name
-        %{"type" => "arg", "children" => [name]} when is_atom(name) -> Atom.to_string(name)
-        _ -> nil
+        %{"type" => "arg", "children" => [name]} when is_binary(name) ->
+          {:param, [], name}
+
+        %{"type" => "arg", "children" => [name]} when is_atom(name) ->
+          {:param, [], Atom.to_string(name)}
+
+        _ ->
+          nil
       end)
       |> Enum.reject(&is_nil/1)
 

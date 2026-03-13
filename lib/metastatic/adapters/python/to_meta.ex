@@ -398,7 +398,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
          {:ok, elt_meta, _} <- transform(elt) do
       # Convert to: {:collection_op, [op_type: :map], [lambda, collection]}
       param_name = extract_variable_name(target_meta)
-      lambda = {:lambda, [params: [param_name], captures: []], [elt_meta]}
+      lambda = {:lambda, [params: [{:param, [], param_name}], captures: []], [elt_meta]}
       {:ok, {:collection_op, [op_type: :map], [lambda, iter_meta]}, %{}}
     end
   end
@@ -426,29 +426,49 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Native Layer - M2.3: Python-Specific Constructs
 
-  # Function definitions with decorators
+  # Function definitions with decorators - keep as language_specific
   def transform(%{"_type" => "FunctionDef", "decorator_list" => [_ | _] = _decorators} = node) do
     {:ok, {:language_specific, [language: :python, hint: :function_with_decorators], node}, %{}}
   end
 
-  # Generator functions (FunctionDef containing Yield/YieldFrom)
+  # Generator functions (FunctionDef containing Yield/YieldFrom) - keep as language_specific
   def transform(%{"_type" => "FunctionDef", "body" => body} = node) do
     if contains_yield?(body) do
       {:ok, {:language_specific, [language: :python, hint: :function_with_generator], node}, %{}}
     else
-      # Regular function - not implemented yet, falls through to catch-all
-      {:error, "Unsupported Python AST construct: #{inspect(node)}"}
+      transform_function_def(node)
     end
   end
 
-  # Async function definitions
+  # Async function definitions - keep as language_specific
   def transform(%{"_type" => "AsyncFunctionDef"} = node) do
     {:ok, {:language_specific, [language: :python, hint: :async_function], node}, %{}}
   end
 
-  # Class definitions
-  def transform(%{"_type" => "ClassDef"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :class], node}, %{}}
+  # Class definitions with decorators - keep as language_specific
+  def transform(%{"_type" => "ClassDef", "decorator_list" => [_ | _]} = node) do
+    {:ok, {:language_specific, [language: :python, hint: :class_with_decorators], node}, %{}}
+  end
+
+  # Class definitions - transform to M2.2s :container
+  def transform(%{"_type" => "ClassDef", "name" => name, "body" => body} = node) do
+    with {:ok, body_stmts} <- transform_list(body) do
+      bases = Map.get(node, "bases", [])
+
+      base_names =
+        Enum.map(bases, fn
+          %{"_type" => "Name", "id" => id} -> id
+          %{"_type" => "Attribute"} = attr -> format_attribute_name(attr)
+          _ -> "unknown"
+        end)
+
+      meta =
+        [container_type: :class, name: name, module: name, language: :python] ++
+          if(base_names != [], do: [bases: base_names], else: []) ++
+          location_meta(node)
+
+      {:ok, {:container, meta, body_stmts}, %{}}
+    end
   end
 
   # Context managers (with statement)
@@ -481,14 +501,53 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:ok, {:language_specific, [language: :python, hint: :async_for], node}, %{}}
   end
 
-  # Import statements
-  def transform(%{"_type" => "Import"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :import], node}, %{}}
+  # Import statements - M2.2s Structural Layer
+  def transform(%{"_type" => "Import", "names" => names} = node) do
+    case names do
+      [%{"name" => name} = alias_node] ->
+        asname = Map.get(alias_node, "asname")
+
+        meta =
+          [source: name, import_type: :module, language: :python] ++
+            if(asname, do: [alias: asname], else: []) ++
+            location_meta(node)
+
+        {:ok, {:import, meta, []}, %{}}
+
+      aliases when is_list(aliases) ->
+        import_nodes =
+          Enum.map(aliases, fn %{"name" => name} = alias_entry ->
+            asname = Map.get(alias_entry, "asname")
+
+            meta =
+              [source: name, import_type: :module, language: :python] ++
+                if(asname, do: [alias: asname], else: []) ++
+                location_meta(node)
+
+            {:import, meta, []}
+          end)
+
+        {:ok, {:block, [], import_nodes}, %{}}
+    end
   end
 
-  # Import from statements
-  def transform(%{"_type" => "ImportFrom"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :import_from], node}, %{}}
+  # Import from statements - M2.2s Structural Layer
+  def transform(%{"_type" => "ImportFrom", "module" => module, "names" => names} = node) do
+    imported_names =
+      Enum.map(names, fn
+        %{"name" => name} -> name
+        name when is_binary(name) -> name
+      end)
+
+    source = module || ""
+    level = Map.get(node, "level", 0)
+
+    meta =
+      [source: source, names: imported_names, import_type: :from, language: :python] ++
+        if(level > 0, do: [relative_level: level], else: []) ++
+        location_meta(node)
+
+    {:ok, {:import, meta, []}, %{}}
   end
 
   # Dict comprehensions
@@ -543,6 +602,14 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Pass statement
   def transform(%{"_type" => "Pass"} = node) do
     {:ok, {:language_specific, [language: :python, hint: :pass], node}, %{}}
+  end
+
+  # Attribute access (obj.attr) - M2.2s Structural Layer
+  def transform(%{"_type" => "Attribute", "value" => value, "attr" => attr} = node) do
+    with {:ok, receiver_meta, _} <- transform(value) do
+      ast = {:attribute_access, [attribute: attr] ++ location_meta(node), [receiver_meta]}
+      {:ok, ast, %{}}
+    end
   end
 
   # Catch-all for unsupported constructs
@@ -620,6 +687,94 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp transform_unary_op(%{"_type" => "UAdd"}), do: {:ok, {:arithmetic, :+}}
   defp transform_unary_op(op), do: {:error, "Unsupported unary operator: #{inspect(op)}"}
 
+  # Transform regular FunctionDef to {:function_def, meta, body}
+  defp transform_function_def(
+         %{"_type" => "FunctionDef", "name" => name, "body" => body, "args" => args} = node
+       ) do
+    with {:ok, params} <- extract_function_params(args),
+         {:ok, body_stmts} <- transform_list(body) do
+      meta =
+        [
+          name: name,
+          params: params,
+          visibility: :public,
+          arity: length(params),
+          function: name,
+          language: :python
+        ] ++ location_meta(node)
+
+      # Add return annotation hint if present
+      meta =
+        case Map.get(node, "returns") do
+          nil -> meta
+          _ -> Keyword.put(meta, :has_return_type, true)
+        end
+
+      {:ok, {:function_def, meta, body_stmts}, %{}}
+    end
+  end
+
+  # Extract function parameters from Python args structure
+  defp extract_function_params(%{"args" => args} = args_node) do
+    positional =
+      Enum.map(args, fn
+        %{"arg" => arg_name, "annotation" => annotation} ->
+          default_meta = if annotation, do: [has_type: true], else: []
+          {:param, default_meta, arg_name}
+
+        %{"arg" => arg_name} ->
+          {:param, [], arg_name}
+
+        _ ->
+          {:param, [], "_"}
+      end)
+
+    # Handle *args and **kwargs
+    vararg =
+      case Map.get(args_node, "vararg") do
+        %{"arg" => arg_name} -> [{:param, [splat: :args], "*#{arg_name}"}]
+        _ -> []
+      end
+
+    kwarg =
+      case Map.get(args_node, "kwarg") do
+        %{"arg" => arg_name} -> [{:param, [splat: :kwargs], "**#{arg_name}"}]
+        _ -> []
+      end
+
+    {:ok, positional ++ vararg ++ kwarg}
+  end
+
+  defp extract_function_params(_), do: {:ok, []}
+
+  # Build location metadata from Python AST node
+  defp location_meta(%{"lineno" => line} = node) do
+    loc = [line: line]
+    loc = if Map.has_key?(node, "col_offset"), do: [{:col, node["col_offset"]} | loc], else: loc
+
+    loc =
+      if Map.has_key?(node, "end_lineno"),
+        do: [{:end_line, node["end_lineno"]} | loc],
+        else: loc
+
+    loc =
+      if Map.has_key?(node, "end_col_offset"),
+        do: [{:end_col, node["end_col_offset"]} | loc],
+        else: loc
+
+    loc
+  end
+
+  defp location_meta(_), do: []
+
+  # Format nested Attribute name (e.g. module.submodule)
+  defp format_attribute_name(%{"_type" => "Attribute", "value" => value, "attr" => attr}) do
+    "#{format_attribute_name(value)}.#{attr}"
+  end
+
+  defp format_attribute_name(%{"_type" => "Name", "id" => name}), do: name
+  defp format_attribute_name(_), do: "unknown"
+
   # Check if body contains Yield or YieldFrom expressions
   defp contains_yield?(body) when is_list(body) do
     Enum.any?(body, &contains_yield_node?/1)
@@ -659,9 +814,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp extract_lambda_params(%{"args" => args}) when is_list(args) do
     params =
       Enum.map(args, fn
-        %{"arg" => name} -> name
-        %{"id" => name} -> name
-        _ -> "_"
+        %{"arg" => name} -> {:param, [], name}
+        %{"id" => name} -> {:param, [], name}
+        _ -> {:param, [], "_"}
       end)
 
     {:ok, params}

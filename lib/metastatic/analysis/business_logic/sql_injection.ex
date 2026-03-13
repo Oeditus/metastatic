@@ -114,7 +114,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SQLInjection do
   def analyze({:function_call, meta, args} = node, _context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_query_function?(func_name) and has_unsafe_sql_argument?(args) do
+    if query_function?(func_name) and has_unsafe_sql_argument?(args) do
       [
         Analyzer.issue(
           analyzer: __MODULE__,
@@ -170,8 +170,8 @@ defmodule Metastatic.Analysis.BusinessLogic.SQLInjection do
   defp check_sql_concatenation(node, left, right, _context) do
     left_sql? = contains_sql_literal?(left)
     right_sql? = contains_sql_literal?(right)
-    left_var? = is_variable_or_call?(left)
-    right_var? = is_variable_or_call?(right)
+    left_var? = variable_or_call?(left)
+    right_var? = variable_or_call?(right)
 
     cond do
       left_sql? and right_var? ->
@@ -214,12 +214,12 @@ defmodule Metastatic.Analysis.BusinessLogic.SQLInjection do
     Enum.any?(@sql_keywords, &String.contains?(upper, &1))
   end
 
-  defp is_variable_or_call?({:variable, _meta, _name}), do: true
-  defp is_variable_or_call?({:function_call, _meta, _args}), do: true
-  defp is_variable_or_call?({:attribute_access, _meta, _children}), do: true
-  defp is_variable_or_call?(_), do: false
+  defp variable_or_call?({:variable, _meta, _name}), do: true
+  defp variable_or_call?({:function_call, _meta, _args}), do: true
+  defp variable_or_call?({:attribute_access, _meta, _children}), do: true
+  defp variable_or_call?(_), do: false
 
-  defp is_query_function?(func_name) when is_binary(func_name) do
+  defp query_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@query_functions, fn pattern ->
@@ -227,7 +227,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SQLInjection do
     end)
   end
 
-  defp is_query_function?(_), do: false
+  defp query_function?(_), do: false
 
   defp has_unsafe_sql_argument?(args) when is_list(args) do
     Enum.any?(args, fn arg ->
@@ -274,7 +274,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SQLInjection do
       case parent do
         {:function_call, meta, _} when is_list(meta) ->
           func_name = Keyword.get(meta, :name, "")
-          is_query_function?(func_name)
+          query_function?(func_name)
 
         _ ->
           false

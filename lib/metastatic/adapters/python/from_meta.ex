@@ -320,6 +320,112 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
+  # Function Definitions - M2.2s Structural Layer (New 3-tuple format)
+  def transform({:function_def, meta, body}, metadata) when is_list(meta) do
+    name = Keyword.get(meta, :name, "_")
+    params = Keyword.get(meta, :params, [])
+
+    with {:ok, body_py} <- transform_list(body, metadata) do
+      args_node = build_function_args(params)
+
+      {:ok,
+       %{
+         "_type" => "FunctionDef",
+         "name" => name,
+         "args" => args_node,
+         "body" => body_py,
+         "decorator_list" => [],
+         "returns" => nil,
+         "lineno" => Keyword.get(meta, :line, 0),
+         "col_offset" => Keyword.get(meta, :col, 0)
+       }}
+    end
+  end
+
+  # Container (Class) - M2.2s Structural Layer (New 3-tuple format)
+  def transform({:container, meta, body}, metadata) when is_list(meta) do
+    container_type = Keyword.get(meta, :container_type)
+
+    case container_type do
+      :class ->
+        name = Keyword.get(meta, :name, "_")
+        base_names = Keyword.get(meta, :bases, [])
+
+        with {:ok, body_py} <- transform_list(body, metadata) do
+          bases =
+            Enum.map(base_names, fn base_name ->
+              %{"_type" => "Name", "id" => base_name, "ctx" => %{"_type" => "Load"}}
+            end)
+
+          {:ok,
+           %{
+             "_type" => "ClassDef",
+             "name" => name,
+             "bases" => bases,
+             "keywords" => [],
+             "body" => body_py,
+             "decorator_list" => [],
+             "lineno" => Keyword.get(meta, :line, 0),
+             "col_offset" => Keyword.get(meta, :col, 0)
+           }}
+        end
+
+      _ ->
+        {:error, "Unsupported container type for Python: #{inspect(container_type)}"}
+    end
+  end
+
+  # Attribute Access - M2.2s Structural Layer (New 3-tuple format)
+  def transform({:attribute_access, meta, [receiver]}, metadata) when is_list(meta) do
+    attr = Keyword.get(meta, :attribute, "_")
+
+    with {:ok, receiver_py} <- transform(receiver, metadata) do
+      {:ok,
+       %{
+         "_type" => "Attribute",
+         "value" => receiver_py,
+         "attr" => attr,
+         "ctx" => %{"_type" => "Load"}
+       }}
+    end
+  end
+
+  # Import - M2.2s Structural Layer (New 3-tuple format)
+  def transform({:import, meta, []}, _metadata) when is_list(meta) do
+    source = Keyword.get(meta, :source)
+    names = Keyword.get(meta, :names)
+    alias_name = Keyword.get(meta, :alias)
+
+    case names do
+      nil ->
+        # Simple module import: import os
+        alias_node = %{
+          "_type" => "alias",
+          "name" => source,
+          "asname" => alias_name
+        }
+
+        {:ok, %{"_type" => "Import", "names" => [alias_node]}}
+
+      names_list when is_list(names_list) ->
+        # From import: from os.path import join
+        alias_nodes =
+          Enum.map(names_list, fn name ->
+            %{"_type" => "alias", "name" => name, "asname" => nil}
+          end)
+
+        level = Keyword.get(meta, :relative_level, 0)
+
+        {:ok,
+         %{
+           "_type" => "ImportFrom",
+           "module" => source,
+           "names" => alias_nodes,
+           "level" => level
+         }}
+    end
+  end
+
   # Language-Specific - M2.3 Native Layer (New 3-tuple format)
   def transform({:language_specific, meta, native_ast}, _metadata) when is_list(meta) do
     language = Keyword.get(meta, :language)
@@ -517,6 +623,40 @@ defmodule Metastatic.Adapters.Python.FromMeta do
       "defaults" => [],
       "vararg" => nil,
       "kwarg" => nil
+    }
+  end
+
+  # Build function arguments (richer than lambda args)
+  defp build_function_args(params) when is_list(params) do
+    {positional, vararg, kwarg} =
+      Enum.reduce(params, {[], nil, nil}, fn param, {pos, va, kw} ->
+        case param do
+          {:param, param_meta, "**" <> arg_name} when is_list(param_meta) ->
+            {pos, va, %{"_type" => "arg", "arg" => arg_name, "annotation" => nil}}
+
+          {:param, param_meta, "*" <> arg_name} when is_list(param_meta) ->
+            {pos, %{"_type" => "arg", "arg" => arg_name, "annotation" => nil}, kw}
+
+          {:param, _param_meta, name} when is_binary(name) ->
+            {pos ++ [%{"_type" => "arg", "arg" => name, "annotation" => nil}], va, kw}
+
+          name when is_binary(name) ->
+            {pos ++ [%{"_type" => "arg", "arg" => name, "annotation" => nil}], va, kw}
+
+          _ ->
+            {pos ++ [%{"_type" => "arg", "arg" => "_", "annotation" => nil}], va, kw}
+        end
+      end)
+
+    %{
+      "_type" => "arguments",
+      "args" => positional,
+      "posonlyargs" => [],
+      "kwonlyargs" => [],
+      "kw_defaults" => [],
+      "defaults" => [],
+      "vararg" => vararg,
+      "kwarg" => kwarg
     }
   end
 

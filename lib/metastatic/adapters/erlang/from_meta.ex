@@ -208,7 +208,8 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
 
   # Pattern Matching - M2.2 Extended Layer (New 3-tuple format)
 
-  def transform({:pattern_match, meta, [scrutinee, arms]}, metadata) when is_list(meta) do
+  def transform({:pattern_match, meta, [scrutinee | arms]}, metadata)
+      when is_list(meta) and is_list(arms) do
     line = Map.get(metadata, :line, 0)
 
     with {:ok, scrutinee_erl} <- transform(scrutinee, metadata),
@@ -266,7 +267,10 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     line = Map.get(metadata, :line, 0)
 
     arms
-    |> Enum.reduce_while({:ok, []}, fn {:match_arm, _meta, [pattern, _guard, body]}, {:ok, acc} ->
+    |> Enum.reduce_while({:ok, []}, fn {:match_arm, meta, body_list}, {:ok, acc} ->
+      pattern = Keyword.get(meta, :pattern)
+      body = List.last(body_list)
+
       with {:ok, pattern_erl} <- transform_pattern(pattern, metadata),
            {:ok, body_erl} <- transform(body, metadata) do
         clause = {:clause, line, [pattern_erl], [], [body_erl]}

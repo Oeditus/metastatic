@@ -12,7 +12,13 @@ defmodule Metastatic.ASTStructuralTest do
   end
 
   defp function_def(name, params, body, opts) do
-    meta = [name: name, params: params] ++ opts
+    normalized =
+      Enum.map(params, fn
+        {:param, _, _} = p -> p
+        n when is_binary(n) -> {:param, [], n}
+      end)
+
+    meta = [name: name, params: normalized] ++ opts
     {:function_def, meta, body}
   end
 

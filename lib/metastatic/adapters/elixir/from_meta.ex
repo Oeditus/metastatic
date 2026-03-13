@@ -122,6 +122,7 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     :attribute_access,
     :augmented_assignment,
     :property,
+    :import,
     # Native
     :language_specific,
     # Helpers
@@ -164,7 +165,8 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   # ----- Binary Operators -----
 
   defp transform_node(:binary_op, meta, [left, right], acc) do
-    op = Keyword.get(meta, :operator)
+    # Use original_op for round-trip fidelity (e.g., :&& instead of normalized :and)
+    op = Keyword.get(meta, :original_op, Keyword.get(meta, :operator))
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
     {{op, elixir_meta, [left, right]}, acc}
   end
@@ -530,6 +532,19 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
     attr_atom = String.to_atom(attribute)
     {{{:., [], [receiver, attr_atom]}, elixir_meta, []}, acc}
+  end
+
+  # ----- Import Directives -----
+
+  defp transform_node(:import, meta, [], acc) do
+    import_type = Keyword.get(meta, :import_type, :import)
+    source = Keyword.get(meta, :source, "Unknown")
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    # Build module alias from source name
+    module_ast = name_to_alias(source)
+
+    {{import_type, elixir_meta, [module_ast]}, acc}
   end
 
   # ----- Catch-all -----

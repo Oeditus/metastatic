@@ -293,7 +293,7 @@ defmodule Metastatic.ASTTest do
 
     test "lambda" do
       ast =
-        {:lambda, [params: ["x", "y"], captures: []],
+        {:lambda, [params: [{:param, [], "x"}, {:param, [], "y"}], captures: []],
          [
            {:binary_op, [category: :arithmetic, operator: :+],
             [{:variable, [], "x"}, {:variable, [], "y"}]}
@@ -304,7 +304,7 @@ defmodule Metastatic.ASTTest do
 
     test "lambda with captures" do
       ast =
-        {:lambda, [params: ["x"], captures: ["offset"]],
+        {:lambda, [params: [{:param, [], "x"}], captures: ["offset"]],
          [
            {:binary_op, [category: :arithmetic, operator: :+],
             [{:variable, [], "x"}, {:variable, [], "offset"}]}
@@ -317,7 +317,7 @@ defmodule Metastatic.ASTTest do
       ast =
         {:collection_op, [op_type: :map],
          [
-           {:lambda, [params: ["x"], captures: []],
+           {:lambda, [params: [{:param, [], "x"}], captures: []],
             [
               {:binary_op, [category: :arithmetic, operator: :*],
                [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]}
@@ -332,7 +332,7 @@ defmodule Metastatic.ASTTest do
       ast =
         {:collection_op, [op_type: :filter],
          [
-           {:lambda, [params: ["x"], captures: []],
+           {:lambda, [params: [{:param, [], "x"}], captures: []],
             [
               {:binary_op, [category: :comparison, operator: :>],
                [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]}
@@ -347,7 +347,7 @@ defmodule Metastatic.ASTTest do
       ast =
         {:collection_op, [op_type: :reduce],
          [
-           {:lambda, [params: ["acc", "x"], captures: []],
+           {:lambda, [params: [{:param, [], "acc"}, {:param, [], "x"}], captures: []],
             [
               {:binary_op, [category: :arithmetic, operator: :+],
                [{:variable, [], "acc"}, {:variable, [], "x"}]}
@@ -364,11 +364,11 @@ defmodule Metastatic.ASTTest do
         {:pattern_match, [],
          [
            {:variable, [], "x"},
-           [
-             {{:literal, [subtype: :integer], 0}, {:literal, [subtype: :string], "zero"}},
-             {{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}},
-             {:_, {:literal, [subtype: :string], "other"}}
-           ]
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 0}],
+            [{:literal, [subtype: :string], "zero"}]},
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [{:literal, [subtype: :string], "one"}]},
+           {:match_arm, [pattern: :_], [{:literal, [subtype: :string], "other"}]}
          ]}
 
       assert AST.conforms?(ast)
@@ -514,7 +514,7 @@ defmodule Metastatic.ASTTest do
 
     test "lambda with parameters and captures" do
       ast =
-        {:lambda, [params: ["x"], captures: ["offset"]],
+        {:lambda, [params: [{:param, [], "x"}], captures: ["offset"]],
          [
            {:binary_op, [category: :arithmetic, operator: :+],
             [{:variable, [], "x"}, {:variable, [], "offset"}]}

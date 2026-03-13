@@ -130,6 +130,7 @@ defmodule Metastatic.AST do
           | :attribute_access
           | :augmented_assignment
           | :property
+          | :import
 
   @typedoc """
   Node type atoms for M2.3 Native Layer - language-specific escape hatch.
@@ -244,7 +245,8 @@ defmodule Metastatic.AST do
     :param,
     :attribute_access,
     :augmented_assignment,
-    :property
+    :property,
+    :import
   ]
 
   @native_types [:language_specific]
@@ -656,7 +658,7 @@ defmodule Metastatic.AST do
     end
   end
 
-  defp valid_node?(:pattern_match, _meta, [scrutinee, arms]) when is_list(arms) do
+  defp valid_node?(:pattern_match, _meta, [scrutinee | arms]) when is_list(arms) do
     conforms?(scrutinee) and valid_pattern_arms?(arms)
   end
 
@@ -736,6 +738,16 @@ defmodule Metastatic.AST do
       end)
   end
 
+  defp valid_node?(:import, meta, []) do
+    source = Keyword.get(meta, :source)
+    names = Keyword.get(meta, :names)
+
+    is_binary(source) and
+      (is_nil(names) or (is_list(names) and Enum.all?(names, &is_binary/1)))
+  end
+
+  defp valid_node?(:import, _meta, _), do: false
+
   # M2.3 Native type
   defp valid_node?(:language_specific, meta, _native_ast) do
     language = Keyword.get(meta, :language)
@@ -744,8 +756,8 @@ defmodule Metastatic.AST do
 
   defp valid_pattern_arms?(arms) when is_list(arms) do
     Enum.all?(arms, fn
-      {pattern, body} -> (conforms?(pattern) or pattern == :_) and conforms?(body)
-      arm -> conforms?(arm)
+      {:match_arm, _, _} = arm -> conforms?(arm)
+      _ -> false
     end)
   end
 
@@ -763,10 +775,6 @@ defmodule Metastatic.AST do
 
         (is_nil(pattern) or conforms?(pattern)) and
           (is_nil(default) or conforms?(default))
-
-      # Also accept simple string params for backward compatibility during transition
-      name when is_binary(name) ->
-        true
 
       _ ->
         false
@@ -1032,7 +1040,7 @@ defmodule Metastatic.AST do
   ## Examples
 
       iex> body = {:binary_op, [operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}
-      iex> ast = {:function_def, [name: "add", params: ["x", "y"]], [body]}
+      iex> ast = {:function_def, [name: "add", params: [{:param, [], "x"}, {:param, [], "y"}]], [body]}
       iex> Metastatic.AST.function_name(ast)
       "add"
   """
@@ -1208,10 +1216,10 @@ defmodule Metastatic.AST do
 
   ## Examples
 
-      iex> func_def1 = {:function_def, [name: "add", params: ["x", "y"]], []}
-      iex> func_def2 = {:function_def, [name: "sub", params: ["x", "y"]], []}
+      iex> func_def1 = {:function_def, [name: "add", params: [{:param, [], "x"}, {:param, [], "y"}]], []}
+      iex> func_def2 = {:function_def, [name: "sub", params: [{:param, [], "x"}, {:param, [], "y"}]], []}
       iex> Metastatic.AST.container(:module, "MyApp.Math", [func_def1, func_def2])
-      {:container, [container_type: :module, name: "MyApp.Math"], [{:function_def, [name: "add", params: ["x", "y"]], []}, {:function_def, [name: "sub", params: ["x", "y"]], []}]}
+      {:container, [container_type: :module, name: "MyApp.Math"], [{:function_def, [name: "add", params: [{:param, [], "x"}, {:param, [], "y"}]], []}, {:function_def, [name: "sub", params: [{:param, [], "x"}, {:param, [], "y"}]], []}]}
   """
   @spec container(container_type(), String.t(), [meta_ast()], keyword()) :: meta_ast()
   def container(type, name, body, extra_meta \\ [])
@@ -1228,12 +1236,16 @@ defmodule Metastatic.AST do
       iex> body = [{:binary_op, [category: :arithmetic, operator: :+],
       ...>   [{:variable, [], "x"}, {:variable, [], "y"}]}]
       iex> Metastatic.AST.function_def("add", ["x", "y"], body)
-      {:function_def, [name: "add", params: ["x", "y"]], [{:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}]}
+      {:function_def, [name: "add", params: [{:param, [], "x"}, {:param, [], "y"}]], [{:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}]}
   """
   @spec function_def(String.t(), [term()], [meta_ast()], keyword()) :: meta_ast()
   def function_def(name, params, body, extra_meta \\ [])
       when is_binary(name) and is_list(params) and is_list(body) do
-    meta = Keyword.merge([name: name, params: params], extra_meta)
+    normalized_params = Enum.map(params, &normalize_param/1)
+    meta = Keyword.merge([name: name, params: normalized_params], extra_meta)
     {:function_def, meta, body}
   end
+
+  defp normalize_param({:param, _, _} = param), do: param
+  defp normalize_param(name) when is_binary(name), do: {:param, [], name}
 end

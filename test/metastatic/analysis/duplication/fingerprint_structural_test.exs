@@ -18,7 +18,13 @@ defmodule Metastatic.Analysis.Duplication.FingerprintStructuralTest do
   end
 
   defp function_def(name, params, body, opts) do
-    {:function_def, [name: name, params: params] ++ opts, [body]}
+    normalized =
+      Enum.map(params, fn
+        {:param, _, _} = p -> p
+        n when is_binary(n) -> {:param, [], n}
+      end)
+
+    {:function_def, [name: name, params: normalized] ++ opts, [body]}
   end
 
   defp attribute_access(attr, receiver) do

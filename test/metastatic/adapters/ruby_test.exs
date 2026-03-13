@@ -465,7 +465,7 @@ defmodule Metastatic.Adapters.RubyTest do
       assert {:ok, {:collection_op, [op_type: :each], [lambda, collection]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:lambda, [params: ["x"], captures: []], [body]} = lambda
+      assert {:lambda, [params: [{:param, [], "x"}], captures: []], [body]} = lambda
       assert {:literal, [subtype: :integer], 1} = body
       assert {:list, [], []} = collection
     end
@@ -496,7 +496,7 @@ defmodule Metastatic.Adapters.RubyTest do
       assert {:ok, {:collection_op, [op_type: :map], [lambda, collection]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:lambda, [params: ["x"], captures: []], _body} = lambda
+      assert {:lambda, [params: [{:param, [], "x"}], captures: []], _body} = lambda
       assert {:list, [], []} = collection
     end
 
@@ -520,7 +520,7 @@ defmodule Metastatic.Adapters.RubyTest do
       assert {:ok, {:collection_op, [op_type: :select], [lambda, collection]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:lambda, [params: ["x"], captures: []], [body]} = lambda
+      assert {:lambda, [params: [{:param, [], "x"}], captures: []], [body]} = lambda
       assert {:literal, [subtype: :boolean], true} = body
       assert {:list, [], []} = collection
     end
@@ -558,7 +558,9 @@ defmodule Metastatic.Adapters.RubyTest do
       assert {:ok, {:collection_op, [op_type: :reduce], [lambda, collection, initial]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:lambda, [params: ["sum", "x"], captures: []], _body} = lambda
+      assert {:lambda, [params: [{:param, [], "sum"}, {:param, [], "x"}], captures: []], _body} =
+               lambda
+
       assert {:list, [], []} = collection
       assert {:literal, [subtype: :integer], 0} = initial
     end
@@ -582,7 +584,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:lambda, [params: ["x"], captures: []], [body]}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:lambda, [params: [{:param, [], "x"}], captures: []], [body]}, %{}} =
+               ToMeta.transform(ast)
+
       assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
     end
 
@@ -609,7 +613,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:lambda, [params: ["x", "y"], captures: []], [body]}, %{}} =
+      assert {:ok,
+              {:lambda, [params: [{:param, [], "x"}, {:param, [], "y"}], captures: []], [body]},
+              %{}} =
                ToMeta.transform(ast)
 
       assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
@@ -892,7 +898,7 @@ defmodule Metastatic.Adapters.RubyTest do
       case meta_ast do
         {:function_def, meta, [body]} when is_list(meta) ->
           assert Keyword.get(meta, :name) == "add"
-          assert Keyword.get(meta, :params) == ["x", "y"]
+          assert Keyword.get(meta, :params) == [{:param, [], "x"}, {:param, [], "y"}]
           assert Keyword.get(meta, :visibility) == :public
           assert Keyword.get(meta, :arity) == 2
           assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
@@ -1017,7 +1023,7 @@ defmodule Metastatic.Adapters.RubyTest do
       case meta_ast do
         {:function_def, meta, _body} when is_list(meta) ->
           assert Keyword.get(meta, :name) == "calculate"
-          assert Keyword.get(meta, :params) == ["x"]
+          assert Keyword.get(meta, :params) == [{:param, [], "x"}]
 
         other ->
           flunk("Expected function_def, got: #{inspect(other)}")
@@ -1584,7 +1590,7 @@ defmodule Metastatic.Adapters.RubyTest do
       }
 
       assert {:ok, {:lambda, meta, [body]}, %{kind: :proc}} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :params) == ["x"]
+      assert Keyword.get(meta, :params) == [{:param, [], "x"}]
       assert Keyword.get(meta, :kind) == :proc
       assert {:binary_op, _, _} = body
     end
@@ -1633,7 +1639,7 @@ defmodule Metastatic.Adapters.RubyTest do
       assert {:ok, {:collection_op, meta, [lambda, collection]}, %{}} = ToMeta.transform(ast)
       assert Keyword.get(meta, :op_type) == :each_with_index
       assert {:lambda, lambda_meta, _} = lambda
-      assert Keyword.get(lambda_meta, :params) == ["item", "index"]
+      assert Keyword.get(lambda_meta, :params) == [{:param, [], "item"}, {:param, [], "index"}]
       assert {:list, [], []} = collection
     end
   end

@@ -96,21 +96,20 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     walk_statements(else_block, count)
   end
 
-  defp walk_statements({:pattern_match, _meta, [_value, branches | _]}, count) do
+  defp walk_statements({:pattern_match, _meta, [_scrutinee | arms]}, count) when is_list(arms) do
     count = count + 1
 
-    branches_list = if is_list(branches), do: branches, else: []
+    Enum.reduce(arms, count, fn
+      {:match_arm, _meta, body_list}, c ->
+        Enum.reduce(body_list, c, fn child, inner -> walk_statements(child, inner) end)
 
-    Enum.reduce(branches_list, count, fn
-      {:match_arm, _, [_pattern, _guard, body]}, c -> walk_statements(body, c)
-      {:pair, _, [_, branch]}, c -> walk_statements(branch, c)
-      other, c -> walk_statements(other, c)
+      other, c ->
+        walk_statements(other, c)
     end)
   end
 
-  defp walk_statements({:match_arm, _meta, [_pattern, guard, body]}, count) do
-    count = if guard, do: walk_statements(guard, count), else: count
-    walk_statements(body, count)
+  defp walk_statements({:match_arm, _meta, body_list}, count) when is_list(body_list) do
+    Enum.reduce(body_list, count, fn child, c -> walk_statements(child, c) end)
   end
 
   defp walk_statements({:lambda, _meta, [body]}, count) do
@@ -220,19 +219,18 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
     walk_returns(else_block, count)
   end
 
-  defp walk_returns({:pattern_match, _meta, [_value, branches | _]}, count) do
-    branches_list = if is_list(branches), do: branches, else: []
+  defp walk_returns({:pattern_match, _meta, [_scrutinee | arms]}, count) when is_list(arms) do
+    Enum.reduce(arms, count, fn
+      {:match_arm, _meta, body_list}, c ->
+        Enum.reduce(body_list, c, fn child, inner -> walk_returns(child, inner) end)
 
-    Enum.reduce(branches_list, count, fn
-      {:match_arm, _, [_pattern, _guard, body]}, c -> walk_returns(body, c)
-      {:pair, _, [_, branch]}, c -> walk_returns(branch, c)
-      other, c -> walk_returns(other, c)
+      other, c ->
+        walk_returns(other, c)
     end)
   end
 
-  defp walk_returns({:match_arm, _meta, [_pattern, guard, body]}, count) do
-    count = if guard, do: walk_returns(guard, count), else: count
-    walk_returns(body, count)
+  defp walk_returns({:match_arm, _meta, body_list}, count) when is_list(body_list) do
+    Enum.reduce(body_list, count, fn child, c -> walk_returns(child, c) end)
   end
 
   defp walk_returns({:lambda, _meta, [body]}, count), do: walk_returns(body, count)

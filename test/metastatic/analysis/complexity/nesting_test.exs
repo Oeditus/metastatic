@@ -67,7 +67,10 @@ defmodule Metastatic.Analysis.Complexity.NestingTest do
     end
 
     test "lambda has depth 1" do
-      ast = {:lambda, [params: ["x"], captures: []], [{:literal, [subtype: :integer], 1}]}
+      ast =
+        {:lambda, [params: [{:param, [], "x"}], captures: []],
+         [{:literal, [subtype: :integer], 1}]}
+
       assert Nesting.calculate(ast) == 1
     end
 
@@ -88,12 +91,10 @@ defmodule Metastatic.Analysis.Complexity.NestingTest do
         {:pattern_match, [],
          [
            {:variable, [], "value"},
-           [
-             {:pair, [],
-              [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :string], "one"}]},
-             {:pair, [],
-              [{:literal, [subtype: :integer], 2}, {:literal, [subtype: :string], "two"}]}
-           ]
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [{:literal, [subtype: :string], "one"}]},
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 2}],
+            [{:literal, [subtype: :string], "two"}]}
          ]}
 
       assert Nesting.calculate(ast) == 1
@@ -170,7 +171,7 @@ defmodule Metastatic.Analysis.Complexity.NestingTest do
 
     test "lambda with conditional inside has depth 2" do
       ast =
-        {:lambda, [params: ["x"], captures: []],
+        {:lambda, [params: [{:param, [], "x"}], captures: []],
          [
            {:conditional, [],
             [
@@ -302,18 +303,15 @@ defmodule Metastatic.Analysis.Complexity.NestingTest do
         {:pattern_match, [],
          [
            {:variable, [], "value"},
-           [
-             {:pair, [],
-              [
-                {:literal, [subtype: :integer], 1},
-                {:conditional, [],
-                 [
-                   {:variable, [], "x"},
-                   {:literal, [subtype: :integer], 10},
-                   {:literal, [subtype: :integer], 20}
-                 ]}
-              ]}
-           ]
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
+            [
+              {:conditional, [],
+               [
+                 {:variable, [], "x"},
+                 {:literal, [subtype: :integer], 10},
+                 {:literal, [subtype: :integer], 20}
+               ]}
+            ]}
          ]}
 
       assert Nesting.calculate(ast) == 2

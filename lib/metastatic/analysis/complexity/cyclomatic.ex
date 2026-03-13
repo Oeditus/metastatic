@@ -137,23 +137,22 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
   end
 
   # Pattern match (3-tuple): +1 per branch
-  defp walk({:pattern_match, _meta, [value, branches | _]}, count) do
-    branches_list = if is_list(branches), do: branches, else: []
-    count = count + length(branches_list)
-    count = walk(value, count)
+  defp walk({:pattern_match, _meta, [scrutinee | arms]}, count) when is_list(arms) do
+    count = count + length(arms)
+    count = walk(scrutinee, count)
 
-    Enum.reduce(branches_list, count, fn
-      {:match_arm, _, [_pattern, _guard, body]}, c -> walk(body, c)
-      {:pair, _, [_pattern, branch]}, c -> walk(branch, c)
-      {_pattern, branch}, c -> walk(branch, c)
-      other, c -> walk(other, c)
+    Enum.reduce(arms, count, fn
+      {:match_arm, _meta, body_list}, c ->
+        Enum.reduce(body_list, c, fn child, acc -> walk(child, acc) end)
+
+      other, c ->
+        walk(other, c)
     end)
   end
 
   # Match arm (3-tuple)
-  defp walk({:match_arm, _meta, [_pattern, guard, body]}, count) do
-    count = if guard, do: walk(guard, count), else: count
-    walk(body, count)
+  defp walk({:match_arm, _meta, body_list}, count) when is_list(body_list) do
+    Enum.reduce(body_list, count, fn child, c -> walk(child, c) end)
   end
 
   # Block (3-tuple): walk statements

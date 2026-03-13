@@ -112,7 +112,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
   def analyze({:function_call, meta, args} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_logging_function?(func_name) do
+    if logging_function?(func_name) do
       check_logging_args(node, func_name, args, context)
     else
       []
@@ -124,7 +124,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
     func_name = Keyword.get(meta, :name, "")
 
     if func_name in ["inspect", "Kernel.inspect", "toString", "to_string", "__str__"] do
-      if is_sensitive_object?(arg, context) do
+      if sensitive_object?(arg, context) do
         [
           Analyzer.issue(
             analyzer: __MODULE__,
@@ -186,7 +186,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
   defp check_sensitive_in_arg(arg, context) do
     case arg do
       {:variable, _meta, name} when is_binary(name) ->
-        if is_sensitive_variable?(name), do: [name], else: []
+        if sensitive_variable?(name), do: [name], else: []
 
       {:function_call, meta, inner_args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
@@ -209,10 +209,10 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
         pairs
         |> Enum.flat_map(fn
           {key, _val} when is_binary(key) ->
-            if is_sensitive_field?(key), do: [key], else: []
+            if sensitive_field?(key), do: [key], else: []
 
           {{:literal, _, key}, _val} when is_binary(key) ->
-            if is_sensitive_field?(key), do: [key], else: []
+            if sensitive_field?(key), do: [key], else: []
 
           _ ->
             []
@@ -235,17 +235,17 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
     |> Enum.flat_map(fn
       {:literal, _, attr} when is_binary(attr) or is_atom(attr) ->
         attr_str = to_string(attr)
-        if is_sensitive_field?(attr_str), do: [attr_str], else: []
+        if sensitive_field?(attr_str), do: [attr_str], else: []
 
       {:variable, _, name} when is_binary(name) ->
-        if is_sensitive_variable?(name), do: [name], else: []
+        if sensitive_variable?(name), do: [name], else: []
 
       _ ->
         []
     end)
   end
 
-  defp is_logging_function?(func_name) when is_binary(func_name) do
+  defp logging_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@logging_functions, fn pattern ->
@@ -253,27 +253,26 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
     end)
   end
 
-  defp is_logging_function?(_), do: false
+  defp logging_function?(_), do: false
 
-  defp is_sensitive_variable?(name) when is_binary(name) do
+  defp sensitive_variable?(name) when is_binary(name) do
     name_lower = String.downcase(name)
 
     Enum.any?(@sensitive_field_patterns, &String.contains?(name_lower, &1)) or
       Enum.any?(@sensitive_object_patterns, &String.contains?(name_lower, &1))
   end
 
-  defp is_sensitive_field?(name) when is_binary(name) or is_atom(name) do
+  defp sensitive_field?(name) when is_binary(name) or is_atom(name) do
     name_lower = name |> to_string() |> String.downcase()
     Enum.any?(@sensitive_field_patterns, &String.contains?(name_lower, &1))
   end
 
-  defp is_sensitive_object?({:variable, _meta, name}, _context) when is_binary(name) do
+  defp sensitive_object?({:variable, _meta, name}, _context) when is_binary(name) do
     name_lower = String.downcase(name)
     Enum.any?(@sensitive_object_patterns, &String.contains?(name_lower, &1))
   end
 
-  defp is_sensitive_object?({:attribute_access, _meta, children}, _context)
-       when is_list(children) do
+  defp sensitive_object?({:attribute_access, _meta, children}, _context) when is_list(children) do
     Enum.any?(children, fn
       {:variable, _, name} when is_binary(name) ->
         name_lower = String.downcase(name)
@@ -284,7 +283,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
     end)
   end
 
-  defp is_sensitive_object?(_, _), do: false
+  defp sensitive_object?(_, _), do: false
 
   defp contains_sensitive_interpolation?(value) when is_binary(value) do
     # Look for #{...} patterns with sensitive variable names

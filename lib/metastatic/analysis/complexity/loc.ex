@@ -134,31 +134,25 @@ defmodule Metastatic.Analysis.Complexity.LoC do
     walk(else_block, count)
   end
 
-  defp walk({:pattern_match, _meta, [value, branches | _]}, count) do
+  defp walk({:pattern_match, _meta, [scrutinee | arms]}, count) when is_list(arms) do
     count = count + 1
-    count = walk_expr(value, count)
+    count = walk_expr(scrutinee, count)
 
-    branches_list = if is_list(branches), do: branches, else: []
-
-    Enum.reduce(branches_list, count, fn
-      {:match_arm, _, [pattern, guard, body]}, c ->
-        c = walk_expr(pattern, c)
-        c = if guard, do: walk_expr(guard, c), else: c
-        walk(body, c)
-
-      {:pair, _, [pattern, branch]}, c ->
-        c = walk_expr(pattern, c)
-        walk(branch, c)
+    Enum.reduce(arms, count, fn
+      {:match_arm, meta, body_list}, c ->
+        pattern = Keyword.get(meta, :pattern)
+        c = if pattern, do: walk_expr(pattern, c), else: c
+        Enum.reduce(body_list, c, fn child, inner -> walk(child, inner) end)
 
       other, c ->
         walk(other, c)
     end)
   end
 
-  defp walk({:match_arm, _meta, [pattern, guard, body]}, count) do
-    count = walk_expr(pattern, count)
-    count = if guard, do: walk_expr(guard, count), else: count
-    walk(body, count)
+  defp walk({:match_arm, meta, body_list}, count) when is_list(body_list) do
+    pattern = Keyword.get(meta, :pattern)
+    count = if pattern, do: walk_expr(pattern, count), else: count
+    Enum.reduce(body_list, count, fn child, c -> walk(child, c) end)
   end
 
   defp walk({:lambda, _meta, [body]}, count) do

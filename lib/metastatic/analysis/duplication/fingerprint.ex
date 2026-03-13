@@ -220,13 +220,14 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
     {:collection_op, meta, Enum.map(children, &normalize_ast/1)}
   end
 
-  defp normalize_ast({:pattern_match, meta, [scrutinee, arms]}) when is_list(arms) do
+  defp normalize_ast({:pattern_match, meta, [scrutinee | arms]}) when is_list(arms) do
     normalized_arms = Enum.map(arms, &normalize_ast/1)
-    {:pattern_match, meta, [normalize_ast(scrutinee), normalized_arms]}
+    {:pattern_match, meta, [normalize_ast(scrutinee) | normalized_arms]}
   end
 
-  defp normalize_ast({:match_arm, meta, [pattern, body]}) do
-    {:match_arm, meta, [normalize_ast(pattern), normalize_ast(body)]}
+  defp normalize_ast({:match_arm, meta, body_list}) when is_list(body_list) do
+    normalized_body = Enum.map(body_list, &normalize_ast/1)
+    {:match_arm, Keyword.delete(meta, :pattern), normalized_body}
   end
 
   defp normalize_ast({:exception_handling, meta, [try_block, handlers, finally_block]}) do

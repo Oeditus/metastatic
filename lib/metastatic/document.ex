@@ -176,8 +176,46 @@ defmodule Metastatic.Document do
   """
   @spec equivalent?(t(), t()) :: boolean()
   def equivalent?(%__MODULE__{ast: ast1}, %__MODULE__{ast: ast2}) do
-    ast1 == ast2
+    strip_meta(ast1) == strip_meta(ast2)
   end
+
+  # Strip metadata from AST nodes for structural comparison.
+  # Preserves type atoms, children structure, and values but replaces
+  # keyword metadata with only the semantically significant keys.
+  @semantic_keys [
+    :subtype,
+    :category,
+    :operator,
+    :name,
+    :op_type,
+    :loop_type,
+    :params,
+    :captures,
+    :container_type,
+    :visibility,
+    :pattern,
+    :construct,
+    :collection_type,
+    :original_form,
+    :language,
+    :hint,
+    :source,
+    :names,
+    :import_type,
+    :alias
+  ]
+
+  defp strip_meta({type, meta, children}) when is_atom(type) and is_list(meta) do
+    stripped = Keyword.take(meta, @semantic_keys)
+    stripped_children = strip_meta(children)
+    {type, stripped, stripped_children}
+  end
+
+  defp strip_meta(list) when is_list(list) do
+    Enum.map(list, &strip_meta/1)
+  end
+
+  defp strip_meta(other), do: other
 
   @doc """
   Extract all variables referenced in the document's AST.

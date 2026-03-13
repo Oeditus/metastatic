@@ -168,31 +168,25 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
         walk(else_block, acc)
 
       # Pattern match (3-tuple)
-      {:pattern_match, _meta, [value, branches | _]} ->
+      {:pattern_match, _meta, [scrutinee | arms]} when is_list(arms) ->
         acc = %{acc | operators: ["case" | acc.operators]}
-        acc = walk(value, acc)
+        acc = walk(scrutinee, acc)
 
-        branches_list = if is_list(branches), do: branches, else: []
-
-        Enum.reduce(branches_list, acc, fn
-          {:match_arm, _, [pattern, guard, body]}, a ->
-            a = walk(pattern, a)
-            a = if guard, do: walk(guard, a), else: a
-            walk(body, a)
-
-          {:pair, _, [pattern, branch]}, a ->
-            a = walk(pattern, a)
-            walk(branch, a)
+        Enum.reduce(arms, acc, fn
+          {:match_arm, meta, body_list}, a ->
+            pattern = Keyword.get(meta, :pattern)
+            a = if pattern, do: walk(pattern, a), else: a
+            Enum.reduce(body_list, a, fn child, inner -> walk(child, inner) end)
 
           other, a ->
             walk(other, a)
         end)
 
       # Match arm (3-tuple)
-      {:match_arm, _meta, [pattern, guard, body]} ->
-        acc = walk(pattern, acc)
-        acc = if guard, do: walk(guard, acc), else: acc
-        walk(body, acc)
+      {:match_arm, meta, body_list} when is_list(body_list) ->
+        pattern = Keyword.get(meta, :pattern)
+        acc = if pattern, do: walk(pattern, acc), else: acc
+        Enum.reduce(body_list, acc, fn child, a -> walk(child, a) end)
 
       # Early return (3-tuple)
       {:early_return, _meta, [value]} ->

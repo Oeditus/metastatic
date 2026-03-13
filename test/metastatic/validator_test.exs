@@ -85,7 +85,7 @@ defmodule Metastatic.ValidatorTest do
     test "validates lambda" do
       ast =
         lambda(
-          ["x"],
+          [{:param, [], "x"}],
           [],
           binary_op(:arithmetic, :+, variable("x"), literal(:integer, 1))
         )
@@ -101,7 +101,7 @@ defmodule Metastatic.ValidatorTest do
         collection_op(
           :map,
           lambda(
-            ["x"],
+            [{:param, [], "x"}],
             [],
             binary_op(:arithmetic, :*, variable("x"), literal(:integer, 2))
           ),
@@ -162,7 +162,7 @@ defmodule Metastatic.ValidatorTest do
     end
 
     test "strict mode accepts extended constructs" do
-      ast = lambda(["x"], [], variable("x"))
+      ast = lambda([{:param, [], "x"}], [], variable("x"))
       doc = Document.new(ast, :python)
 
       assert {:ok, _} = Validator.validate(doc, mode: :strict)

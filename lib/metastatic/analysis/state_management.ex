@@ -15,7 +15,7 @@ defmodule Metastatic.Analysis.StateManagement do
 
       # Stateless container
       ast = {:container, [container_type: :class, name: "Math"], [
-        {:function_def, [name: "add", params: ["x", "y"], visibility: :public], [
+        {:function_def, [name: "add", params: [{:param, [], "x"}, {:param, [], "y"}], visibility: :public], [
          {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}]}
       ]}
 

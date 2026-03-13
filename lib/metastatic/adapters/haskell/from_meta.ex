@@ -105,6 +105,12 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     transform_collection(elements, collection_type)
   end
 
+  # M2.1 Core Layer - Tuples (3-tuple format)
+
+  def transform({:tuple, _meta, elements}, _metadata) when is_list(elements) do
+    transform_collection(elements, :tuple)
+  end
+
   # M2.1 Core Layer - Blocks (3-tuple format)
 
   def transform({:block, meta, statements}, _metadata) when is_list(meta) do
@@ -127,9 +133,10 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
 
   # M2.2 Extended Layer - Pattern Matching (3-tuple format)
 
-  def transform({:pattern_match, _meta, [scrutinee, branches, _else_branch]}, _metadata) do
+  def transform({:pattern_match, _meta, [scrutinee | arms]}, _metadata)
+      when is_list(arms) do
     with {:ok, scrutinee_ast} <- transform(scrutinee, %{}),
-         {:ok, branches_ast} <- transform_case_branches(branches) do
+         {:ok, branches_ast} <- transform_match_arms(arms) do
       {:ok,
        %{
          "type" => "case",
@@ -295,10 +302,10 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  defp transform_case_branches(branches) when is_list(branches) do
-    branches
-    |> Enum.reduce_while({:ok, []}, fn branch, {:ok, acc} ->
-      case transform_case_branch(branch) do
+  defp transform_match_arms(arms) when is_list(arms) do
+    arms
+    |> Enum.reduce_while({:ok, []}, fn arm, {:ok, acc} ->
+      case transform_match_arm(arm) do
         {:ok, branch_ast} -> {:cont, {:ok, [branch_ast | acc]}}
         {:error, _} = err -> {:halt, err}
       end
@@ -309,16 +316,19 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  # 3-tuple pair format: {:pair, [], [pattern, body]}
-  defp transform_case_branch({:pair, _meta, [pattern, body]}) do
+  # Standard match_arm format: {:match_arm, [pattern: pattern], [body]}
+  defp transform_match_arm({:match_arm, meta, body_list}) when is_list(meta) do
+    pattern = Keyword.get(meta, :pattern)
+    body = List.last(body_list)
+
     with {:ok, pattern_ast} <- transform_pattern(pattern),
          {:ok, body_ast} <- transform(body, %{}) do
       {:ok, %{"pattern" => pattern_ast, "rhs" => body_ast}}
     end
   end
 
-  defp transform_case_branch(other) do
-    {:error, "Expected pair in case branch, got: #{inspect(other)}"}
+  defp transform_match_arm(other) do
+    {:error, "Expected match_arm in case branch, got: #{inspect(other)}"}
   end
 
   defp transform_pattern({:variable, _meta, name}) do

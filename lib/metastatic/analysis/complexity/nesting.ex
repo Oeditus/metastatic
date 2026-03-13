@@ -142,20 +142,15 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
   end
 
   # Pattern match (3-tuple): increment depth for branches
-  defp walk({:pattern_match, _meta, [value, branches | _]}, current, max) do
-    {_, max} = walk(value, current, max)
-    branches_list = if is_list(branches), do: branches, else: []
+  defp walk({:pattern_match, _meta, [scrutinee | arms]}, current, max) when is_list(arms) do
+    {_, max} = walk(scrutinee, current, max)
 
     {_, max} =
-      Enum.reduce(branches_list, {current, max}, fn
-        {:match_arm, _, [_pattern, _guard, body]}, {_c, m} ->
-          walk(body, current + 1, m)
-
-        {:pair, _, [_pattern, branch]}, {_c, m} ->
-          walk(branch, current + 1, m)
-
-        {_pattern, branch}, {_c, m} ->
-          walk(branch, current + 1, m)
+      Enum.reduce(arms, {current, max}, fn
+        {:match_arm, _meta, body_list}, {_c, m} ->
+          Enum.reduce(body_list, {current, m}, fn child, {_cc, mm} ->
+            walk(child, current + 1, mm)
+          end)
 
         other, {_c, m} ->
           walk(other, current, m)
@@ -165,9 +160,10 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
   end
 
   # Match arm (3-tuple): increment depth for body
-  defp walk({:match_arm, _meta, [_pattern, guard, body]}, current, max) do
-    {_, max} = if guard, do: walk(guard, current, max), else: {current, max}
-    walk(body, current + 1, max)
+  defp walk({:match_arm, _meta, body_list}, current, max) when is_list(body_list) do
+    Enum.reduce(body_list, {current, max}, fn child, {_c, m} ->
+      walk(child, current + 1, m)
+    end)
   end
 
   # Block (3-tuple): walk statements at same depth

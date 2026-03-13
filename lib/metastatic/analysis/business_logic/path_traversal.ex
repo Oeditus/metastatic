@@ -120,10 +120,10 @@ defmodule Metastatic.Analysis.BusinessLogic.PathTraversal do
     func_name = Keyword.get(meta, :name, "")
 
     cond do
-      is_file_function?(func_name) and has_tainted_path_argument?(args, context) ->
+      file_function?(func_name) and has_tainted_path_argument?(args, context) ->
         [create_path_traversal_issue(node, func_name, "file operation with user-controlled path")]
 
-      is_path_function?(func_name) and has_tainted_path_argument?(args, context) ->
+      path_function?(func_name) and has_tainted_path_argument?(args, context) ->
         [
           Analyzer.issue(
             analyzer: __MODULE__,
@@ -196,7 +196,7 @@ defmodule Metastatic.Analysis.BusinessLogic.PathTraversal do
     )
   end
 
-  defp is_file_function?(func_name) when is_binary(func_name) do
+  defp file_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@file_functions, fn pattern ->
@@ -204,9 +204,9 @@ defmodule Metastatic.Analysis.BusinessLogic.PathTraversal do
     end)
   end
 
-  defp is_file_function?(_), do: false
+  defp file_function?(_), do: false
 
-  defp is_path_function?(func_name) when is_binary(func_name) do
+  defp path_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@path_functions, fn pattern ->
@@ -214,7 +214,7 @@ defmodule Metastatic.Analysis.BusinessLogic.PathTraversal do
     end)
   end
 
-  defp is_path_function?(_), do: false
+  defp path_function?(_), do: false
 
   defp has_tainted_path_argument?(args, context) when is_list(args) do
     Enum.any?(args, &contains_user_input?(&1, context))
@@ -225,11 +225,11 @@ defmodule Metastatic.Analysis.BusinessLogic.PathTraversal do
   defp contains_user_input?(node, context) do
     case node do
       {:variable, _meta, name} when is_binary(name) ->
-        is_user_input_variable?(name) or in_tainted_scope?(name, context)
+        user_input_variable?(name) or in_tainted_scope?(name, context)
 
       {:function_call, meta, _args} when is_list(meta) ->
         func_name = Keyword.get(meta, :name, "")
-        is_user_input_function?(func_name)
+        user_input_function?(func_name)
 
       {:attribute_access, _meta, children} when is_list(children) ->
         Enum.any?(children, &contains_user_input?(&1, context))
@@ -246,17 +246,17 @@ defmodule Metastatic.Analysis.BusinessLogic.PathTraversal do
     end
   end
 
-  defp is_user_input_variable?(name) when is_binary(name) do
+  defp user_input_variable?(name) when is_binary(name) do
     name_lower = String.downcase(name)
     Enum.any?(@user_input_patterns, &String.contains?(name_lower, &1))
   end
 
-  defp is_user_input_function?(func_name) when is_binary(func_name) do
+  defp user_input_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
     Enum.any?(@user_input_patterns, &String.contains?(func_lower, &1))
   end
 
-  defp is_user_input_function?(_), do: false
+  defp user_input_function?(_), do: false
 
   defp in_tainted_scope?(name, context) do
     tainted_vars = Map.get(context, :tainted_vars, MapSet.new())

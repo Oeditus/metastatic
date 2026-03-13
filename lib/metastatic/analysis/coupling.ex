@@ -21,7 +21,7 @@ defmodule Metastatic.Analysis.Coupling do
 
       # Low coupling - no external dependencies
       ast = {:container, [container_type: :class, name: "Calculator"], [
-        {:function_def, [name: "add", params: ["x", "y"], visibility: :public], [
+        {:function_def, [name: "add", params: [{:param, [], "x"}, {:param, [], "y"}], visibility: :public], [
          {:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:variable, [], "y"}]}]}
       ]}
 

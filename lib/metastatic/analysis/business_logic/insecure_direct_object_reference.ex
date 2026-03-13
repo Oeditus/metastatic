@@ -81,7 +81,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InsecureDirectObjectReference do
   def analyze({:function_call, meta, args} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if is_fetch_function?(func_name) and has_user_supplied_id?(args) and
+    if fetch_function?(func_name) and has_user_supplied_id?(args) and
          not in_authorization_context?(context) do
       [
         Analyzer.issue(
@@ -106,7 +106,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InsecureDirectObjectReference do
 
   # ----- Private Helpers -----
 
-  defp is_fetch_function?(func_name) when is_binary(func_name) do
+  defp fetch_function?(func_name) when is_binary(func_name) do
     func_lower = String.downcase(func_name)
 
     Enum.any?(@fetch_functions, fn pattern ->
@@ -114,7 +114,7 @@ defmodule Metastatic.Analysis.BusinessLogic.InsecureDirectObjectReference do
     end)
   end
 
-  defp is_fetch_function?(_), do: false
+  defp fetch_function?(_), do: false
 
   defp has_user_supplied_id?(args) when is_list(args) do
     Enum.any?(args, fn arg ->
