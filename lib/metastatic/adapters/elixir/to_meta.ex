@@ -183,6 +183,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {{:__with_marker__, [], nil}, Map.put(ctx, :pending_with, ast)}
   end
 
+  # Handle module attributes in pre_transform to prevent Macro.traverse from
+  # descending into the inner {attr_name, meta, [value]} and transforming attr_name
+  # (e.g. :moduledoc) into a :function_call node before the @ handler sees it.
+  defp pre_transform({:@, _meta, [{attr_name, _, _}]} = ast, ctx)
+       when is_atom(attr_name) do
+    {{:__attr_marker__, [], nil}, Map.put(ctx, :pending_attr, ast)}
+  end
+
   # Default: pass through
   defp pre_transform(ast, ctx), do: {ast, ctx}
 
@@ -439,6 +447,28 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       {{:with, meta, args}, new_ctx} ->
         result = transform_with(args, meta)
         {result, new_ctx}
+
+      {nil, ctx} ->
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
+  # Handle __attr_marker__ - retrieve original module attribute from context and transform it
+  defp post_transform({:__attr_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_attr) do
+      # Setter: @attr value
+      {{:@, meta, [{attr_name, _attr_meta, [value]}]}, new_ctx} ->
+        {:ok, value_ast, _} = transform(value)
+        var_name = "@#{attr_name}"
+        node_meta = [attribute_type: :module_attribute] ++ build_meta(meta)
+        target = {:variable, [], var_name}
+        {{:assignment, node_meta, [target, value_ast]}, new_ctx}
+
+      # Getter: @attr (no value)
+      {{:@, meta, [{attr_name, _attr_meta, nil}]}, new_ctx} ->
+        var_name = "@#{attr_name}"
+        node_meta = [attribute_type: :module_attribute] ++ build_meta(meta)
+        {{:variable, node_meta, var_name}, new_ctx}
 
       {nil, ctx} ->
         {{:literal, [subtype: :null], nil}, ctx}
@@ -886,13 +916,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # ----- Module Attributes -----
-
-  defp post_transform({:@, meta, [{attr_name, _attr_meta, [value]}]}, ctx) do
-    var_name = "@#{attr_name}"
-    node_meta = [attribute_type: :module_attribute] ++ build_meta(meta)
-    target = {:variable, [], var_name}
-    {{:assignment, node_meta, [target, value]}, ctx}
-  end
+  # Handled via __attr_marker__ in pre/post_transform to prevent
+  # child traversal from corrupting the attribute name.
 
   # ----- Try/Rescue -----
 
