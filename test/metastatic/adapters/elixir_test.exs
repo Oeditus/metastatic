@@ -183,7 +183,7 @@ defmodule Metastatic.Adapters.ElixirTest do
     test "transforms string concatenation" do
       ast = {:<>, [], ["hello", " world"]}
       assert {:ok, result, %{}} = ToMeta.transform(ast)
-      assert binary_op?(result, :arithmetic, :<>)
+      assert binary_op?(result, :string, :<>)
     end
 
     test "normalizes && to :and" do
@@ -429,15 +429,17 @@ defmodule Metastatic.Adapters.ElixirTest do
   end
 
   describe "ToMeta - comprehensions (Extended layer)" do
-    test "transforms for comprehension to language_specific" do
-      # For comprehensions are transformed to language_specific because after
-      # traversal, the <- operator is already transformed to function_call
+    test "transforms for comprehension to comprehension node" do
       ast =
         {:for, [], [{:<-, [], [{:x, [], nil}, [1, 2, 3]]}, [do: {:*, [], [{:x, [], nil}, 2]}]]}
 
-      assert {:ok, {:language_specific, meta, _embedded}, _metadata} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :language) == :elixir
-      assert Keyword.get(meta, :hint) == :comprehension
+      assert {:ok, {:comprehension, _meta, [body | generators]}, _metadata} =
+               ToMeta.transform(ast)
+
+      # Body is the multiplication expression
+      assert {:binary_op, _, _} = body
+      # Single generator
+      assert [{:generator, _, [{:variable, _, "x"}, {:list, _, _}]}] = generators
     end
   end
 

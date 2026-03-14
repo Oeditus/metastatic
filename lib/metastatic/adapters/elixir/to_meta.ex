@@ -35,7 +35,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       iex> {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
       iex> meta_ast
       {:binary_op, [category: :arithmetic, operator: :+, original_meta: [line: 1]],
-       [{:variable, [original_meta: [line: 1]], "x"},
+       [{:variable, [scope: :local, original_meta: [line: 1]], "x"},
         {:literal, [subtype: :integer], 5}]}
   """
   require Logger
@@ -77,7 +77,13 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     :async_operation,
     :property,
     :augmented_assignment,
-    :import
+    :import,
+    :range,
+    :string_interpolation,
+    :comprehension,
+    :generator,
+    :filter,
+    :type_annotation
   ]
 
   @map {:__aliases__, [alias: false], [:Map]}
@@ -93,7 +99,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       {:ok, {:literal, [subtype: :integer], 42}, %{}}
 
       iex> ToMeta.transform({:x, [line: 1], nil})
-      {:ok, {:variable, [line: 1, original_meta: [line: 1]], "x"}, %{}}
+      {:ok, {:variable, [scope: :local, line: 1, original_meta: [line: 1]], "x"}, %{}}
   """
   @spec transform(term()) :: {:ok, term(), map()} | {:error, String.t()}
   def transform(elixir_ast) do
@@ -181,6 +187,22 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # (especially `<-` operators) before children get transformed.
   defp pre_transform({:with, _meta, _args} = ast, ctx) do
     {{:__with_marker__, [], nil}, Map.put(ctx, :pending_with, ast)}
+  end
+
+  # Handle for comprehensions in pre_transform to preserve `<-` generators
+  # before children get transformed.
+  defp pre_transform({:for, _meta, _args} = ast, ctx) do
+    {{:__for_marker__, [], nil}, Map.put(ctx, :pending_for, ast)}
+  end
+
+  # Handle string interpolation in pre_transform to prevent Macro.traverse from
+  # descending into the binary parts and corrupting the interpolation structure.
+  defp pre_transform({:<<>>, _meta, parts} = ast, ctx) when is_list(parts) do
+    if has_interpolation?(parts) do
+      {{:__interpolation_marker__, [], nil}, Map.put(ctx, :pending_interpolation, ast)}
+    else
+      {ast, ctx}
+    end
   end
 
   # Handle module attributes in pre_transform to prevent Macro.traverse from
@@ -453,21 +475,74 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
+  # Handle __for_marker__ - retrieve original for comprehension and transform it
+  defp post_transform({:__for_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_for) do
+      {{:for, meta, args}, new_ctx} ->
+        result = transform_for(args, meta)
+        {result, new_ctx}
+
+      {nil, ctx} ->
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
+  # Handle __interpolation_marker__ - produce :string_interpolation MetaAST node
+  defp post_transform({:__interpolation_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_interpolation) do
+      {{:<<>>, meta, parts}, new_ctx} ->
+        # Transform interpolation parts individually
+        transformed_parts =
+          Enum.map(parts, fn
+            part when is_binary(part) ->
+              {:literal, [subtype: :string], part}
+
+            {:"::", _, [{{:., _, [Kernel, :to_string]}, _, [expr]}, {:binary, _, _}]} ->
+              {:ok, expr_ast, _} = transform(expr)
+              expr_ast
+
+            other ->
+              {:ok, ast, _} = transform(other)
+              ast
+          end)
+
+        node_meta = build_meta(meta)
+        {{:string_interpolation, node_meta, transformed_parts}, new_ctx}
+
+      {nil, ctx} ->
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
   # Handle __attr_marker__ - retrieve original module attribute from context and transform it
   defp post_transform({:__attr_marker__, [], nil}, ctx) do
     case Map.pop(ctx, :pending_attr) do
+      # Type annotation attributes: @spec, @type, @typep, @callback, @macrocallback
+      {{:@, meta, [{attr_name, _attr_meta, [value]}]}, new_ctx}
+      when attr_name in [:spec, :type, :typep, :callback, :macrocallback] ->
+        {func_name, arity} = extract_type_annotation_info(attr_name, value)
+        type_expr = {:language_specific, [language: :elixir, hint: :type_expr], value}
+
+        node_meta =
+          [annotation_type: attr_name, name: func_name, arity: arity] ++ build_meta(meta)
+
+        {{:type_annotation, node_meta, [type_expr]}, new_ctx}
+
       # Setter: @attr value
       {{:@, meta, [{attr_name, _attr_meta, [value]}]}, new_ctx} ->
         {:ok, value_ast, _} = transform(value)
         var_name = "@#{attr_name}"
         node_meta = [attribute_type: :module_attribute] ++ build_meta(meta)
-        target = {:variable, [], var_name}
+        target = {:variable, [scope: :module_attribute], var_name}
         {{:assignment, node_meta, [target, value_ast]}, new_ctx}
 
       # Getter: @attr (no value)
       {{:@, meta, [{attr_name, _attr_meta, nil}]}, new_ctx} ->
         var_name = "@#{attr_name}"
-        node_meta = [attribute_type: :module_attribute] ++ build_meta(meta)
+
+        node_meta =
+          [scope: :module_attribute, attribute_type: :module_attribute] ++ build_meta(meta)
+
         {{:variable, node_meta, var_name}, new_ctx}
 
       {nil, ctx} ->
@@ -549,7 +624,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Variable reference
   defp post_transform({name, meta, context}, ctx)
        when is_atom(name) and is_atom(context) and not is_nil(context) do
-    node_meta = build_meta(meta)
+    node_meta = [scope: :local] ++ build_meta(meta)
     {{:variable, node_meta, Atom.to_string(name)}, ctx}
   end
 
@@ -559,7 +634,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     if special_form?(name) do
       {{:literal, [subtype: :symbol] ++ build_meta(meta), name}, ctx}
     else
-      node_meta = build_meta(meta)
+      node_meta = [scope: :local] ++ build_meta(meta)
       {{:variable, node_meta, Atom.to_string(name)}, ctx}
     end
   end
@@ -574,7 +649,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # String concatenation
   defp post_transform({:<>, meta, [left, right]}, ctx) do
-    node_meta = [category: :arithmetic, operator: :<>] ++ build_meta(meta)
+    node_meta = [category: :string, operator: :<>] ++ build_meta(meta)
     {{:binary_op, node_meta, [left, right]}, ctx}
   end
 
@@ -590,6 +665,20 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     original_meta = if normalized != op, do: [original_op: op], else: []
     node_meta = [category: :boolean, operator: normalized] ++ original_meta ++ build_meta(meta)
     {{:binary_op, node_meta, [left, right]}, ctx}
+  end
+
+  # ----- Range Operators -----
+
+  # Range: 1..10
+  defp post_transform({:.., meta, [left, right]}, ctx) do
+    node_meta = build_meta(meta)
+    {{:range, node_meta, [left, right]}, ctx}
+  end
+
+  # Range with step: 1..10//2
+  defp post_transform({:..//, meta, [start, stop, step]}, ctx) do
+    node_meta = [step: step] ++ build_meta(meta)
+    {{:range, node_meta, [start, stop]}, ctx}
   end
 
   # ----- Unary Operators -----
@@ -802,6 +891,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
                 :@,
                 :&,
                 :|>,
+                :..,
+                :..//,
                 :import,
                 :use,
                 :require,
@@ -962,26 +1053,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Note: with expressions are now handled via __with_marker__ in pre/post_transform.
 
   # ----- For Comprehension -----
-
-  defp post_transform({:for, meta, args}, ctx) do
-    {generators, opts} = extract_comprehension_parts(args)
-    body = Keyword.get(opts, :do)
-
-    case generators do
-      [{:<-, _, [var, collection]}] ->
-        # Simple map-like comprehension
-        var_name = extract_var_name(var)
-        param = {:param, [], var_name}
-        lambda = {:lambda, [params: [param]], flatten_body(body)}
-        node_meta = [op_type: :map, original_form: :comprehension] ++ build_meta(meta)
-        {{:collection_op, node_meta, [lambda, collection]}, ctx}
-
-      _ ->
-        # Complex comprehension - preserve as language_specific
-        node_meta = [language: :elixir, hint: :comprehension] ++ build_meta(meta)
-        {{:language_specific, node_meta, {:for, meta, args}}, ctx}
-    end
-  end
+  # Note: for comprehensions are handled via __for_marker__ in pre/post_transform.
 
   # ----- Attribute Access -----
 
@@ -1082,6 +1154,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   defp ensure_meta_ast(other), do: other
 
+  # Check if binary parts contain interpolation
+  defp has_interpolation?(parts) do
+    Enum.any?(parts, fn
+      {:"::", _, _} -> true
+      _ -> false
+    end)
+  end
+
   # Check if an atom is a special form
   defp special_form?(name) do
     name in [
@@ -1145,10 +1225,6 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp params_to_pattern_meta_ast([single]), do: single
   defp params_to_pattern_meta_ast(params), do: {:tuple, [], params}
 
-  # Extract variable name
-  defp extract_var_name({name, _, _}) when is_atom(name), do: Atom.to_string(name)
-  defp extract_var_name(_), do: "_"
-
   # Flatten body to list of statements (for raw Elixir AST)
   defp flatten_body({:__block__, _, statements}), do: statements
   defp flatten_body({:block, _, statements}), do: statements
@@ -1164,9 +1240,38 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Extract function signature info from transformed MetaAST
   # With args: signature becomes {:function_call, [name: "func_name"], [params...]}
   # Without args: signature becomes {:variable, meta, "func_name"}
-  defp extract_signature_from_meta_ast({:function_call, meta, params}) do
+  #
+  # Guarded functions: after Macro.traverse, `{:when, meta, [sig, guard]}`
+  # becomes `{:function_call, [name: "when"], [sig_transformed, guard_transformed]}`.
+  # We detect this pattern and extract the real signature + guard.
+
+  # Guarded function: {:function_call, [name: "when"], [real_sig, guard_ast]}
+  defp extract_signature_from_meta_ast({:function_call, meta, [real_sig, guard_ast]})
+       when is_list(meta) do
+    if Keyword.get(meta, :name) == "when" do
+      {func_name, params, _} = extract_signature_from_meta_ast(real_sig)
+      {func_name, params, guard_ast}
+    else
+      extract_signature_as_call(meta, [real_sig, guard_ast])
+    end
+  end
+
+  # Regular function call signature with 1 or 3+ params
+  defp extract_signature_from_meta_ast({:function_call, meta, params}) when is_list(meta) do
+    extract_signature_as_call(meta, params)
+  end
+
+  # Zero-arity function: signature becomes a variable
+  defp extract_signature_from_meta_ast({:variable, _, func_name}) do
+    {func_name, [], nil}
+  end
+
+  # Fallback
+  defp extract_signature_from_meta_ast(_), do: {"anonymous", [], nil}
+
+  defp extract_signature_as_call(meta, params) do
     func_name = Keyword.get(meta, :name, "anonymous")
-    # Convert parameter MetaAST nodes to {:param, [], name} format
+
     param_list =
       Enum.map(params, fn
         {:variable, _, name} -> {:param, [], name}
@@ -1175,14 +1280,6 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
     {func_name, param_list, nil}
   end
-
-  # Zero-arity function: signature becomes a variable
-  defp extract_signature_from_meta_ast({:variable, _, func_name}) do
-    {func_name, [], nil}
-  end
-
-  # Handle guarded functions - signature would include guard info
-  defp extract_signature_from_meta_ast(_), do: {"anonymous", [], nil}
 
   # Extract module name from transformed MetaAST
   # The name becomes {:variable, meta, "Module.Name"}
@@ -1357,23 +1454,6 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end)
   end
 
-  # Extract comprehension parts
-  defp extract_comprehension_parts(args) do
-    {generators, rest} =
-      Enum.split_while(args, fn
-        {:<-, _, _} -> true
-        _ -> false
-      end)
-
-    opts =
-      case List.last(rest) do
-        kw when is_list(kw) -> kw
-        _ -> []
-      end
-
-    {generators, opts}
-  end
-
   # Extract captured function name
   defp extract_captured_function_name({{:., _, [module, func]}, _, []}) do
     "#{extract_module_name(module)}.#{func}"
@@ -1384,4 +1464,65 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   defp extract_captured_function_name(_), do: "unknown"
+
+  # Transform for comprehension (called from pre_transform marker)
+  # Elixir for args: [gen1, gen2, filter1, gen3, filter2, [do: body, into: target]]
+  # The last element is always the keyword opts list.
+  defp transform_for(args, meta) do
+    # Split: last element is opts keyword list, everything before is clauses
+    {clauses, [opts]} = Enum.split(args, -1)
+    body = Keyword.get(opts, :do)
+    {:ok, body_ast, _} = transform(body)
+    into = Keyword.get(opts, :into)
+
+    # Transform generators and filters (interleaved)
+    generators_and_filters =
+      Enum.map(clauses, fn
+        {:<-, gen_meta, [var, collection]} ->
+          {:ok, var_ast, _} = transform(var)
+          {:ok, coll_ast, _} = transform(collection)
+          {:generator, build_meta(gen_meta), [var_ast, coll_ast]}
+
+        filter_expr ->
+          {:ok, filter_ast, _} = transform(filter_expr)
+          {:filter, [], [filter_ast]}
+      end)
+
+    node_meta = build_meta(meta)
+    node_meta = if into, do: [into: into] ++ node_meta, else: node_meta
+    {:comprehension, node_meta, [body_ast | generators_and_filters]}
+  end
+
+  # Extract function name and arity from type annotation value
+  defp extract_type_annotation_info(attr_type, value)
+       when attr_type in [:spec, :callback, :macrocallback] do
+    case value do
+      # @spec func(args) :: return_type
+      {:"::", _, [{func_name, _, args} | _]} when is_atom(func_name) and is_list(args) ->
+        {Atom.to_string(func_name), length(args)}
+
+      # @spec func :: return_type (no args)
+      {:"::", _, [{func_name, _, nil} | _]} when is_atom(func_name) ->
+        {Atom.to_string(func_name), 0}
+
+      # @spec func(args) :: return_type with when clause
+      {:when, _, [{:"::", _, [{func_name, _, args} | _]} | _]}
+      when is_atom(func_name) and is_list(args) ->
+        {Atom.to_string(func_name), length(args)}
+
+      _ ->
+        {"unknown", 0}
+    end
+  end
+
+  defp extract_type_annotation_info(_attr_type, value) do
+    case value do
+      # @type name :: type_expr
+      {:"::", _, [{name, _, _} | _]} when is_atom(name) ->
+        {Atom.to_string(name), 0}
+
+      _ ->
+        {"unknown", 0}
+    end
+  end
 end

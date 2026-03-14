@@ -49,7 +49,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   # M2.1 Core Layer - Variables
 
   def transform(%{"type" => "var", "name" => name}) do
-    {:ok, {:variable, [], name}, %{}}
+    {:ok, {:variable, [scope: :local], name}, %{}}
   end
 
   # M2.1 Core Layer - Constructors (data constructors)
@@ -246,7 +246,8 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     # Try to extract function name and transform to a more useful representation
     case extract_function_from_matches(matches) do
       {:ok, name, body} ->
-        {:ok, {:assignment, [], [{:variable, [], name}, body]}, %{construct: :function_binding}}
+        {:ok, {:assignment, [], [{:variable, [scope: :local], name}, body]},
+         %{construct: :function_binding}}
 
       :error ->
         {:ok,
@@ -322,7 +323,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   defp transform_binding(%{"type" => "pat_bind", "pattern" => pat, "rhs" => rhs}) do
     with {:ok, var_name} <- extract_pattern_var(pat),
          {:ok, value_meta, _} <- transform(rhs) do
-      {:ok, {:assignment, [], [{:variable, [], var_name}, value_meta]}}
+      {:ok, {:assignment, [], [{:variable, [scope: :local], var_name}, value_meta]}}
     end
   end
 

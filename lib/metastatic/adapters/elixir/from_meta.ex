@@ -123,6 +123,13 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     :augmented_assignment,
     :property,
     :import,
+    :type_annotation,
+    # New types
+    :range,
+    :string_interpolation,
+    :comprehension,
+    :generator,
+    :filter,
     # Native
     :language_specific,
     # Helpers
@@ -179,11 +186,54 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     {{op, elixir_meta, [operand]}, acc}
   end
 
+  # ----- Range -----
+
+  defp transform_node(:range, meta, [start, stop], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    case Keyword.get(meta, :step) do
+      nil ->
+        # Simple range: start..stop
+        {{:.., elixir_meta, [start, stop]}, acc}
+
+      step ->
+        # Range with step: start..stop//step
+        # Step is stored in metadata and NOT traversed by AST.traverse,
+        # so we must transform it manually here.
+        {:ok, step_ex} = __MODULE__.transform(step, acc)
+        {{:..//, elixir_meta, [start, stop, step_ex]}, acc}
+    end
+  end
+
+  # ----- String Interpolation -----
+
+  defp transform_node(:string_interpolation, meta, parts, acc) when is_list(parts) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    elixir_parts =
+      Enum.map(parts, fn
+        # Plain string literal - after traversal it's a raw string
+        value when is_binary(value) -> value
+        # Expression part - wrap in interpolation syntax
+        expr -> {:"::", [], [{{:., [], [Kernel, :to_string]}, [], [expr]}, {:binary, [], nil}]}
+      end)
+
+    {{:<<>>, elixir_meta, elixir_parts}, acc}
+  end
+
   # ----- Inline Match (=) -----
 
   defp transform_node(:inline_match, meta, [pattern, value], acc) do
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
-    {{:=, elixir_meta, [pattern, value]}, acc}
+
+    case Keyword.get(meta, :original_form) do
+      # with clause: reconstruct as `<-` instead of `=`
+      :with_clause ->
+        {{:<-, elixir_meta, [pattern, value]}, acc}
+
+      _ ->
+        {{:=, elixir_meta, [pattern, value]}, acc}
+    end
   end
 
   # ----- Lists -----
@@ -232,10 +282,17 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   defp transform_node(:block, meta, statements, acc) when is_list(statements) do
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-    case statements do
-      [] -> {nil, acc}
-      [single] -> {single, acc}
-      multiple -> {{:__block__, elixir_meta, multiple}, acc}
+    case Keyword.get(meta, :original_form) do
+      :with ->
+        # Reconstruct with expression from inline_match clauses + body
+        reconstruct_with(statements, elixir_meta, acc)
+
+      _ ->
+        case statements do
+          [] -> {nil, acc}
+          [single] -> {single, acc}
+          multiple -> {{:__block__, elixir_meta, multiple}, acc}
+        end
     end
   end
 
@@ -245,18 +302,25 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     name = Keyword.get(meta, :name, "unknown")
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-    case String.split(name, ".") do
-      [single_name] ->
-        # Local call
-        func_atom = String.to_atom(single_name)
-        {{func_atom, elixir_meta, args}, acc}
+    case Keyword.get(meta, :original_form) do
+      # Range with step: 1..10//2 -> {:"..//", meta, [start, stop, step]}
+      :range_step ->
+        {{:..//, elixir_meta, args}, acc}
 
-      parts when length(parts) > 1 ->
-        # Remote call
-        {func_name, module_parts} = List.pop_at(parts, -1)
-        module_ast = build_module_alias(module_parts)
-        func_atom = String.to_atom(func_name)
-        {{{:., [], [module_ast, func_atom]}, elixir_meta, args}, acc}
+      _ ->
+        case String.split(name, ".") do
+          [single_name] ->
+            # Local call
+            func_atom = String.to_atom(single_name)
+            {{func_atom, elixir_meta, args}, acc}
+
+          parts when length(parts) > 1 ->
+            # Remote call
+            {func_name, module_parts} = List.pop_at(parts, -1)
+            module_ast = build_module_alias(module_parts)
+            func_atom = String.to_atom(func_name)
+            {{{:., [], [module_ast, func_atom]}, elixir_meta, args}, acc}
+        end
     end
   end
 
@@ -265,10 +329,9 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   defp transform_node(:conditional, meta, [condition, then_branch, else_branch], acc) do
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-    # Check if this was originally an unless
     case Keyword.get(meta, :original_form) do
       :unless ->
-        # Reconstruct unless (need to undo the negation)
+        # Reconstruct unless (undo the negation)
         actual_cond =
           case condition do
             {:not, [], [inner_cond]} -> inner_cond
@@ -280,9 +343,9 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
         {{:unless, elixir_meta, [actual_cond, clauses]}, acc}
 
       :cond ->
-        # This was a cond - but we've nested it, just emit as if
-        clauses = build_if_clauses(then_branch, else_branch)
-        {{:if, elixir_meta, [condition, clauses]}, acc}
+        # Unflatten nested conditionals back to cond clauses
+        cond_clauses = collect_cond_clauses(condition, then_branch, else_branch)
+        {{:cond, elixir_meta, [[do: cond_clauses]]}, acc}
 
       _ ->
         # Regular if
@@ -306,6 +369,16 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     _guard = Keyword.get(meta, :guard)
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
+    # Pattern is stored in metadata and not traversed by AST.traverse,
+    # so we must transform it manually here.
+    pattern_ex =
+      if pattern do
+        {:ok, transformed} = __MODULE__.transform(pattern, acc)
+        transformed
+      else
+        :_
+      end
+
     body_ex =
       case body do
         [single] -> single
@@ -313,35 +386,78 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
       end
 
     # Return the clause format {:->, meta, [[pattern], body]}
-    {{:->, elixir_meta, [[pattern], body_ex]}, acc}
+    {{:->, elixir_meta, [[pattern_ex], body_ex]}, acc}
   end
 
   # ----- Lambda (anonymous functions) -----
 
   defp transform_node(:lambda, meta, body, acc) when is_list(body) do
-    params = Keyword.get(meta, :params, [])
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    multi_clause = Keyword.get(meta, :multi_clause, false)
+    capture_form = Keyword.get(meta, :capture_form)
 
-    params_ex =
-      Enum.map(params, fn
-        {:param, _meta, name} when is_binary(name) ->
-          {String.to_atom(name), [], nil}
+    cond do
+      # Function capture: &func/arity or &(&1 + &2)
+      capture_form in [:named_function, :argument_reference, :expression] ->
+        reconstruct_capture(meta, body, elixir_meta, acc)
 
-        name when is_binary(name) ->
-          {String.to_atom(name), [], nil}
+      # Multi-clause fn: fn :a -> 1; :b -> 2 end
+      multi_clause ->
+        clauses =
+          Enum.map(body, fn
+            {:match_arm, arm_meta, arm_body} ->
+              pattern = Keyword.get(arm_meta, :pattern)
+              arm_ex_meta = Keyword.get(arm_meta, :original_meta, [])
 
-        other ->
-          other
-      end)
+              arm_body_ex =
+                case arm_body do
+                  [single] -> single
+                  multiple -> {:__block__, [], multiple}
+                end
 
-    body_ex =
-      case body do
-        [single] -> single
-        multiple -> {:__block__, [], multiple}
-      end
+              params =
+                case pattern do
+                  {:tuple, _, elts} -> elts
+                  single -> [single]
+                end
 
-    clause = {:->, [], [params_ex, body_ex]}
-    {{:fn, elixir_meta, [clause]}, acc}
+              {:->, arm_ex_meta, [params, arm_body_ex]}
+
+            # Fallback for already-transformed clauses
+            {:->, _, _} = clause ->
+              clause
+
+            other ->
+              {:->, [], [[:_], other]}
+          end)
+
+        {{:fn, elixir_meta, clauses}, acc}
+
+      # Single-clause lambda: fn x -> x end
+      true ->
+        params = Keyword.get(meta, :params, [])
+
+        params_ex =
+          Enum.map(params, fn
+            {:param, _meta, name} when is_binary(name) ->
+              {String.to_atom(name), [], nil}
+
+            name when is_binary(name) ->
+              {String.to_atom(name), [], nil}
+
+            other ->
+              other
+          end)
+
+        body_ex =
+          case body do
+            [single] -> single
+            multiple -> {:__block__, [], multiple}
+          end
+
+        clause = {:->, [], [params_ex, body_ex]}
+        {{:fn, elixir_meta, [clause]}, acc}
+    end
   end
 
   # ----- Collection Operations -----
@@ -404,6 +520,7 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     name = Keyword.get(meta, :name, "unknown")
     params = Keyword.get(meta, :params, [])
     visibility = Keyword.get(meta, :visibility, :public)
+    guards = Keyword.get(meta, :guards)
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
     func_atom = String.to_atom(name)
@@ -429,7 +546,49 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
       end
 
     signature = {func_atom, elixir_meta, params_ex}
+
+    # Wrap signature with guard clause if present.
+    # Guards are stored in metadata and not traversed by AST.traverse,
+    # so we must transform them manually here.
+    signature =
+      if guards do
+        {:ok, guards_ex} = __MODULE__.transform(guards, acc)
+        {:when, elixir_meta, [signature, guards_ex]}
+      else
+        signature
+      end
+
     {{def_type, elixir_meta, [signature, [do: body_ex]]}, acc}
+  end
+
+  # ----- Assignment -----
+
+  defp transform_node(:assignment, meta, [target, value], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    case Keyword.get(meta, :attribute_type) do
+      :module_attribute ->
+        # Module attribute: @attr value
+        # After traversal, target was {:variable, [], "@attr_name"} which became
+        # {:'@attr_name', [], nil}. Strip the @ prefix to get the attribute atom.
+        attr_name =
+          case target do
+            {var_atom, _, _} when is_atom(var_atom) ->
+              var_atom
+              |> Atom.to_string()
+              |> String.trim_leading("@")
+              |> String.to_atom()
+
+            _ ->
+              :unknown
+          end
+
+        {{:@, elixir_meta, [{attr_name, elixir_meta, [value]}]}, acc}
+
+      _ ->
+        # Plain assignment (imperative binding)
+        {{:=, elixir_meta, [target, value]}, acc}
+    end
   end
 
   # ----- Pin Operator -----
@@ -445,15 +604,63 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     {[head | tail], acc}
   end
 
+  # ----- Comprehension -----
+
+  defp transform_node(:comprehension, meta, [body | generators_and_filters], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    # generators/filters are already transformed by AST.traverse to Elixir forms
+    clauses =
+      Enum.map(generators_and_filters, fn
+        # After traversal, generator becomes {:<-, meta, [var, coll]} (Elixir AST)
+        {:<-, _, _} = gen -> gen
+        # Filter becomes raw Elixir AST condition
+        filter -> filter
+      end)
+
+    into = Keyword.get(meta, :into)
+    opts = [do: body]
+    opts = if into, do: Keyword.put(opts, :into, into), else: opts
+
+    {{:for, elixir_meta, clauses ++ [opts]}, acc}
+  end
+
+  # ----- Generator (inside comprehension) -----
+
+  defp transform_node(:generator, meta, [variable, collection], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    {{:<-, elixir_meta, [variable, collection]}, acc}
+  end
+
+  # ----- Filter (inside comprehension) -----
+
+  defp transform_node(:filter, _meta, [condition], acc) do
+    {condition, acc}
+  end
+
+  # ----- Type Annotation -----
+
+  defp transform_node(:type_annotation, meta, [type_expr], acc) do
+    annotation_type = Keyword.get(meta, :annotation_type, :spec)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+
+    # type_expr is a language_specific node wrapping the original Elixir type AST.
+    # After traversal, the language_specific handler returns the native AST.
+    # So type_expr here is already the raw Elixir type AST.
+    {{:@, elixir_meta, [{annotation_type, elixir_meta, [type_expr]}]}, acc}
+  end
+
   # ----- Language Specific -----
 
   defp transform_node(:language_specific, meta, native_ast, acc) do
     language = Keyword.get(meta, :language)
 
-    if language == :elixir do
-      {native_ast, acc}
-    else
-      throw({:unsupported, "Cannot reify #{language} language-specific construct to Elixir"})
+    case language do
+      :elixir ->
+        {native_ast, acc}
+
+      _ ->
+        throw({:unsupported, "Cannot reify #{language} language-specific construct to Elixir"})
     end
   end
 
@@ -498,25 +705,14 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
     case children do
       [try_block | rest] ->
-        # Build try expression
+        # After bottom-up traversal, match_arm children are already transformed
+        # to {:->, ...} clauses. Separate clause handlers from a potential after block.
+        {rescue_clauses, after_block} = split_exception_handlers(rest)
+
+        # Build keyword list in the order Macro.to_string expects: do, rescue, after
         clauses = [do: try_block]
-
-        clauses =
-          Enum.reduce(rest, clauses, fn
-            {:catch_clause, _, [pattern, body]} ->
-              catch_clause = {:->, [], [[pattern], body]}
-              Keyword.update(clauses, :catch, [catch_clause], &[catch_clause | &1])
-
-            {:rescue_clause, _, [pattern, body]} ->
-              rescue_clause = {:->, [], [[pattern], body]}
-              Keyword.update(clauses, :rescue, [rescue_clause], &[rescue_clause | &1])
-
-            {:finally_clause, _, [body]} ->
-              Keyword.put(clauses, :after, body)
-
-            _ ->
-              clauses
-          end)
+        clauses = if rescue_clauses != [], do: clauses ++ [rescue: rescue_clauses], else: clauses
+        clauses = if after_block, do: clauses ++ [after: after_block], else: clauses
 
         {{:try, elixir_meta, [clauses]}, acc}
 
@@ -551,6 +747,170 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   defp transform_node(type, meta, children, _acc) do
     throw({:unsupported, "Unsupported MetaAST construct: #{inspect({type, meta, children})}"})
+  end
+
+  # ----- Lambda Helpers -----
+
+  # Reconstruct & capture syntax from lambda metadata
+  defp reconstruct_capture(meta, body, elixir_meta, acc) do
+    capture_form = Keyword.get(meta, :capture_form)
+
+    case capture_form do
+      :named_function ->
+        case body do
+          [{:function_call, func_meta, _args}] ->
+            func_name = Keyword.get(func_meta, :name, "unknown")
+            arity = Keyword.get(meta, :arity, length(Keyword.get(meta, :params, [])))
+            func_ref = build_capture_func_ref(func_name)
+            {{:&, elixir_meta, [{:/, [], [func_ref, arity]}]}, acc}
+
+          _ ->
+            build_fn_fallback(meta, body, elixir_meta, acc)
+        end
+
+      :argument_reference ->
+        {{:&, elixir_meta, [1]}, acc}
+
+      :expression ->
+        arity = Keyword.get(meta, :arity, length(Keyword.get(meta, :params, [])))
+        capture_body = rebuild_capture_body(body, arity)
+        {{:&, elixir_meta, [capture_body]}, acc}
+
+      _ ->
+        build_fn_fallback(meta, body, elixir_meta, acc)
+    end
+  end
+
+  defp build_capture_func_ref(func_name) do
+    case String.split(func_name, ".") do
+      [single] ->
+        {String.to_atom(single), [], nil}
+
+      parts ->
+        {func, module_parts} = List.pop_at(parts, -1)
+        module_ast = build_module_alias(module_parts)
+        {{:., [], [module_ast, String.to_atom(func)]}, [], []}
+    end
+  end
+
+  defp rebuild_capture_body(body, arity) do
+    substitution = for i <- 1..arity//1, into: %{}, do: {"arg_#{i}", i}
+
+    body_ex =
+      case body do
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
+      end
+
+    substitute_capture_args(body_ex, substitution)
+  end
+
+  defp substitute_capture_args({var_atom, meta, nil} = ast, subs) when is_atom(var_atom) do
+    name = Atom.to_string(var_atom)
+
+    case Map.get(subs, name) do
+      nil -> ast
+      n -> {:&, meta, [n]}
+    end
+  end
+
+  defp substitute_capture_args({form, meta, args}, subs) when is_list(args) do
+    {form, meta, Enum.map(args, &substitute_capture_args(&1, subs))}
+  end
+
+  defp substitute_capture_args(other, _subs), do: other
+
+  defp build_fn_fallback(meta, body, elixir_meta, acc) do
+    params = Keyword.get(meta, :params, [])
+
+    params_ex =
+      Enum.map(params, fn
+        {:param, _, name} when is_binary(name) -> {String.to_atom(name), [], nil}
+        name when is_binary(name) -> {String.to_atom(name), [], nil}
+        other -> other
+      end)
+
+    body_ex =
+      case body do
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
+      end
+
+    clause = {:->, [], [params_ex, body_ex]}
+    {{:fn, elixir_meta, [clause]}, acc}
+  end
+
+  # ----- Exception Handling Helpers -----
+
+  # Split exception handler children into clause handlers and optional after block.
+  # After bottom-up traversal, match_arm nodes become {:->, ...} clauses.
+  # The after block (if present) is the last element and is NOT a clause.
+  defp split_exception_handlers([]), do: {[], nil}
+
+  defp split_exception_handlers(rest) do
+    {clauses, tail} =
+      Enum.split_while(rest, fn
+        {:->, _, _} -> true
+        _ -> false
+      end)
+
+    case tail do
+      [after_block] -> {clauses, after_block}
+      [] -> {clauses, nil}
+      _ -> {clauses, {:__block__, [], tail}}
+    end
+  end
+
+  # ----- Cond Reconstruction Helpers -----
+
+  # Collect cond clauses from nested conditional chain.
+  # After bottom-up traversal, inner conditionals are already transformed
+  # to {:if, ...} Elixir AST. We need to handle both MetaAST and Elixir forms.
+  defp collect_cond_clauses(condition, then_branch, else_branch) do
+    clause = {:->, [], [[condition], then_branch]}
+
+    case else_branch do
+      # MetaAST conditional (shouldn't normally happen after traversal, but handle)
+      {:conditional, _meta, [next_cond, next_then, next_else]} ->
+        [clause | collect_cond_clauses(next_cond, next_then, next_else)]
+
+      # Already-transformed Elixir {:if, meta, [condition, [do: then, else: else]]}
+      {:if, _meta, [next_cond, kw_clauses]} when is_list(kw_clauses) ->
+        next_then = Keyword.get(kw_clauses, :do)
+        next_else = Keyword.get(kw_clauses, :else)
+        [clause | collect_cond_clauses(next_cond, next_then, next_else)]
+
+      nil ->
+        [clause]
+
+      _ ->
+        [clause]
+    end
+  end
+
+  # ----- With Reconstruction Helpers -----
+
+  # Reconstruct a with expression from a block of statements.
+  # After bottom-up traversal, inline_match nodes with :with_clause
+  # are already transformed to {:<-, meta, [pattern, expr]}.
+  # The remaining statements form the body.
+  defp reconstruct_with(statements, elixir_meta, acc) do
+    # Split: `<-` clauses are with clauses, everything after is body
+    {with_clauses, body_stmts} =
+      Enum.split_while(statements, fn
+        {:<-, _meta, _args} -> true
+        _ -> false
+      end)
+
+    body =
+      case body_stmts do
+        [] -> nil
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
+      end
+
+    with_args = with_clauses ++ [[do: body]]
+    {{:with, elixir_meta, with_args}, acc}
   end
 
   # ----- Helper Functions -----

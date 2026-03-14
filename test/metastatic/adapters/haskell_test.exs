@@ -66,7 +66,7 @@ defmodule Metastatic.Adapters.HaskellTest do
   describe "ToMeta - variables (M2.1 Core Layer)" do
     test "transforms variables" do
       ast = %{"type" => "var", "name" => "x"}
-      assert {:ok, {:variable, [], "x"}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:variable, [scope: :local], "x"}, %{}} = ToMeta.transform(ast)
     end
 
     test "transforms constructors" do
@@ -165,7 +165,7 @@ defmodule Metastatic.Adapters.HaskellTest do
       }
 
       assert {:ok, {:function_call, [name: "f"], [arg]}, %{}} = ToMeta.transform(ast)
-      assert {:variable, [], "x"} = arg
+      assert {:variable, [scope: :local], "x"} = arg
     end
 
     test "transforms curried function application" do
@@ -181,8 +181,8 @@ defmodule Metastatic.Adapters.HaskellTest do
       }
 
       assert {:ok, {:function_call, [name: "f"], [arg1, arg2]}, %{}} = ToMeta.transform(ast)
-      assert {:variable, [], "x"} = arg1
-      assert {:variable, [], "y"} = arg2
+      assert {:variable, [scope: :local], "x"} = arg1
+      assert {:variable, [scope: :local], "y"} = arg2
     end
   end
 
@@ -250,7 +250,7 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert {:ok, {:conditional, [], [condition, then_branch, else_branch]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:variable, [], "x"} = condition
+      assert {:variable, [scope: :local], "x"} = condition
       assert {:literal, [subtype: :integer], 1} = then_branch
       assert {:literal, [subtype: :integer], 2} = else_branch
     end
@@ -278,10 +278,11 @@ defmodule Metastatic.Adapters.HaskellTest do
 
       assert [assignment, body] = statements
 
-      assert {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]} =
+      assert {:assignment, [],
+              [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 42}]} =
                assignment
 
-      assert {:variable, [], "x"} = body
+      assert {:variable, [scope: :local], "x"} = body
     end
   end
 
@@ -358,7 +359,7 @@ defmodule Metastatic.Adapters.HaskellTest do
 
       # Haskell case produces [scrutinee | match_arm_nodes]
       assert {:ok, {:pattern_match, [], [scrutinee | arms]}, %{}} = ToMeta.transform(ast)
-      assert {:variable, [], "x"} = scrutinee
+      assert {:variable, [scope: :local], "x"} = scrutinee
       assert [{:match_arm, _, _}, {:match_arm, _, _}] = arms
     end
   end
@@ -449,7 +450,10 @@ defmodule Metastatic.Adapters.HaskellTest do
     alias Metastatic.Adapters.Haskell.FromMeta
 
     test "transforms function calls with currying" do
-      meta_ast = {:function_call, [name: "f"], [{:variable, [], "x"}, {:variable, [], "y"}]}
+      meta_ast =
+        {:function_call, [name: "f"],
+         [{:variable, [scope: :local], "x"}, {:variable, [scope: :local], "y"}]}
+
       assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
       assert ast["type"] == "app"
       assert get_in(ast, ["function", "type"]) == "app"
@@ -498,8 +502,9 @@ defmodule Metastatic.Adapters.HaskellTest do
       meta_ast =
         {:block, [construct: :let],
          [
-           {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]},
-           {:variable, [], "x"}
+           {:assignment, [],
+            [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 42}]},
+           {:variable, [scope: :local], "x"}
          ]}
 
       assert {:ok, ast} = FromMeta.transform(meta_ast, %{construct: :let})
@@ -513,7 +518,7 @@ defmodule Metastatic.Adapters.HaskellTest do
       meta_ast =
         {:pattern_match, [],
          [
-           {:variable, [], "x"},
+           {:variable, [scope: :local], "x"},
            {:match_arm, [pattern: {:literal, [subtype: :integer], 1}],
             [{:literal, [subtype: :string], "one"}]},
            {:match_arm, [pattern: :_], [{:literal, [subtype: :string], "other"}]}
@@ -643,8 +648,9 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert {:ok,
               {:assignment, [],
                [
-                 {:variable, [], "factorial"},
-                 {:lambda, [params: [{:param, [], "n"}], captures: []], [{:variable, [], "n"}]}
+                 {:variable, [scope: :local], "factorial"},
+                 {:lambda, [params: [{:param, [], "n"}], captures: []],
+                  [{:variable, [scope: :local], "n"}]}
                ]}, %{construct: :function_binding}} = ToMeta.transform(ast)
     end
   end

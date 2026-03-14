@@ -69,6 +69,31 @@ defmodule Metastatic.AST do
   Analyzers can use `op_kind` for precise semantic detection instead of heuristics.
   See `Metastatic.Semantic.OpKind` for the full type specification.
 
+  ## Import Semantics
+
+  The `:import` MetaAST type unifies all dependency/module-loading directives
+  across languages. The `import_type` metadata key preserves the original
+  language-specific semantics:
+
+  **Elixir:**
+  - `import_type: :import` -- brings functions into scope (`import MyModule`)
+  - `import_type: :use` -- invokes `__using__/1` macro (`use GenServer`)
+  - `import_type: :require` -- ensures module is compiled for macros (`require Logger`)
+  - `import_type: :alias` -- creates a short name (`alias MyApp.Repo`)
+
+  **Python:** `import_type: :import` for both `import` and `from...import`
+  **Ruby:** `import_type: :require` for `require`, `:include` for `include`
+  **Haskell:** `import_type: :import` for `import` declarations
+  **Erlang:** `import_type: :import` for `-import` attributes
+
+  All share the common structure:
+
+      {:import, [source: "ModuleName", import_type: :import, language: :elixir], []}
+
+  Adapters producing `:import` nodes MUST include `:source` (the module/package
+  name as a string) and `:import_type` (the original directive atom). The
+  `:language` key enables round-trip reconstruction of the original directive.
+
   ## Traversal
 
   Use `traverse/4` for walking and transforming ASTs:
@@ -107,6 +132,8 @@ defmodule Metastatic.AST do
           | :block
           | :assignment
           | :inline_match
+          | :range
+          | :string_interpolation
 
   @typedoc """
   Node type atoms for M2.2 Extended Layer - common patterns.
@@ -119,6 +146,9 @@ defmodule Metastatic.AST do
           | :match_arm
           | :exception_handling
           | :async_operation
+          | :comprehension
+          | :generator
+          | :filter
 
   @typedoc """
   Node type atoms for M2.2s Structural Layer - organizational constructs.
@@ -131,6 +161,7 @@ defmodule Metastatic.AST do
           | :augmented_assignment
           | :property
           | :import
+          | :type_annotation
 
   @typedoc """
   Node type atoms for M2.3 Native Layer - language-specific escape hatch.
@@ -157,7 +188,7 @@ defmodule Metastatic.AST do
   @typedoc """
   Category for binary/unary operators.
   """
-  @type operator_category :: :arithmetic | :comparison | :boolean
+  @type operator_category :: :arithmetic | :comparison | :boolean | :range | :string
 
   @typedoc """
   Container type classification.
@@ -168,6 +199,34 @@ defmodule Metastatic.AST do
   Visibility modifier.
   """
   @type visibility :: :public | :private | :protected
+
+  @typedoc """
+  Import type classification for `:import` nodes.
+
+  Preserves the original language directive so that from_meta can reconstruct
+  the correct syntax. Each language maps its dependency-loading constructs
+  to one of these atoms.
+  """
+  @type import_type :: :import | :use | :require | :alias | :include
+
+  @typedoc """
+  Scope classification for variable nodes.
+
+  Used in the `scope` metadata key of `:variable` nodes to distinguish
+  between different binding contexts:
+
+  - `:local` - Regular local variables (e.g., `x` in Elixir, `x` in Python)
+  - `:module_attribute` - Module-level attributes (e.g., `@attr` in Elixir)
+  - `:global` - Global/top-level variables (e.g., `global x` in Python)
+  - `:instance` - Instance variables (e.g., `@x` in Ruby, `self.x` in Python)
+  - `:class` - Class-level variables (e.g., `@@x` in Ruby)
+
+  Example:
+
+      {:variable, [scope: :local, line: 5], "x"}
+      {:variable, [scope: :module_attribute], "@moduledoc"}
+  """
+  @type variable_scope :: :local | :module_attribute | :global | :instance | :class
 
   @typedoc """
   Semantic domain for op_kind metadata.
@@ -226,7 +285,9 @@ defmodule Metastatic.AST do
     :early_return,
     :block,
     :assignment,
-    :inline_match
+    :inline_match,
+    :range,
+    :string_interpolation
   ]
 
   @extended_types [
@@ -236,7 +297,10 @@ defmodule Metastatic.AST do
     :pattern_match,
     :match_arm,
     :exception_handling,
-    :async_operation
+    :async_operation,
+    :comprehension,
+    :generator,
+    :filter
   ]
 
   @structural_types [
@@ -246,7 +310,8 @@ defmodule Metastatic.AST do
     :attribute_access,
     :augmented_assignment,
     :property,
-    :import
+    :import,
+    :type_annotation
   ]
 
   @native_types [:language_specific]
@@ -255,7 +320,7 @@ defmodule Metastatic.AST do
 
   @literal_subtypes [:integer, :float, :string, :boolean, :null, :symbol, :regex]
 
-  @operator_categories [:arithmetic, :comparison, :boolean]
+  @operator_categories [:arithmetic, :comparison, :boolean, :range, :string]
 
   @container_types [:module, :class, :namespace]
 
@@ -622,6 +687,21 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:inline_match, _meta, _), do: false
 
+  # Range: {start, stop} with optional step in meta
+  defp valid_node?(:range, meta, [start, stop]) do
+    step = Keyword.get(meta, :step)
+
+    conforms?(start) and conforms?(stop) and
+      (is_nil(step) or conforms?(step))
+  end
+
+  defp valid_node?(:range, _meta, _), do: false
+
+  # String interpolation: list of literal string and expression parts
+  defp valid_node?(:string_interpolation, _meta, parts) do
+    is_list(parts) and Enum.all?(parts, &conforms?/1)
+  end
+
   # M2.2 Extended types
   defp valid_node?(:loop, meta, children) do
     loop_type = Keyword.get(meta, :loop_type)
@@ -686,6 +766,28 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:async_operation, _meta, _), do: false
 
+  # Comprehension: body + generators/filters
+  defp valid_node?(:comprehension, _meta, [body | generators_and_filters])
+       when is_list(generators_and_filters) do
+    conforms?(body) and Enum.all?(generators_and_filters, &conforms?/1)
+  end
+
+  defp valid_node?(:comprehension, _meta, _), do: false
+
+  # Generator: iterates variable over collection
+  defp valid_node?(:generator, _meta, [variable, collection]) do
+    conforms?(variable) and conforms?(collection)
+  end
+
+  defp valid_node?(:generator, _meta, _), do: false
+
+  # Filter: condition guard in comprehension
+  defp valid_node?(:filter, _meta, [condition]) do
+    conforms?(condition)
+  end
+
+  defp valid_node?(:filter, _meta, _), do: false
+
   # M2.2s Structural types
   defp valid_node?(:container, meta, body) do
     container_type = Keyword.get(meta, :container_type)
@@ -747,6 +849,14 @@ defmodule Metastatic.AST do
   end
 
   defp valid_node?(:import, _meta, _), do: false
+
+  # Type annotation: target + type expression
+  defp valid_node?(:type_annotation, meta, children) do
+    annotation_type = Keyword.get(meta, :annotation_type)
+
+    annotation_type in [:spec, :type, :hint, :callback] and
+      is_list(children) and Enum.all?(children, &conforms?/1)
+  end
 
   # M2.3 Native type
   defp valid_node?(:language_specific, meta, _native_ast) do
@@ -1248,4 +1358,103 @@ defmodule Metastatic.AST do
 
   defp normalize_param({:param, _, _} = param), do: param
   defp normalize_param(name) when is_binary(name), do: {:param, [], name}
+
+  # ----- New Type Builder Helpers -----
+
+  @doc """
+  Create a range node.
+
+  ## Examples
+
+      iex> start = {:literal, [subtype: :integer], 1}
+      iex> stop = {:literal, [subtype: :integer], 10}
+      iex> Metastatic.AST.range(start, stop)
+      {:range, [], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 10}]}
+
+      iex> start = {:literal, [subtype: :integer], 1}
+      iex> stop = {:literal, [subtype: :integer], 10}
+      iex> step = {:literal, [subtype: :integer], 2}
+      iex> Metastatic.AST.range(start, stop, step: step)
+      {:range, [step: {:literal, [subtype: :integer], 2}], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 10}]}
+  """
+  @spec range(meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def range(start, stop, meta \\ []) do
+    {:range, meta, [start, stop]}
+  end
+
+  @doc """
+  Create a string interpolation node.
+
+  ## Examples
+
+      iex> parts = [{:literal, [subtype: :string], "Hello, "}, {:variable, [], "name"}, {:literal, [subtype: :string], "!"}]
+      iex> Metastatic.AST.string_interpolation(parts)
+      {:string_interpolation, [], [{:literal, [subtype: :string], "Hello, "}, {:variable, [], "name"}, {:literal, [subtype: :string], "!"}]}
+  """
+  @spec string_interpolation([meta_ast()], keyword()) :: meta_ast()
+  def string_interpolation(parts, meta \\ []) when is_list(parts) do
+    {:string_interpolation, meta, parts}
+  end
+
+  @doc """
+  Create a comprehension node.
+
+  ## Examples
+
+      iex> body = {:binary_op, [category: :arithmetic, operator: :*], [{:variable, [], "x"}, {:variable, [], "x"}]}
+      iex> gen = {:generator, [], [{:variable, [], "x"}, {:function_call, [name: "range"], [{:literal, [subtype: :integer], 10}]}]}
+      iex> Metastatic.AST.comprehension(body, [gen])
+      {:comprehension, [], [{:binary_op, [category: :arithmetic, operator: :*], [{:variable, [], "x"}, {:variable, [], "x"}]}, {:generator, [], [{:variable, [], "x"}, {:function_call, [name: "range"], [{:literal, [subtype: :integer], 10}]}]}]}
+  """
+  @spec comprehension(meta_ast(), [meta_ast()], keyword()) :: meta_ast()
+  def comprehension(body, generators_and_filters, meta \\ [])
+      when is_list(generators_and_filters) do
+    {:comprehension, meta, [body | generators_and_filters]}
+  end
+
+  @doc """
+  Create a generator node.
+
+  ## Examples
+
+      iex> var = {:variable, [], "x"}
+      iex> coll = {:function_call, [name: "range"], [{:literal, [subtype: :integer], 10}]}
+      iex> Metastatic.AST.generator(var, coll)
+      {:generator, [], [{:variable, [], "x"}, {:function_call, [name: "range"], [{:literal, [subtype: :integer], 10}]}]}
+  """
+  @spec generator(meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def generator(variable, collection, meta \\ []) do
+    {:generator, meta, [variable, collection]}
+  end
+
+  @doc """
+  Create a filter node.
+
+  ## Examples
+
+      iex> condition = {:binary_op, [category: :comparison, operator: :>], [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]}
+      iex> Metastatic.AST.filter(condition)
+      {:filter, [], [{:binary_op, [category: :comparison, operator: :>], [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]}]}
+  """
+  @spec filter(meta_ast(), keyword()) :: meta_ast()
+  def filter(condition, meta \\ []) do
+    {:filter, meta, [condition]}
+  end
+
+  @doc """
+  Create a type annotation node.
+
+  ## Examples
+
+      iex> target = {:function_call, [name: "add"], []}
+      iex> type_expr = {:literal, [subtype: :string], "integer() :: integer() -> integer()"}
+      iex> Metastatic.AST.type_annotation(:spec, target, type_expr)
+      {:type_annotation, [annotation_type: :spec], [{:function_call, [name: "add"], []}, {:literal, [subtype: :string], "integer() :: integer() -> integer()"}]}
+  """
+  @spec type_annotation(atom(), meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def type_annotation(annotation_type, target, type_expr, extra_meta \\ [])
+      when annotation_type in [:spec, :type, :hint, :callback] do
+    meta = Keyword.merge([annotation_type: annotation_type], extra_meta)
+    {:type_annotation, meta, [target, type_expr]}
+  end
 end

@@ -319,7 +319,7 @@ defmodule Metastatic.Adapters.ErlangTest do
 
   describe "FromMeta - variables" do
     test "transforms variables back" do
-      assert {:ok, {:var, 0, :X}} = FromMeta.transform({:variable, [], "X"}, %{})
+      assert {:ok, {:var, 0, :X}} = FromMeta.transform({:variable, [scope: :local], "X"}, %{})
     end
   end
 
@@ -327,7 +327,7 @@ defmodule Metastatic.Adapters.ErlangTest do
     test "transforms arithmetic operators back" do
       meta_ast =
         {:binary_op, [category: :arithmetic, operator: :+],
-         [{:variable, [], "X"}, {:literal, [subtype: :integer], 5}]}
+         [{:variable, [scope: :local], "X"}, {:literal, [subtype: :integer], 5}]}
 
       assert {:ok, {:op, 0, :+, {:var, 0, :X}, {:integer, 0, 5}}} =
                FromMeta.transform(meta_ast, %{})
@@ -356,7 +356,8 @@ defmodule Metastatic.Adapters.ErlangTest do
   describe "FromMeta - inline_match (pattern matching)" do
     test "transforms simple match back: X = 5" do
       meta_ast =
-        {:inline_match, [], [{:variable, [], "X"}, {:literal, [subtype: :integer], 5}]}
+        {:inline_match, [],
+         [{:variable, [scope: :local], "X"}, {:literal, [subtype: :integer], 5}]}
 
       assert {:ok, {:match, 0, {:var, 0, :X}, {:integer, 0, 5}}} =
                FromMeta.transform(meta_ast, %{})
@@ -366,7 +367,7 @@ defmodule Metastatic.Adapters.ErlangTest do
       meta_ast =
         {:inline_match, [],
          [
-           {:tuple, [], [{:variable, [], "X"}, {:variable, [], "Y"}]},
+           {:tuple, [], [{:variable, [scope: :local], "X"}, {:variable, [scope: :local], "Y"}]},
            {:tuple, [], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
          ]}
 
@@ -379,8 +380,9 @@ defmodule Metastatic.Adapters.ErlangTest do
       meta_ast =
         {:inline_match, [],
          [
-           {:cons_pattern, [], [{:variable, [], "H"}, {:variable, [], "T"}]},
-           {:variable, [], "List"}
+           {:cons_pattern, [],
+            [{:variable, [scope: :local], "H"}, {:variable, [scope: :local], "T"}]},
+           {:variable, [scope: :local], "List"}
          ]}
 
       assert {:ok, {:match, 0, {:cons, 0, {:var, 0, :H}, {:var, 0, :T}}, {:var, 0, :List}}} =
@@ -388,7 +390,7 @@ defmodule Metastatic.Adapters.ErlangTest do
     end
 
     test "transforms wildcard pattern back: _ = Value" do
-      meta_ast = {:inline_match, [], [:_, {:variable, [], "Value"}]}
+      meta_ast = {:inline_match, [], [:_, {:variable, [scope: :local], "Value"}]}
 
       assert {:ok, {:match, 0, {:var, 0, :_}, {:var, 0, :Value}}} =
                FromMeta.transform(meta_ast, %{})
@@ -396,7 +398,8 @@ defmodule Metastatic.Adapters.ErlangTest do
 
     test "preserves line numbers in round-trip" do
       meta_ast =
-        {:inline_match, [], [{:variable, [], "X"}, {:literal, [subtype: :integer], 5}]}
+        {:inline_match, [],
+         [{:variable, [scope: :local], "X"}, {:literal, [subtype: :integer], 5}]}
 
       metadata = %{line: 42}
 

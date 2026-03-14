@@ -92,12 +92,12 @@ defmodule Metastatic.Adapters.PythonTest do
   describe "ToMeta - variables" do
     test "transforms variable references" do
       ast = %{"_type" => "Name", "id" => "x"}
-      assert {:ok, {:variable, [], "x"}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:variable, [scope: :local], "x"}, %{}} = ToMeta.transform(ast)
     end
 
     test "transforms different variable names" do
       ast = %{"_type" => "Name", "id" => "my_var"}
-      assert {:ok, {:variable, [], "my_var"}, %{}} = ToMeta.transform(ast)
+      assert {:ok, {:variable, [scope: :local], "my_var"}, %{}} = ToMeta.transform(ast)
     end
   end
 
@@ -113,7 +113,7 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:ok, {:binary_op, [category: :arithmetic, operator: :+], [left, right]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:variable, [], "x"} = left
+      assert {:variable, [scope: :local], "x"} = left
       assert {:literal, [subtype: :integer], 5} = right
     end
 
@@ -129,7 +129,7 @@ defmodule Metastatic.Adapters.PythonTest do
                ToMeta.transform(ast)
 
       assert {:literal, [subtype: :integer], 10} = left
-      assert {:variable, [], "y"} = right
+      assert {:variable, [scope: :local], "y"} = right
     end
 
     test "transforms multiplication and division" do
@@ -410,7 +410,7 @@ defmodule Metastatic.Adapters.PythonTest do
   describe "FromMeta - variables" do
     test "transforms variables back" do
       assert {:ok, %{"_type" => "Name", "id" => "x"}} =
-               FromMeta.transform({:variable, [], "x"}, %{})
+               FromMeta.transform({:variable, [scope: :local], "x"}, %{})
     end
   end
 
@@ -418,7 +418,7 @@ defmodule Metastatic.Adapters.PythonTest do
     test "transforms arithmetic operators back" do
       meta_ast =
         {:binary_op, [category: :arithmetic, operator: :+],
-         [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+         [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 5}]}
 
       assert {:ok, %{"_type" => "BinOp", "op" => %{"_type" => "Add"}}} =
                FromMeta.transform(meta_ast, %{})
@@ -427,7 +427,7 @@ defmodule Metastatic.Adapters.PythonTest do
     test "transforms comparison operators back" do
       meta_ast =
         {:binary_op, [category: :comparison, operator: :==],
-         [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+         [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 5}]}
 
       assert {:ok, %{"_type" => "Compare", "ops" => [%{"_type" => "Eq"}]}} =
                FromMeta.transform(meta_ast, %{})
@@ -638,7 +638,7 @@ defmodule Metastatic.Adapters.PythonTest do
   describe "FromMeta - Assignments" do
     test "transforms assignment back" do
       meta_ast =
-        {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+        {:assignment, [], [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 5}]}
 
       assert {:ok,
               %{
@@ -652,7 +652,7 @@ defmodule Metastatic.Adapters.PythonTest do
       meta_ast =
         {:assignment, [],
          [
-           {:tuple, [], [{:variable, [], "x"}, {:variable, [], "y"}]},
+           {:tuple, [], [{:variable, [scope: :local], "x"}, {:variable, [scope: :local], "y"}]},
            {:tuple, [], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
          ]}
 
@@ -909,8 +909,8 @@ defmodule Metastatic.Adapters.PythonTest do
         {:loop, [loop_type: :while],
          [
            {:binary_op, [category: :comparison, operator: :>],
-            [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]},
-           {:variable, [], "x"}
+            [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 0}]},
+           {:variable, [scope: :local], "x"}
          ]}
 
       assert {:ok, %{"_type" => "While", "test" => _, "body" => [_]}} =
@@ -920,7 +920,11 @@ defmodule Metastatic.Adapters.PythonTest do
     test "transforms for loop back" do
       meta_ast =
         {:loop, [loop_type: :for_each],
-         [{:variable, [], "i"}, {:variable, [], "items"}, {:variable, [], "i"}]}
+         [
+           {:variable, [scope: :local], "i"},
+           {:variable, [scope: :local], "items"},
+           {:variable, [scope: :local], "i"}
+         ]}
 
       assert {:ok, %{"_type" => "For", "target" => _, "iter" => _, "body" => [_]}} =
                FromMeta.transform(meta_ast, %{})
@@ -933,7 +937,7 @@ defmodule Metastatic.Adapters.PythonTest do
         {:lambda, [params: [{:param, [], "x"}], captures: []],
          [
            {:binary_op, [category: :arithmetic, operator: :*],
-            [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]}
+            [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 2}]}
          ]}
 
       assert {:ok, %{"_type" => "Lambda", "args" => %{"args" => [%{"arg" => "x"}]}}} =
@@ -945,7 +949,7 @@ defmodule Metastatic.Adapters.PythonTest do
         {:lambda, [params: [{:param, [], "x"}, {:param, [], "y"}], captures: []],
          [
            {:binary_op, [category: :arithmetic, operator: :+],
-            [{:variable, [], "x"}, {:variable, [], "y"}]}
+            [{:variable, [scope: :local], "x"}, {:variable, [scope: :local], "y"}]}
          ]}
 
       assert {:ok,
@@ -964,9 +968,9 @@ defmodule Metastatic.Adapters.PythonTest do
            {:lambda, [params: [{:param, [], "x"}], captures: []],
             [
               {:binary_op, [category: :arithmetic, operator: :*],
-               [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]}
+               [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 2}]}
             ]},
-           {:variable, [], "numbers"}
+           {:variable, [scope: :local], "numbers"}
          ]}
 
       assert {:ok, %{"_type" => "ListComp", "elt" => _, "generators" => [_]}} =
@@ -977,8 +981,9 @@ defmodule Metastatic.Adapters.PythonTest do
       meta_ast =
         {:collection_op, [op_type: :filter],
          [
-           {:lambda, [params: [{:param, [], "x"}], captures: []], [{:variable, [], "x"}]},
-           {:variable, [], "items"}
+           {:lambda, [params: [{:param, [], "x"}], captures: []],
+            [{:variable, [scope: :local], "x"}]},
+           {:variable, [scope: :local], "items"}
          ]}
 
       assert {:ok, %{"_type" => "Call", "func" => %{"_type" => "Name", "id" => "filter"}}} =
@@ -992,9 +997,9 @@ defmodule Metastatic.Adapters.PythonTest do
            {:lambda, [params: [{:param, [], "acc"}, {:param, [], "x"}], captures: []],
             [
               {:binary_op, [category: :arithmetic, operator: :+],
-               [{:variable, [], "acc"}, {:variable, [], "x"}]}
+               [{:variable, [scope: :local], "acc"}, {:variable, [scope: :local], "x"}]}
             ]},
-           {:variable, [], "numbers"},
+           {:variable, [scope: :local], "numbers"},
            {:literal, [subtype: :integer], 0}
          ]}
 
@@ -1013,8 +1018,8 @@ defmodule Metastatic.Adapters.PythonTest do
          [
            {:function_call, [name: "risky"], []},
            [
-             {:error, {:variable, [], "e"},
-              {:function_call, [name: "handle"], [{:variable, [], "e"}]}}
+             {:error, {:variable, [scope: :local], "e"},
+              {:function_call, [name: "handle"], [{:variable, [scope: :local], "e"}]}}
            ],
            nil
          ]}

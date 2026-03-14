@@ -72,7 +72,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   # Variables - M2.1 Core Layer (New 3-tuple format)
 
   def transform({:var, line, name}) when is_atom(name) do
-    {:ok, {:variable, line_meta(line), Atom.to_string(name)}, %{}}
+    {:ok, {:variable, [scope: :local] ++ line_meta(line), Atom.to_string(name)}, %{}}
   end
 
   # Binary Operators - M2.1 Core Layer (New 3-tuple format)

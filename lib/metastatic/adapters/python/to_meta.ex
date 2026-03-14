@@ -58,7 +58,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
       {:ok, {:literal, [subtype: :integer], 42}, %{}}
 
       iex> transform(%{"_type" => "Name", "id" => "x"})
-      {:ok, {:variable, [], "x"}, %{}}
+      {:ok, {:variable, [scope: :local], "x"}, %{}}
 
       iex> transform(%{"_type" => "BinOp", "op" => %{"_type" => "Add"}, ...})
       {:ok, {:binary_op, [category: :arithmetic, operator: :+], [left, right]}, %{}}
@@ -117,7 +117,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Variables - M2.1 Core Layer
 
   def transform(%{"_type" => "Name", "id" => name} = node) do
-    {:ok, add_location({:variable, [], name}, node), %{}}
+    {:ok, add_location({:variable, [scope: :local], name}, node), %{}}
   end
 
   # Binary Operators - M2.1 Core Layer
@@ -874,7 +874,10 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp extract_exception_type(_), do: {:ok, :error}
 
   defp transform_or_name(nil), do: {:ok, nil, %{}}
-  defp transform_or_name(name) when is_binary(name), do: {:ok, {:variable, [], name}, %{}}
+
+  defp transform_or_name(name) when is_binary(name),
+    do: {:ok, {:variable, [scope: :local], name}, %{}}
+
   defp transform_or_name(node), do: transform(node)
 
   # Extract variable name from MetaAST node

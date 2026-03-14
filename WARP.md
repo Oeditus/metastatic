@@ -7,7 +7,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
 **Current Status:** Phase 9 Complete - Uniform 3-Tuple MetaAST Format (v0.3.0-dev)  
-- Core MetaAST foundation implemented with 1422 passing tests (235 doctests + 1187 tests, 100% coverage)
+- Core MetaAST foundation implemented with 1908 passing tests (255 doctests + 1653 tests, 100% coverage)
 - **New Uniform 3-Tuple Format**: All MetaAST nodes use `{type_atom, keyword_meta, children_or_value}`
 - M2.2s Structural/Organizational Layer: container, function_def, attribute_access, augmented_assignment, property
 - M1 Metadata Preservation: Full context threading (module, function, arity, visibility) for Ragex integration
@@ -19,7 +19,7 @@ Metastatic is a cross-language code analysis library using a unified MetaAST (Me
 
 ### Testing
 ```bash
-# Run all tests (1422 tests: 235 doctests + 1187 tests, all passing)
+# Run all tests (1908 tests: 255 doctests + 1653 tests, all passing)
 mix test
 
 # Run specific test file
@@ -305,6 +305,16 @@ All MetaAST nodes now use a uniform structure: `{type_atom, keyword_meta, childr
 - `:arithmetic` - `+`, `-`, `*`, `/`, etc.
 - `:comparison` - `>`, `<`, `==`, `!=`, etc.
 - `:boolean` - `and`, `or`, etc.
+- `:range` - `..` (Elixir/Ruby range construction)
+- `:string` - `<>` (Elixir string concatenation)
+
+**Variable scope metadata:**
+All `:variable` nodes carry a `scope` key distinguishing binding context:
+- `:local` - regular variables (`x`, `name`)
+- `:module_attribute` - Elixir module attributes (`@timeout`, `@moduledoc`)
+- `:instance` - Ruby instance variables (`@x`)
+- `:class` - Ruby class variables (`@@x`)
+- `:global` - global variables (Ruby `$var`, Python `global x`)
 
 **Metadata in keyword lists:**
 - Loop type: `{:loop, [loop_type: :while], [condition, body]}`
