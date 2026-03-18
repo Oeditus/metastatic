@@ -99,6 +99,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-plt-
 
+      - name: Run Dialyzer
+        run: mix dialyzer --format github
+
       - name: Run Credo (static analysis)
         run: mix credo --strict || true
         continue-on-error: true

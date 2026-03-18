@@ -2,7 +2,7 @@ defmodule Metastatic.MixProject do
   use Mix.Project
 
   @app :metastatic
-  @version "0.11.0"
+  @version "0.12.0"
   @source_url "https://github.com/Oeditus/metastatic"
 
   def project do
@@ -24,7 +24,7 @@ defmodule Metastatic.MixProject do
         plt_add_deps: :app_tree,
         plt_add_apps: [:mix, :ex_unit],
         plt_core_path: ".dialyzer",
-        list_unused_filters: false,
+        list_unused_filters: true,
         ignore_warnings: ".dialyzer/ignore.exs"
       ],
       name: "Metastatic",
