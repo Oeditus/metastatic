@@ -123,7 +123,7 @@ defmodule Metastatic.Test.AdapterHelper do
         {:error, {:max_depth_exceeded, depth, max}} ->
           flunk("AST depth #{depth} exceeds maximum #{max}")
 
-        {:error, {:max_variables_exceeded, count, max}} ->
+        {:error, {:too_many_variables, count, max}} ->
           flunk("Variable count #{count} exceeds maximum #{max}")
 
         {:error, errors} ->

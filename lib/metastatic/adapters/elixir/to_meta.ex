@@ -309,11 +309,6 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         # It's a function call
         func_name = Atom.to_string(op)
         {{:function_call, [name: func_name] ++ build_meta(meta), transformed_args}, new_max}
-
-      unknown ->
-        # Keep as-is but with transformed children
-        Logger.warning("Unexpected OP: " <> inspect(unknown))
-        {{op, meta, transformed_args}, new_max}
     end
   end
 
@@ -388,7 +383,6 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp classify_op(op) when op in @boolean_ops, do: {:boolean, normalize_bool_op(op)}
   defp classify_op(:not), do: {:unary_boolean, :not}
   defp classify_op(op) when is_atom(op), do: :function_call
-  defp classify_op(_), do: :unknown
 
   defp normalize_bool_op(:&&), do: :and
   defp normalize_bool_op(:||), do: :or

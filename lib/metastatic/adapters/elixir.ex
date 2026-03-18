@@ -187,18 +187,6 @@ defmodule Metastatic.Adapters.Elixir do
       {:@, _meta, [{_name, _meta2, [value]}]} ->
         [value]
 
-      # List
-      list when is_list(list) ->
-        list
-
-      # Literal or unknown - no children
-      _ when is_atom(ast) or is_number(ast) or is_binary(ast) ->
-        []
-
-      # Other tuples - try to extract all elements except metadata
-      {_tag, _meta, elements} when is_list(elements) ->
-        elements
-
       _ ->
         []
     end

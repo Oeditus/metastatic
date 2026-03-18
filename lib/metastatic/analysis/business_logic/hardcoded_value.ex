@@ -163,14 +163,10 @@ defmodule Metastatic.Analysis.BusinessLogic.HardcodedValue do
     Regex.match?(@url_pattern, string)
   end
 
-  defp url?(_), do: false
-
   # Check if string is an IP address
   defp ip?(string) when is_binary(string) do
     Regex.match?(@ip_pattern, string) and valid_ip?(string)
   end
-
-  defp ip?(_), do: false
 
   # Validate IP address octets are in valid range (0-255)
   defp valid_ip?(ip_string) do
@@ -189,8 +185,6 @@ defmodule Metastatic.Analysis.BusinessLogic.HardcodedValue do
     String.contains?(url, ["localhost", "127.0.0.1", "0.0.0.0"])
   end
 
-  defp localhost_url?(_), do: false
-
   # Check if IP is in local/private range
   defp local_ip?(ip) when is_binary(ip) do
     cond do
@@ -202,8 +196,6 @@ defmodule Metastatic.Analysis.BusinessLogic.HardcodedValue do
       true -> false
     end
   end
-
-  defp local_ip?(_), do: false
 
   # Check if IP is in 172.16.0.0 - 172.31.255.255 range
   defp in_private_range?(ip) do

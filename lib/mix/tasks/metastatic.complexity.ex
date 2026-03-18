@@ -47,6 +47,8 @@ defmodule Mix.Tasks.Metastatic.Complexity do
   @shortdoc "Analyzes code complexity"
 
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
+  @dialyzer {:no_return, analyze_file: 5}
 
   alias Metastatic.Analysis.Complexity
   alias Metastatic.Analysis.Complexity.Formatter
@@ -206,8 +208,11 @@ defmodule Mix.Tasks.Metastatic.Complexity do
     thresholds
   end
 
-  defp module_file?(%{ast: {:language_specific, _, _, :module_definition}}), do: true
-  defp module_file?(%{ast: {:language_specific, _, _, :module_definition, _}}), do: true
+  defp module_file?(%{ast: {:language_specific, meta, _}}) when is_list(meta) do
+    Keyword.get(meta, :hint) == :module_definition
+  end
+
+  defp module_file?(%{ast: {:container, _meta, _}}), do: true
   defp module_file?(_), do: false
 
   defp parse_scope(opts) do
@@ -288,35 +293,43 @@ defmodule Mix.Tasks.Metastatic.Complexity do
     end
   end
 
-  defp get_module_body({:language_specific, _, _, :module_definition, metadata}, _doc_metadata)
-       when is_map(metadata) do
-    body = Map.get(metadata, :body)
-    # Ensure body is wrapped in a block for uniform handling
-    case body do
-      {:block, _} -> body
-      nil -> {:block, []}
-      single -> {:block, [single]}
+  defp get_module_body({:language_specific, meta, _native_ast}, doc_metadata)
+       when is_list(meta) do
+    hint = Keyword.get(meta, :hint)
+
+    if hint == :module_definition do
+      body = Map.get(doc_metadata, :body)
+
+      case body do
+        {:block, _, _} -> body
+        nil -> {:block, [], []}
+        single -> {:block, [], [single]}
+      end
+    else
+      nil
     end
   end
 
-  defp get_module_body({:language_specific, _, _, :module_definition}, metadata) do
-    body = Map.get(metadata, :body)
-
-    case body do
-      {:block, _} -> body
-      nil -> {:block, []}
-      single -> {:block, [single]}
-    end
+  defp get_module_body({:container, _meta, children}, _doc_metadata)
+       when is_list(children) do
+    {:block, [], children}
   end
 
   defp get_module_body(_ast, _metadata), do: nil
 
-  defp find_function_in_body({:block, statements}, func_name) when is_list(statements) do
-    # Find ALL clauses with the same name
+  defp find_function_in_body(nil, _func_name), do: :not_found
+
+  defp find_function_in_body({:block, _meta, statements}, func_name)
+       when is_list(statements) do
+    # Find ALL clauses with the same name (3-tuple format)
     matching_clauses =
       Enum.filter(statements, fn
-        {:language_specific, _, _, :function_definition, metadata} ->
-          Map.get(metadata, :function_name) == func_name
+        {:language_specific, meta, native_ast} when is_list(meta) ->
+          Keyword.get(meta, :hint) == :function_definition and
+            Map.get(native_ast, "function_name") == func_name
+
+        {:function_def, meta, _children} when is_list(meta) ->
+          Keyword.get(meta, :name) == func_name
 
         _ ->
           false
@@ -327,17 +340,19 @@ defmodule Mix.Tasks.Metastatic.Complexity do
         :not_found
 
       clauses ->
-        # Extract bodies from all matching clauses
         bodies =
-          Enum.map(clauses, fn {:language_specific, _, _, :function_definition, metadata} ->
-            Map.get(metadata, :body)
+          Enum.map(clauses, fn
+            {:language_specific, _meta, native_ast} ->
+              Map.get(native_ast, "body")
+
+            {:function_def, _meta, children} ->
+              {:block, [], children}
           end)
 
-        # Combine all clause bodies into a block
         combined_ast =
           case bodies do
             [single] -> single
-            multiple -> {:block, multiple}
+            multiple -> {:block, [], multiple}
           end
 
         {:ok, combined_ast}

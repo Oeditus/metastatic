@@ -55,6 +55,7 @@ defmodule Mix.Tasks.Metastatic.Translate do
   """
 
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
 
   alias Metastatic.CLI
   alias Metastatic.CLI.Translator

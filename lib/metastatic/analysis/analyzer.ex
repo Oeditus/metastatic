@@ -70,6 +70,8 @@ defmodule Metastatic.Analysis.Analyzer do
           | :correctness
           | :style
           | :refactoring
+          | :reliability
+          | :observability
 
   @typedoc "Issue severity level"
   @type severity :: :error | :warning | :info | :refactoring_opportunity
@@ -102,11 +104,12 @@ defmodule Metastatic.Analysis.Analyzer do
 
   @typedoc "Analysis context passed to callbacks"
   @type context :: %{
-          document: Document.t(),
-          config: map(),
-          parent_stack: [AST.meta_ast()],
-          depth: non_neg_integer(),
-          scope: map()
+          required(:document) => Document.t(),
+          required(:config) => map(),
+          required(:parent_stack) => [AST.meta_ast()],
+          required(:depth) => non_neg_integer(),
+          required(:scope) => map(),
+          optional(atom()) => term()
         }
 
   @typedoc "Analyzer metadata"

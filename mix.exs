@@ -22,9 +22,9 @@ defmodule Metastatic.MixProject do
       dialyzer: [
         plt_file: {:no_warn, ".dialyzer/dialyzer.plt"},
         plt_add_deps: :app_tree,
-        plt_add_apps: [:mix],
+        plt_add_apps: [:mix, :ex_unit],
         plt_core_path: ".dialyzer",
-        list_unused_filters: true,
+        list_unused_filters: false,
         ignore_warnings: ".dialyzer/ignore.exs"
       ],
       name: "Metastatic",
@@ -63,6 +63,7 @@ defmodule Metastatic.MixProject do
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test, runtime: false},
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false},
       {:benchee_html, "~> 1.0", only: [:dev, :test], runtime: false}

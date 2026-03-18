@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Metastatic.SecurityScan do
   @shortdoc "Scans for security vulnerabilities"
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
 
   alias Metastatic.Analysis.Security
   alias Metastatic.Builder

@@ -40,7 +40,6 @@ defmodule Metastatic.Semantic.Patterns do
 
   @typedoc "Pattern specification"
   @type pattern_spec :: %{
-          pattern: String.t() | Regex.t(),
           operation: OpKind.operation(),
           framework: OpKind.framework() | nil,
           extract_target: :first_arg | :receiver | :none | nil

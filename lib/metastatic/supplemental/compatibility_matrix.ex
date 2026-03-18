@@ -187,7 +187,7 @@ defmodule Metastatic.Supplemental.CompatibilityMatrix do
     ]
 
     lines =
-      if map_size(all_supplementals) == 0 do
+      if Enum.empty?(all_supplementals) do
         lines ++ ["No supplemental modules registered."]
       else
         lines ++ format_supplementals_detail(all_supplementals)
@@ -228,7 +228,7 @@ defmodule Metastatic.Supplemental.CompatibilityMatrix do
   defp format_text_table(constructs, languages, _matrix) do
     # Calculate column widths
     construct_width =
-      constructs |> Enum.map(&String.length(to_string(&1))) |> Enum.max(default: 10)
+      constructs |> Enum.map(&String.length(to_string(&1))) |> Enum.max(fn -> 10 end)
 
     construct_width = max(construct_width, 10)
 
@@ -260,10 +260,12 @@ defmodule Metastatic.Supplemental.CompatibilityMatrix do
     Enum.join([header, separator] ++ rows, "\n")
   end
 
-  defp format_supplementals_detail(supplementals) do
-    supplementals
-    |> Enum.sort_by(fn {module, _} -> module end)
-    |> Enum.flat_map(fn {module, info} ->
+  defp format_supplementals_detail(modules) do
+    modules
+    |> Enum.sort()
+    |> Enum.flat_map(fn module ->
+      info = module.info()
+
       [
         "Module: #{inspect(module)}",
         "  Target Language: #{info.target_language}",

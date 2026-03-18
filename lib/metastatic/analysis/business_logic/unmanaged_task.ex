@@ -231,6 +231,4 @@ defmodule Metastatic.Analysis.BusinessLogic.UnmanagedTask do
         String.contains?(func_str, "promise")
     end
   end
-
-  defp async_spawn?(_), do: false
 end

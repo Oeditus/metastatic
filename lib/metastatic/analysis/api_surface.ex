@@ -47,7 +47,9 @@ defmodule Metastatic.Analysis.ApiSurface do
          do: {:ok, analyze_api(name, members)}
   end
 
-  defp extract_container({:container, type, name, _metadata, members}) do
+  defp extract_container({:container, meta, members}) when is_list(meta) and is_list(members) do
+    name = Keyword.get(meta, :name)
+    type = Keyword.get(meta, :container_type, :module)
     {:ok, type, name, members}
   end
 

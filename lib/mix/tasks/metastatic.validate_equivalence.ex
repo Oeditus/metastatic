@@ -59,6 +59,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
   """
 
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
 
   alias Metastatic.{Builder, CLI}
 

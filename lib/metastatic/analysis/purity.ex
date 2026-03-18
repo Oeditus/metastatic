@@ -225,9 +225,6 @@ defmodule Metastatic.Analysis.Purity do
     walk(value, ctx)
   end
 
-  # Nil
-  defp walk_node(nil, ctx), do: ctx
-
   # Fallback
   defp walk_node(_, ctx), do: ctx
 

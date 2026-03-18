@@ -129,7 +129,6 @@ defmodule Metastatic.Analysis.Complexity.Formatter do
           :cognitive -> String.contains?(warning, "Cognitive")
           :nesting -> String.contains?(warning, "Nesting")
           :loc -> String.contains?(warning, "Logical lines")
-          _ -> false
         end
       end)
 

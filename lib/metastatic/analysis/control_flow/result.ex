@@ -232,6 +232,9 @@ defmodule Metastatic.Analysis.ControlFlow.Result do
     detect_cycle_dfs(cfg, cfg.entry, MapSet.new(), MapSet.new())
   end
 
+  # Dialyzer flags recursive MapSet arguments as opaque type violations — false positive.
+  @dialyzer {:no_opaque, detect_cycle_dfs: 4}
+
   defp detect_cycle_dfs(_cfg, node_id, _visited, _rec_stack) when node_id == nil, do: false
 
   defp detect_cycle_dfs(cfg, node_id, visited, rec_stack) do

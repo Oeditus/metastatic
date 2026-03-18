@@ -2,7 +2,7 @@ defmodule Metastatic.Document.Analyzer do
   @moduledoc false
 
   @callback handle_analyze(Metastatic.Document.t(), keyword()) ::
-              {:ok, map()} | {:error, term()}
+              {:ok, term()} | {:error, term()}
 
   defmacro __using__(opts \\ []) do
     quote location: :keep, generated: true do
@@ -16,28 +16,67 @@ defmodule Metastatic.Document.Analyzer do
         )
 
       @doc doc
-      @spec analyze(Metastatic.Document.t()) :: {:ok, map()} | {:error, term()}
-      @spec analyze(Metastatic.Document.t(), keyword()) :: {:ok, map()} | {:error, term()}
-      @spec analyze(Metastatic.language(), term(), keyword()) :: {:ok, map()} | {:error, term()}
-      def analyze(language_or_doc, source_or_ast_or_opts \\ [], opts \\ [])
+      @spec analyze(Metastatic.Document.t()) :: {:ok, term()} | {:error, term()}
+      def analyze(%Metastatic.Document{ast: nil}), do: {:error, :invalid_ast}
+      def analyze(%Metastatic.Document{} = doc), do: handle_analyze(doc, [])
 
-      def analyze(language, source_or_ast, opts) when is_atom(language) do
+      @doc false
+      @spec analyze(Metastatic.Document.t(), keyword()) :: {:ok, term()} | {:error, term()}
+      @spec analyze(Metastatic.language(), term()) :: {:ok, term()} | {:error, term()}
+      def analyze(%Metastatic.Document{ast: nil}, _opts), do: {:error, :invalid_ast}
+      def analyze(%Metastatic.Document{} = doc, opts), do: handle_analyze(doc, opts)
+
+      def analyze(language, source_or_ast) when is_atom(language) do
         with {:ok, doc} <- Metastatic.Document.normalize({language, source_or_ast}),
-             do: analyze(doc, opts, opts)
+             do: handle_analyze(doc, [])
       end
 
-      def analyze(%Metastatic.Document{ast: nil}, _, _),
-        do: {:error, :invalid_ast}
-
-      def analyze(%Metastatic.Document{ast: _} = doc, opts, _),
-        do: handle_analyze(doc, opts)
+      @doc false
+      @spec analyze(Metastatic.language(), term(), keyword()) :: {:ok, term()} | {:error, term()}
+      def analyze(language, source_or_ast, opts) when is_atom(language) do
+        with {:ok, doc} <- Metastatic.Document.normalize({language, source_or_ast}),
+             do: handle_analyze(doc, opts)
+      end
 
       @doc doc <> "\n\nUnlike not-banged version, this one either returns a result or raises"
-      @spec analyze!(Metastatic.Document.t()) :: map()
-      @spec analyze!(Metastatic.Document.t(), keyword()) :: map()
-      @spec analyze!(Metastatic.language(), term(), keyword()) :: map()
-      def analyze!(language_or_doc, source_or_ast_or_opts \\ [], opts \\ []) do
-        case analyze(language_or_doc, source_or_ast_or_opts, opts) do
+      @spec analyze!(Metastatic.Document.t()) :: term()
+      def analyze!(%Metastatic.Document{} = doc) do
+        case analyze(doc) do
+          {:ok, result} ->
+            result
+
+          {:error, reason} ->
+            raise "Analysis by #{inspect(__MODULE__)} failed: #{inspect(reason)}"
+        end
+      end
+
+      @doc false
+      @spec analyze!(Metastatic.Document.t(), keyword()) :: term()
+      @spec analyze!(Metastatic.language(), term()) :: term()
+      def analyze!(%Metastatic.Document{} = doc, opts) do
+        case analyze(doc, opts) do
+          {:ok, result} ->
+            result
+
+          {:error, reason} ->
+            raise "Analysis by #{inspect(__MODULE__)} failed: #{inspect(reason)}"
+        end
+      end
+
+      def analyze!(language, source_or_ast) when is_atom(language) do
+        case analyze(language, source_or_ast) do
+          {:ok, result} ->
+            result
+
+          {:error, reason} ->
+            raise "Analysis by #{inspect(__MODULE__)} failed: #{inspect(reason)}"
+        end
+      end
+
+      @doc false
+      @spec analyze!(Metastatic.language(), term(), keyword()) :: term()
+      def analyze!(language, source_or_ast, opts) when is_atom(language) do
+        case analyze(language, source_or_ast, opts) do
           {:ok, result} ->
             result
 

@@ -33,6 +33,7 @@ defmodule Mix.Tasks.Metastatic.DeadCode do
   @shortdoc "Detects dead code"
 
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
 
   alias Metastatic.Analysis.DeadCode
   alias Metastatic.Builder

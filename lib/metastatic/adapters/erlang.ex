@@ -118,9 +118,6 @@ defmodule Metastatic.Adapters.Erlang do
 
       {:error, {_line, _module, reason}} ->
         {:error, "Parse error: #{inspect(reason)}"}
-
-      {:error, reason} ->
-        {:error, inspect(reason)}
     end
   end
 

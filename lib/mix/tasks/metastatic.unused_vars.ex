@@ -27,6 +27,7 @@ defmodule Mix.Tasks.Metastatic.UnusedVars do
   @shortdoc "Detects unused variables"
 
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
 
   alias Metastatic.Analysis.UnusedVariables
   alias Metastatic.Builder

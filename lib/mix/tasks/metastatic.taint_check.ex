@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Metastatic.TaintCheck do
   @shortdoc "Performs taint analysis"
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
 
   alias Metastatic.Analysis.Taint
   alias Metastatic.Builder

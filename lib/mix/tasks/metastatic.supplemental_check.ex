@@ -36,6 +36,8 @@ defmodule Mix.Tasks.Metastatic.SupplementalCheck do
   @shortdoc "Detects required supplemental modules"
 
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
+  @dialyzer {:no_return, analyze_file: 4}
 
   alias Metastatic.Builder
   alias Metastatic.Supplemental.Validator
