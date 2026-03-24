@@ -1,11 +1,53 @@
 defmodule Mix.Tasks.Metastatic.SecurityScan do
   @shortdoc "Scans for security vulnerabilities"
+
+  @moduledoc """
+  Scans source code for security vulnerabilities using pattern-based detection.
+
+  ## Usage
+
+      mix metastatic.security_scan FILE [options]
+
+  ## Options
+
+    * `--format` - Output format: text (default) or json
+    * `--language` - Source language: python, elixir, erlang, ruby, or haskell (auto-detected if not specified)
+
+  ## Examples
+
+      # Scan for security issues
+      mix metastatic.security_scan my_file.py
+
+      # JSON output with CWE details
+      mix metastatic.security_scan my_file.ex --format json
+
+  ## Vulnerability Categories
+
+    * Dangerous functions (eval, exec, pickle.loads)
+    * Hardcoded secrets (passwords, API keys, tokens) - CWE-798
+    * Weak cryptography (MD5, SHA1, DES)
+    * Insecure protocols (HTTP for sensitive data)
+    * SQL injection patterns - CWE-89
+    * Command injection patterns - CWE-78
+
+  ## Severity Levels
+
+  Critical, High, Medium, Low
+
+  ## Exit Codes
+
+    * 0 - No vulnerabilities found
+    * 1 - Vulnerabilities detected
+    * 2 - Error during analysis
+  """
+
   use Mix.Task
   @dialyzer {:no_return, run: 1}
 
   alias Metastatic.Analysis.Security
   alias Metastatic.Builder
 
+  @impl Mix.Task
   def run(args) do
     {opts, files, _} = OptionParser.parse(args, strict: [format: :string, language: :string])
 

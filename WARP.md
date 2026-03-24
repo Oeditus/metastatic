@@ -6,20 +6,25 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
-**Current Status:** Phase 9 Complete - Uniform 3-Tuple MetaAST Format (v0.3.0-dev)  
-- Core MetaAST foundation implemented with 1908 passing tests (255 doctests + 1653 tests, 100% coverage)
-- **New Uniform 3-Tuple Format**: All MetaAST nodes use `{type_atom, keyword_meta, children_or_value}`
+**Current Status:** v0.12.0 - Production Ready
+- 255 doctests + 1605 tests passing (excluding haskell tag), 100% coverage
+- Uniform 3-Tuple MetaAST Format: All MetaAST nodes use `{type_atom, keyword_meta, children_or_value}`
 - M2.2s Structural/Organizational Layer: container, function_def, attribute_access, augmented_assignment, property
 - M1 Metadata Preservation: Full context threading (module, function, arity, visibility) for Ragex integration
 - Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented with 3-tuple output
-- All 9 analysis tools support structural types and new 3-tuple format
+- All 9 analysis tools support structural types and 3-tuple format
 - Business Logic Analyzers: 20 language-agnostic analyzers updated for 3-tuple format
+- OpKind Semantic Metadata System: 7 domains (db, http, auth, cache, queue, file, external_api)
+- All 15 mix tasks have full documentation and support all 5 languages
 
 ## Essential Commands
 
 ### Testing
 ```bash
-# Run all tests (1908 tests: 255 doctests + 1653 tests, all passing)
+# Run all tests (255 doctests + 1605 tests passing, excluding haskell)
+mix test --exclude haskell
+
+# Run including haskell tests (requires GHC)
 mix test
 
 # Run specific test file
@@ -65,7 +70,7 @@ Metastatic follows a four-level meta-modeling hierarchy:
 flowchart TD
     M3["M3: Elixir type system (@type, @spec)"]
     M2["M2: MetaAST (this library - CURRENT FOCUS)"]
-    M1["M1: Language-specific ASTs (Python/JS/Elixir AST - Phase 2+)"]
+    M1["M1: Language-specific ASTs (Python/Elixir/Ruby/Erlang/Haskell AST)"]
     M0["M0: Runtime execution"]
     
     M3 -->|instance-of| M2
@@ -326,14 +331,16 @@ All `:variable` nodes carry a `scope` key distinguishing binding context:
 
 ## Development Workflow
 
-### Phase Context
-Phase 9 (Uniform 3-Tuple Format) is **complete**. Current state:
-- All MetaAST nodes migrated to uniform 3-tuple format: `{type_atom, keyword_meta, children_or_value}`
+### Current State
+v0.12.0 is the first production release. Key capabilities:
+- All MetaAST nodes use uniform 3-tuple format: `{type_atom, keyword_meta, children_or_value}`
 - Core MetaAST types (M2.1 Core + M2.2 Extended + M2.2s Structural) fully implemented and tested
-- All 5 language adapters operational with 3-tuple output: Python, Elixir, Ruby, Erlang, Haskell
+- All 5 language adapters operational: Python, Elixir, Ruby, Erlang, Haskell
 - Full structural support: containers, function definitions, properties
 - All 9 analysis tools updated for 3-tuple format
-- 20 business logic analyzers updated for 3-tuple format
+- 20 business logic analyzers with OpKind semantic metadata
+- All 15 mix tasks with full documentation and ruby/haskell support
+- `detect_duplicates` performs real file-based analysis via language adapters
 
 ### Working with MetaAST
 
@@ -449,15 +456,16 @@ All tests use meaningful examples demonstrating real-world usage, not just synth
 
 ## Future Work Context
 
-When implementing language adapters (Phase 2+):
+When adding a new language adapter:
 1. Create module in `lib/metastatic/adapters/`
 2. Implement `@behaviour Metastatic.Adapter`
 3. Required callbacks: `parse/1`, `to_meta/1`, `from_meta/2`, `unparse/1`, `file_extensions/0`
 4. Target >95% round-trip fidelity (Source → M1 → M2 → M1 → Source)
 5. Create 50+ test fixtures
-6. Aim for <100ms performance per 1000 LOC
+6. Add extension to `detect_language/1` helpers in all relevant mix tasks
+7. Aim for <100ms performance per 1000 LOC
 
-When implementing cross-language tools (Phase 3+):
-- Mutation operators work at M2 level, apply to all languages
-- Purity analysis uses M2 AST traversal
-- All tools language-agnostic by design
+When building new analysis tools:
+- Work at M2 level - automatically applies to all supported languages
+- Use OpKind metadata for accurate semantic detection
+- All tools are language-agnostic by design

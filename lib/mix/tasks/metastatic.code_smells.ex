@@ -1,11 +1,52 @@
 defmodule Mix.Tasks.Metastatic.CodeSmells do
   @shortdoc "Detects code smells"
+
+  @moduledoc """
+  Detects code smells in a given source file.
+
+  ## Usage
+
+      mix metastatic.code_smells FILE [options]
+
+  ## Options
+
+    * `--format` - Output format: text (default) or json
+    * `--language` - Source language: python, elixir, erlang, ruby, or haskell (auto-detected if not specified)
+
+  ## Examples
+
+      # Basic code smell detection
+      mix metastatic.code_smells my_file.py
+
+      # JSON output
+      mix metastatic.code_smells my_file.ex --format json
+
+      # Explicit language
+      mix metastatic.code_smells my_file.rb --language ruby
+
+  ## Detected Smells
+
+    * Long functions (>20 statements)
+    * Deep nesting (>4 levels)
+    * High cyclomatic complexity (>10)
+    * High cognitive complexity (>15)
+    * Magic numbers (unexplained literals)
+    * Complex conditionals (>3 boolean operators)
+
+  ## Exit Codes
+
+    * 0 - No smells detected
+    * 1 - Code smells found
+    * 2 - Error during analysis
+  """
+
   use Mix.Task
   @dialyzer {:no_return, run: 1}
 
   alias Metastatic.Analysis.Smells
   alias Metastatic.Builder
 
+  @impl Mix.Task
   def run(args) do
     {opts, files, _} = OptionParser.parse(args, strict: [format: :string, language: :string])
 

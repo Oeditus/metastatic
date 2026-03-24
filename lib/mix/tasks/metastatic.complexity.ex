@@ -9,7 +9,7 @@ defmodule Mix.Tasks.Metastatic.Complexity do
   ## Options
 
     * `--format` - Output format: text (default), json, or detailed
-    * `--language` - Source language: python, elixir, or erlang (auto-detected if not specified)
+    * `--language` - Source language: python, elixir, erlang, ruby, or haskell (auto-detected if not specified)
     * `--max-cyclomatic` - Cyclomatic complexity threshold (default: 10)
     * `--max-cognitive` - Cognitive complexity threshold (default: 15)
     * `--max-nesting` - Nesting depth threshold (default: 3)
@@ -150,10 +150,12 @@ defmodule Mix.Tasks.Metastatic.Complexity do
   defp parse_language("python"), do: :python
   defp parse_language("elixir"), do: :elixir
   defp parse_language("erlang"), do: :erlang
+  defp parse_language("ruby"), do: :ruby
+  defp parse_language("haskell"), do: :haskell
 
   defp parse_language(other) do
     Mix.shell().error("Unknown language: #{other}")
-    Mix.shell().info("Valid languages: python, elixir, erlang")
+    Mix.shell().info("Valid languages: python, elixir, erlang, ruby, haskell")
     exit({:shutdown, 2})
   end
 
@@ -173,6 +175,12 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
       ".hrl" ->
         :erlang
+
+      ".rb" ->
+        :ruby
+
+      ".hs" ->
+        :haskell
 
       other ->
         Mix.shell().error("Cannot detect language from extension: #{other}")

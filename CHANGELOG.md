@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-03-19
+
 ### Added
 - **OpKind Semantic Metadata System** - Semantic operation kind metadata for accurate code analysis:
   - New `Metastatic.Semantic.OpKind` module providing semantic meaning for function calls and operations
@@ -89,6 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `STRUCTURAL_LAYER_DESIGN.md` - Implementation design decisions and rationale
 - Updated `README.md` with M2.2s layer description
 - Enhanced `@typedoc` for all structural types with M1 instances and examples
+
+### Mix Tasks
+- All 15 mix tasks now have comprehensive `@moduledoc` documentation and `@impl Mix.Task`
+- Added ruby and haskell language support to `analyze`, `complexity`, `purity_check`, `translate`, `validate_equivalence`
+- `detect_duplicates` now fully implemented - parses real source files via language adapters
 
 ## [0.1.0] - 2026-01-21
 

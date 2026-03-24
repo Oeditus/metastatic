@@ -15,8 +15,8 @@ defmodule Mix.Tasks.Metastatic.Translate do
 
   ## Options
 
-  - `--from LANG` - Source language (python, elixir, erlang)
-  - `--to LANG` - Target language (python, elixir, erlang)
+  - `--from LANG` - Source language (python, elixir, erlang, ruby, haskell)
+  - `--to LANG` - Target language (python, elixir, erlang, ruby, haskell)
   - `--output PATH` - Output file or directory (optional for single files)
 
   ## Examples
@@ -151,8 +151,15 @@ defmodule Mix.Tasks.Metastatic.Translate do
       "erlang" ->
         {:ok, :erlang}
 
+      "ruby" ->
+        {:ok, :ruby}
+
+      "haskell" ->
+        {:ok, :haskell}
+
       _ ->
-        {:error, "Invalid --#{opt_name} language: #{lang_str}. Supported: python, elixir, erlang"}
+        {:error,
+         "Invalid --#{opt_name} language: #{lang_str}. Supported: python, elixir, erlang, ruby, haskell"}
     end
   end
 

@@ -875,7 +875,7 @@ Research synthesis from muex and propwise multi-language analysis projects.
 ```elixir
 def deps do
   [
-    {:metastatic, "~> 0.1"}
+    {:metastatic, "~> 0.12"}
   ]
 end
 ```

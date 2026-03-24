@@ -1,9 +1,10 @@
 defmodule Mix.Tasks.Metastatic.DetectDuplicates do
   @moduledoc """
-  Detects code duplication across MetaAST documents.
+  Detects code duplication across source files using the unified MetaAST representation.
 
-  This task analyzes one or more files for code duplication, supporting
-  cross-language detection when files are parsed to MetaAST.
+  Parses source files through the appropriate language adapter, abstracts them to
+  MetaAST, and then detects structural code clones (Type I-III) across the
+  resulting documents. Cross-language detection works out of the box.
 
   ## Usage
 
@@ -16,13 +17,25 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
     * `--threshold FLOAT` - Similarity threshold for Type III detection (default: 0.8)
     * `--output PATH` - Write output to file instead of stdout
     * `--cross-language` - Enable cross-language detection (default: true)
-    * `--dir PATH` - Scan all files in directory recursively
+    * `--dir PATH` - Scan all supported files in directory recursively
     * `--help` - Display this help message
+
+  ## Supported Languages
+
+  Language is auto-detected from file extension:
+
+    * `.py` - Python
+    * `.ex`, `.exs` - Elixir
+    * `.erl`, `.hrl` - Erlang
+    * `.rb` - Ruby
 
   ## Examples
 
       # Detect duplicates between two files
       mix metastatic.detect_duplicates lib/foo.ex lib/bar.ex
+
+      # Cross-language detection
+      mix metastatic.detect_duplicates lib/foo.ex src/foo.py
 
       # Scan entire directory
       mix metastatic.detect_duplicates --dir lib/
@@ -33,32 +46,32 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
       # Save detailed report to file
       mix metastatic.detect_duplicates --dir lib/ --format detailed --output report.txt
 
-  ## Note
-
-  This task currently works with MetaAST documents. Language adapter support
-  (to parse real source files) will be added in future phases.
-
-  For now, you can use this task programmatically via the API:
+  ## Programmatic API
 
       alias Metastatic.{Document, Analysis.Duplication}
-      
-      # Create documents
+
       doc1 = Document.new(ast1, :elixir)
       doc2 = Document.new(ast2, :python)
-      
-      # Detect duplicates
+
       {:ok, result} = Duplication.detect(doc1, doc2)
-      
-      # Or detect across multiple documents
       {:ok, groups} = Duplication.detect_in_list([doc1, doc2, doc3])
   """
 
-  @shortdoc "Detects code duplication across MetaAST documents"
+  @shortdoc "Detects code duplication across source files"
 
   use Mix.Task
+  @dialyzer {:no_return, run: 1}
+
+  alias Metastatic.Analysis.Duplication
+  alias Metastatic.Analysis.Duplication.Reporter
+  alias Metastatic.Builder
+
+  @supported_extensions ~w(.py .ex .exs .erl .hrl .rb)
 
   @impl Mix.Task
   def run(args) do
+    Mix.Task.run("app.start")
+
     {opts, files, _} =
       OptionParser.parse(args,
         strict: [
@@ -102,60 +115,105 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
     Mix.shell().info(@moduledoc)
   end
 
-  defp scan_directory(dir_path, _opts) do
-    Mix.shell().info("Scanning directory: #{dir_path}")
+  defp scan_directory(dir_path, opts) do
+    unless File.dir?(dir_path) do
+      Mix.shell().error("Error: Not a directory: #{dir_path}")
+      exit({:shutdown, 2})
+    end
 
-    Mix.shell().info(
-      "Note: Directory scanning with real files requires language adapters (Phase 2+)"
-    )
+    files =
+      dir_path
+      |> Path.join("**/*")
+      |> Path.wildcard()
+      |> Enum.filter(&(Path.extname(&1) in @supported_extensions))
+      |> Enum.filter(&(not File.dir?(&1)))
+      |> Enum.sort()
 
-    Mix.shell().info("This feature will be available once language adapters are implemented.")
-    Mix.shell().info("")
-    Mix.shell().info("For now, use the API directly with MetaAST documents:")
-    Mix.shell().info("  Duplication.detect_in_list([doc1, doc2, ...])")
+    if length(files) < 2 do
+      Mix.shell().info(
+        "Found #{length(files)} supported file(s) in #{dir_path} - need at least 2"
+      )
+
+      exit({:shutdown, 0})
+    end
+
+    Mix.shell().info("Scanning #{length(files)} files in #{dir_path}...")
+    detect_in_files(files, opts)
   end
 
   defp detect_in_files(files, opts) do
-    Mix.shell().info("Detecting duplicates in files:")
-    Enum.each(files, &Mix.shell().info("  - #{&1}"))
-    Mix.shell().info("")
-    Mix.shell().info("Note: File parsing requires language adapters (Phase 2+)")
-    Mix.shell().info("This feature will be available once language adapters are implemented.")
-    Mix.shell().info("")
-    Mix.shell().info("For now, use the API directly with MetaAST documents:")
-    Mix.shell().info("  doc1 = Document.new(ast1, :elixir)")
-    Mix.shell().info("  doc2 = Document.new(ast2, :python)")
-    Mix.shell().info("  {:ok, result} = Duplication.detect(doc1, doc2)")
-    Mix.shell().info("  Reporter.format(result, :#{opts[:format] || "text"})")
+    format = String.to_atom(opts[:format] || "text")
+    threshold = opts[:threshold] || 0.8
+    detect_opts = [threshold: threshold]
+
+    documents = load_documents(files)
+
+    if length(documents) < 2 do
+      Mix.shell().error("Could not parse enough files for comparison")
+      exit({:shutdown, 2})
+    end
+
+    Mix.shell().info("Comparing #{length(documents)} document(s)...")
+
+    {:ok, groups} = Duplication.detect_in_list(documents, detect_opts)
+
+    output = Reporter.format_groups(groups, format)
+
+    write_output(output, opts[:output])
+
+    if length(groups) > 0 do
+      exit({:shutdown, 1})
+    else
+      exit({:shutdown, 0})
+    end
   end
 
-  # Helper to format and output results (will be used when adapters are available)
-  # defp output_result(result, opts) do
-  #   format = String.to_atom(opts[:format] || "text")
-  #   output = Reporter.format(result, format)
-  #
-  #   case opts[:output] do
-  #     nil ->
-  #       Mix.shell().info(output)
-  #
-  #     path ->
-  #       File.write!(path, output)
-  #       Mix.shell().info("Report written to: #{path}")
-  #   end
-  # end
-  #
-  # # Helper to format and output clone groups (will be used when adapters are available)
-  # defp output_groups(groups, opts) do
-  #   format = String.to_atom(opts[:format] || "text")
-  #   output = Reporter.format_groups(groups, format)
-  #
-  #   case opts[:output] do
-  #     nil ->
-  #       Mix.shell().info(output)
-  #
-  #     path ->
-  #       File.write!(path, output)
-  #       Mix.shell().info("Report written to: #{path}")
-  #   end
-  # end
+  defp load_documents(files) do
+    files
+    |> Enum.flat_map(fn file ->
+      case detect_language(file) do
+        {:ok, lang} ->
+          case File.read(file) do
+            {:ok, source} ->
+              case Builder.from_source(source, lang) do
+                {:ok, doc} ->
+                  [{file, lang, doc}]
+
+                {:error, reason} ->
+                  Mix.shell().info("Skipping #{file}: #{inspect(reason)}")
+                  []
+              end
+
+            {:error, reason} ->
+              Mix.shell().info("Cannot read #{file}: #{inspect(reason)}")
+              []
+          end
+
+        :unsupported ->
+          []
+      end
+    end)
+    |> Enum.map(fn {_file, _lang, doc} -> doc end)
+  end
+
+  defp write_output(output, nil) do
+    Mix.shell().info(output)
+  end
+
+  defp write_output(output, path) do
+    File.write!(path, output)
+    Mix.shell().info("Report written to: #{path}")
+  end
+
+  defp detect_language(file) do
+    case Path.extname(file) do
+      ".py" -> {:ok, :python}
+      ".ex" -> {:ok, :elixir}
+      ".exs" -> {:ok, :elixir}
+      ".erl" -> {:ok, :erlang}
+      ".hrl" -> {:ok, :erlang}
+      ".rb" -> {:ok, :ruby}
+      _ -> :unsupported
+    end
+  end
 end

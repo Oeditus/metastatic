@@ -149,9 +149,15 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
           "erlang" ->
             {:ok, :erlang}
 
+          "ruby" ->
+            {:ok, :ruby}
+
+          "haskell" ->
+            {:ok, :haskell}
+
           _ ->
             {:error,
-             "Invalid language for #{opt_key}: #{lang_str}. Supported: python, elixir, erlang"}
+             "Invalid language for #{opt_key}: #{lang_str}. Supported: python, elixir, erlang, ruby, haskell"}
         end
     end
   end
