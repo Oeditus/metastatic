@@ -2391,7 +2391,7 @@ defmodule Metastatic.Adapters.RubyTest do
         Path.wildcard(Path.join(@book_shop_path, "app/**/*.rb")) ++
           Path.wildcard(Path.join(@book_shop_path, "config/**/*.rb"))
 
-      assert length(files) > 0, "Expected to find Ruby files in book_shop_rails"
+      assert match?([_ | _], files), "Expected to find Ruby files in book_shop_rails"
 
       results =
         Enum.map(files, fn f ->

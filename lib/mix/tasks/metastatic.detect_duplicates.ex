@@ -125,8 +125,7 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
       dir_path
       |> Path.join("**/*")
       |> Path.wildcard()
-      |> Enum.filter(&(Path.extname(&1) in @supported_extensions))
-      |> Enum.filter(&(not File.dir?(&1)))
+      |> Enum.filter(&(Path.extname(&1) in @supported_extensions and not File.dir?(&1)))
       |> Enum.sort()
 
     if length(files) < 2 do
@@ -161,10 +160,9 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
 
     write_output(output, opts[:output])
 
-    if length(groups) > 0 do
-      exit({:shutdown, 1})
-    else
-      exit({:shutdown, 0})
+    case groups do
+      [] -> exit({:shutdown, 0})
+      _ -> exit({:shutdown, 1})
     end
   end
 
