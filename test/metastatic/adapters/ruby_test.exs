@@ -2383,6 +2383,7 @@ defmodule Metastatic.Adapters.RubyTest do
   end
 
   describe "Rails Integration - book_shop_rails app" do
+    @describetag :skip
     @book_shop_path "/home/am/Proyectos/TopTal/book_shop_rails"
 
     @tag :book_shop
