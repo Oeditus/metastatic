@@ -1,3 +1,5 @@
+<img src="https://raw.githubusercontent.com/Oeditus/metastatic/v0.13.0/stuff/img/logo-128x128.png" alt="Metastatic" width="128" align="right">
+
 # Metastatic
 
 **Cross-language code analysis through unified MetaAST representation**
