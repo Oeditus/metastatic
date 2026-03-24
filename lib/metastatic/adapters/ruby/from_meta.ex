@@ -109,9 +109,12 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
 
   def transform({:function_call, meta, args}, _metadata) when is_list(meta) do
     name = Keyword.get(meta, :name)
+    null_safe = Keyword.get(meta, :null_safe, false)
+    # Choose send type: csend for safe navigation (&.), send otherwise
+    send_type = if null_safe, do: "csend", else: "send"
 
     with {:ok, args_ast} <- transform_list(args) do
-      {:ok, %{"type" => "send", "children" => [nil, String.to_atom(name) | args_ast]}}
+      {:ok, %{"type" => send_type, "children" => [nil, String.to_atom(name) | args_ast]}}
     end
   end
 
@@ -232,9 +235,11 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
 
   def transform({:attribute_access, meta, [receiver]}, _metadata) when is_list(meta) do
     attribute = Keyword.get(meta, :attribute)
+    null_safe = Keyword.get(meta, :null_safe, false)
+    send_type = if null_safe, do: "csend", else: "send"
 
     with {:ok, receiver_ast} <- transform(receiver, %{}) do
-      {:ok, %{"type" => "send", "children" => [receiver_ast, String.to_atom(attribute)]}}
+      {:ok, %{"type" => send_type, "children" => [receiver_ast, String.to_atom(attribute)]}}
     end
   end
 
@@ -245,7 +250,21 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
 
     with {:ok, target_ast} <- transform(target, %{}),
          {:ok, value_ast} <- transform(value, %{}) do
-      {:ok, %{"type" => "op_asgn", "children" => [target_ast, op, value_ast]}}
+      case op do
+        # ||= reconstructs to or_asgn; target must be *asgn binding form
+        :"||=" ->
+          target_asgn = to_binding_asgn(target_ast)
+          {:ok, %{"type" => "or_asgn", "children" => [target_asgn, value_ast]}}
+
+        # &&= reconstructs to and_asgn
+        :"&&=" ->
+          target_asgn = to_binding_asgn(target_ast)
+          {:ok, %{"type" => "and_asgn", "children" => [target_asgn, value_ast]}}
+
+        # Regular op_asgn (+= -= *= etc.)
+        _ ->
+          {:ok, %{"type" => "op_asgn", "children" => [target_ast, op, value_ast]}}
+      end
     end
   end
 
@@ -314,6 +333,9 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
 
     with {:ok, lambda_ast} <- transform(lambda, %{}),
          {:ok, collection_ast} <- transform_or_nil(collection) do
+      # Extract args and body from the lambda AST safely
+      {args_ast, body_ast} = extract_block_parts(lambda_ast)
+
       case op_type do
         :times ->
           # N.times { |i| body }
@@ -322,8 +344,8 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
              "type" => "block",
              "children" => [
                %{"type" => "send", "children" => [collection_ast, :times]},
-               lambda_ast["children"] |> Enum.at(1),
-               lambda_ast["children"] |> Enum.at(2)
+               args_ast,
+               body_ast
              ]
            }}
 
@@ -336,8 +358,8 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
              "type" => "block",
              "children" => [
                %{"type" => "send", "children" => [collection_ast, :reduce, initial_ast]},
-               lambda_ast["children"] |> Enum.at(1),
-               lambda_ast["children"] |> Enum.at(2)
+               args_ast,
+               body_ast
              ]
            }}
 
@@ -347,8 +369,8 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
              "type" => "block",
              "children" => [
                %{"type" => "send", "children" => [collection_ast, op]},
-               lambda_ast["children"] |> Enum.at(1),
-               lambda_ast["children"] |> Enum.at(2)
+               args_ast,
+               body_ast
              ]
            }}
       end
@@ -433,34 +455,104 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   defp build_args_ast(params) when is_list(params) do
     children =
       Enum.map(params, fn
-        {:param, meta, name} when is_binary(name) ->
-          # New 3-tuple format: {:param, [pattern: pattern, default: default], name}
-          pattern = Keyword.get(meta, :pattern)
-          default = Keyword.get(meta, :default)
-
-          cond do
-            pattern != nil ->
-              %{"type" => "arg", "children" => ["_pattern"]}
-
-            default != nil ->
-              %{"type" => "optarg", "children" => [name]}
-
-            true ->
-              %{"type" => "arg", "children" => [name]}
-          end
+        {:param, meta, name} when is_binary(name) and is_list(meta) ->
+          build_single_param_ast(meta, name)
 
         param when is_binary(param) ->
           %{"type" => "arg", "children" => [param]}
 
         {:pattern, _meta} ->
-          # Legacy pattern parameters
           %{"type" => "arg", "children" => ["_pattern"]}
 
         {:default, name, _default_val} ->
-          # Legacy default parameters
           %{"type" => "arg", "children" => [name]}
       end)
 
     %{"type" => "args", "children" => children}
+  end
+
+  # Build a single parameter AST node from param metadata
+  defp build_single_param_ast(meta, name) do
+    cond do
+      # Block parameter: &block
+      Keyword.get(meta, :block) == true ->
+        %{"type" => "blockarg", "children" => [name]}
+
+      # Keyword rest parameter: **opts
+      Keyword.get(meta, :keyword_rest) == true ->
+        %{"type" => "kwrestarg", "children" => [name]}
+
+      # Rest parameter: *args
+      Keyword.get(meta, :rest) == true ->
+        %{"type" => "restarg", "children" => [name]}
+
+      # Forward arguments: ...
+      Keyword.get(meta, :forward) == true ->
+        %{"type" => "forward_arg", "children" => []}
+
+      # Keyword parameter with default: name: "default"
+      Keyword.get(meta, :keyword) == true && Keyword.has_key?(meta, :default) ->
+        default = Keyword.get(meta, :default)
+
+        case transform_or_nil(default) do
+          {:ok, default_ast} ->
+            %{"type" => "kwoptarg", "children" => [name, default_ast]}
+
+          _ ->
+            %{"type" => "kwoptarg", "children" => [name]}
+        end
+
+      # Required keyword parameter: name:
+      Keyword.get(meta, :keyword) == true ->
+        %{"type" => "kwarg", "children" => [name]}
+
+      # Optional positional parameter with default: x = 1
+      Keyword.has_key?(meta, :default) ->
+        default = Keyword.get(meta, :default)
+
+        case transform_or_nil(default) do
+          {:ok, default_ast} ->
+            %{"type" => "optarg", "children" => [name, default_ast]}
+
+          _ ->
+            %{"type" => "optarg", "children" => [name]}
+        end
+
+      # Pattern parameter
+      Keyword.get(meta, :pattern) != nil ->
+        %{"type" => "arg", "children" => ["_pattern"]}
+
+      # Regular required positional parameter
+      true ->
+        %{"type" => "arg", "children" => [name]}
+    end
+  end
+
+  # Convert a variable AST node to its binding (assignment) form
+  # Used for or_asgn/and_asgn targets: lvar -> lvasgn, ivar -> ivasgn, etc.
+  defp to_binding_asgn(%{"type" => "lvar", "children" => [name]}),
+    do: %{"type" => "lvasgn", "children" => [name]}
+
+  defp to_binding_asgn(%{"type" => "ivar", "children" => [name]}),
+    do: %{"type" => "ivasgn", "children" => [name]}
+
+  defp to_binding_asgn(%{"type" => "cvar", "children" => [name]}),
+    do: %{"type" => "cvasgn", "children" => [name]}
+
+  defp to_binding_asgn(%{"type" => "gvar", "children" => [name]}),
+    do: %{"type" => "gvasgn", "children" => [name]}
+
+  # Fallback: use as-is (already in binding form or other node type)
+  defp to_binding_asgn(ast), do: ast
+
+  # Extract args and body from a lambda/block AST node safely
+  # Handles both the "block" wrapper format and direct access
+  defp extract_block_parts(%{"type" => "block", "children" => [_send, args, body]}) do
+    {args, body}
+  end
+
+  defp extract_block_parts(other) do
+    # Fallback: empty args and the whole thing as body
+    {%{"type" => "args", "children" => []}, other}
   end
 end

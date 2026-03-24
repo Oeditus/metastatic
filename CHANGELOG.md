@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-03-24
+
+### Added
+- **Comprehensive Ruby/Rails Support** - Major expansion of the Ruby adapter:
+  - Safe navigation operator (`&.`) via `csend` AST type: maps to `function_call`/`attribute_access` with `null_safe: true`
+  - Conditional assignment operators: `||=` (`or_asgn`) and `&&=` (`and_asgn`) map to `augmented_assignment`
+  - All Ruby parameter types: `optarg`, `kwarg`, `kwoptarg`, `restarg`, `kwrestarg`, `blockarg`, `forward_arg`
+  - Variable binding forms for `ivasgn`, `cvasgn`, `gvasgn` (1-child targets in `||=`/`&&=`)
+  - Multi-statement `kwbegin` blocks (explicit `begin...end`)
+  - FromMeta round-trip: `csend` reconstruction, `or_asgn`/`and_asgn` reconstruction, all parameter types
+  - Fixed fragile `collection_op` from_meta lambda extraction
+  - Parser now emits `end_line` and `end_column` in location info
+  - 3 Rails fixture files for testing (model, concern, service)
+  - 41 new tests including integration tests against 53-file Rails app (51/53 transform successfully)
+  - Test suite: 255 doctests + 1646 tests, 0 failures
+
 ## [0.12.0] - 2026-03-19
 
 ### Added

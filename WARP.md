@@ -6,12 +6,13 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
-**Current Status:** v0.12.0 - Production Ready
-- 255 doctests + 1605 tests passing (excluding haskell tag), 100% coverage
+**Current Status:** v0.12.1 - Production Ready
+- 255 doctests + 1646 tests passing (excluding haskell tag), 100% coverage
 - Uniform 3-Tuple MetaAST Format: All MetaAST nodes use `{type_atom, keyword_meta, children_or_value}`
 - M2.2s Structural/Organizational Layer: container, function_def, attribute_access, augmented_assignment, property
 - M1 Metadata Preservation: Full context threading (module, function, arity, visibility) for Ragex integration
 - Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented with 3-tuple output
+- Comprehensive Ruby/Rails Support: safe navigation (&.), memoization (||=/&&=), all parameter types, tested against 53-file Rails app
 - All 9 analysis tools support structural types and 3-tuple format
 - Business Logic Analyzers: 20 language-agnostic analyzers updated for 3-tuple format
 - OpKind Semantic Metadata System: 7 domains (db, http, auth, cache, queue, file, external_api)
@@ -21,7 +22,7 @@ Metastatic is a cross-language code analysis library using a unified MetaAST (Me
 
 ### Testing
 ```bash
-# Run all tests (255 doctests + 1605 tests passing, excluding haskell)
+# Run all tests (255 doctests + 1646 tests passing, excluding haskell)
 mix test --exclude haskell
 
 # Run including haskell tests (requires GHC)
@@ -332,15 +333,60 @@ All `:variable` nodes carry a `scope` key distinguishing binding context:
 ## Development Workflow
 
 ### Current State
-v0.12.0 is the first production release. Key capabilities:
+v0.12.1 - Production Ready. Key capabilities:
 - All MetaAST nodes use uniform 3-tuple format: `{type_atom, keyword_meta, children_or_value}`
 - Core MetaAST types (M2.1 Core + M2.2 Extended + M2.2s Structural) fully implemented and tested
 - All 5 language adapters operational: Python, Elixir, Ruby, Erlang, Haskell
 - Full structural support: containers, function definitions, properties
+- Comprehensive Ruby/Rails support: 51/53 files from a real Rails app transform successfully
 - All 9 analysis tools updated for 3-tuple format
 - 20 business logic analyzers with OpKind semantic metadata
 - All 15 mix tasks with full documentation and ruby/haskell support
 - `detect_duplicates` performs real file-based analysis via language adapters
+
+### Ruby Adapter Capabilities
+
+The Ruby adapter (`lib/metastatic/adapters/ruby/`) supports comprehensive Ruby/Rails analysis:
+
+**M2.1 Core:** literals (int/float/string/symbol/bool/nil/constant), variables (local/instance/class/global), binary ops (arithmetic/comparison/boolean), unary ops, method calls (local/instance/with receiver), conditionals, assignments, blocks, lists (arrays), maps (hashes), early return
+
+**M2.2 Extended:** while/until/for loops, 25+ iterator methods (each/map/select/reduce/find/sort_by/etc.), lambdas/procs, case/when pattern matching, begin/rescue/ensure exception handling
+
+**M2.2s Structural:** class/module containers with inheritance, method definitions (def/defs), all Ruby parameter types (arg, optarg, kwarg, kwoptarg, restarg, kwrestarg, blockarg, forward_arg), attribute access, augmented assignment (+=/-=), conditional assignment (||=/&&=)
+
+**Ruby-specific (M2.3):** safe navigation operator (&.), string interpolation, regular expressions, yield, super/zsuper, alias, splat/block_pass/kwsplat, multiple assignment, defined?, singleton classes, BEGIN/END blocks, break/next/redo/retry
+
+**Parameter types example:**
+```elixir
+# def complex(a, b = 1, *rest, key:, opt: 2, **kw, &blk)
+{:function_def, [
+  name: "complex",
+  params: [
+    {:param, [], "a"},
+    {:param, [default: {:literal, [subtype: :integer], 1}], "b"},
+    {:param, [rest: true], "rest"},
+    {:param, [keyword: true], "key"},
+    {:param, [keyword: true, default: {:literal, [subtype: :integer], 2}], "opt"},
+    {:param, [keyword_rest: true], "kw"},
+    {:param, [block: true], "blk"}
+  ],
+  visibility: :public, arity: 7
+], [body...]}
+```
+
+**Safe navigation (null_safe):**
+```elixir
+# user&.name
+{:attribute_access, [attribute: "name", null_safe: true], [receiver]}
+# header&.match(pattern)
+{:function_call, [name: "header.match", null_safe: true], [pattern]}
+```
+
+**Memoization (||=/&&=):**
+```elixir
+# @current_user ||= User.find_by(id: 1)
+{:augmented_assignment, [category: :boolean, operator: :"||="], [target, value]}
+```
 
 ### Working with MetaAST
 

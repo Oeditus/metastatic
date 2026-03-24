@@ -346,6 +346,12 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     {:ok, {:variable, [scope: :local], var_name}, %{scope: :local, binding: true}}
   end
 
+  # Instance variable binding (without value, e.g., in or_asgn targets)
+  def transform(%{"type" => "ivasgn", "children" => [name]}) do
+    var_name = if is_atom(name), do: Atom.to_string(name), else: name
+    {:ok, {:variable, [scope: :instance], var_name}, %{scope: :instance, binding: true}}
+  end
+
   # Instance variable assignment
   def transform(%{"type" => "ivasgn", "children" => [name, value]}) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
@@ -354,6 +360,12 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       {:ok, {:assignment, [scope: :instance], [{:variable, [], var_name}, value_meta]},
        %{scope: :instance}}
     end
+  end
+
+  # Class variable binding (without value, e.g., in or_asgn targets)
+  def transform(%{"type" => "cvasgn", "children" => [name]}) do
+    var_name = if is_atom(name), do: Atom.to_string(name), else: name
+    {:ok, {:variable, [scope: :class], var_name}, %{scope: :class, binding: true}}
   end
 
   # Class variable assignment
@@ -366,6 +378,12 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
+  # Global variable binding (without value, e.g., in or_asgn targets)
+  def transform(%{"type" => "gvasgn", "children" => [name]}) do
+    var_name = if is_atom(name), do: Atom.to_string(name), else: name
+    {:ok, {:variable, [scope: :global], var_name}, %{scope: :global, binding: true}}
+  end
+
   # Global variable assignment
   def transform(%{"type" => "gvasgn", "children" => [name, value]}) do
     var_name = if is_atom(name), do: Atom.to_string(name), else: name
@@ -373,6 +391,34 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, value_meta, _} <- transform(value) do
       {:ok, {:assignment, [scope: :global], [{:variable, [], var_name}, value_meta]},
        %{scope: :global}}
+    end
+  end
+
+  # Conditional assignment operators - M2.2s Structural Layer
+
+  # ||= (or-assignment) - idiomatic Ruby memoization: @x ||= compute
+  def transform(%{"type" => "or_asgn", "children" => [target, value]} = ast) do
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, value_meta, _} <- transform(value) do
+      {:ok,
+       add_location(
+         {:augmented_assignment, [category: :boolean, operator: :"||="],
+          [target_meta, value_meta]},
+         ast
+       ), %{original_type: :or_asgn}}
+    end
+  end
+
+  # &&= (and-assignment)
+  def transform(%{"type" => "and_asgn", "children" => [target, value]} = ast) do
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, value_meta, _} <- transform(value) do
+      {:ok,
+       add_location(
+         {:augmented_assignment, [category: :boolean, operator: :"&&="],
+          [target_meta, value_meta]},
+         ast
+       ), %{original_type: :and_asgn}}
     end
   end
 
@@ -394,6 +440,43 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       {:ok,
        {:augmented_assignment, [category: category, operator: op_atom],
         [target_meta, value_meta]}, %{}}
+    end
+  end
+
+  # Safe navigation operator (&.) - M2.1 Core Layer
+  # csend is identical to send but uses &. instead of .
+  # Ruby: obj&.method  (returns nil if obj is nil instead of raising NoMethodError)
+
+  # csend without arguments: 2 children [receiver, method]
+  def transform(%{"type" => "csend", "children" => [receiver, method]}) do
+    method_str = if is_atom(method), do: Atom.to_string(method), else: method
+
+    with {:ok, receiver_meta, _} <- transform(receiver) do
+      case receiver_meta do
+        {:variable, _, _} ->
+          {:ok, {:attribute_access, [attribute: method_str, null_safe: true], [receiver_meta]},
+           %{kind: :instance_var, null_safe: true}}
+
+        _ ->
+          qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
+
+          {:ok, {:function_call, [name: qualified_name, null_safe: true], []},
+           %{call_type: :instance, null_safe: true}}
+      end
+    end
+  end
+
+  # csend with arguments (including operators): 3+ children [receiver, method, args...]
+  def transform(%{"type" => "csend", "children" => [receiver, method | args]})
+      when not is_nil(receiver) do
+    method_str = if is_atom(method), do: Atom.to_string(method), else: method
+
+    with {:ok, receiver_meta, _} <- transform(receiver),
+         {:ok, args_meta} <- transform_list(args) do
+      qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
+
+      {:ok, {:function_call, [name: qualified_name, null_safe: true], args_meta},
+       %{call_type: :instance, null_safe: true}}
     end
   end
 
@@ -470,9 +553,25 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # Exception Handling - M2.2 Extended Layer
 
-  # Begin/rescue/ensure block
-  def transform(%{"type" => "kwbegin", "children" => [ensure_or_rescue]}) do
-    transform(ensure_or_rescue)
+  # Begin/rescue/ensure block (single child delegates to inner node)
+  def transform(%{"type" => "kwbegin", "children" => [ensure_or_rescue]})
+      when is_map(ensure_or_rescue) do
+    case ensure_or_rescue do
+      %{"type" => type} when type in ["rescue", "ensure"] ->
+        transform(ensure_or_rescue)
+
+      _ ->
+        # Single-statement kwbegin, treat as transparent wrapper
+        transform(ensure_or_rescue)
+    end
+  end
+
+  # kwbegin with multiple statements (explicit begin...end block)
+  def transform(%{"type" => "kwbegin", "children" => statements})
+      when is_list(statements) and length(statements) > 1 do
+    with {:ok, statements_meta} <- transform_list(statements) do
+      {:ok, {:block, [], statements_meta}, %{}}
+    end
   end
 
   # Ensure block (with or without rescue)
@@ -929,19 +1028,10 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
-  # Extract lambda parameters from args node
+  # Extract lambda parameters from args node (reuses extract_single_param)
   defp extract_lambda_params(%{"type" => "args", "children" => args}) do
     params =
-      Enum.map(args, fn
-        %{"type" => "arg", "children" => [name]} when is_binary(name) ->
-          {:param, [], name}
-
-        %{"type" => "arg", "children" => [name]} when is_atom(name) ->
-          {:param, [], Atom.to_string(name)}
-
-        _ ->
-          nil
-      end)
+      Enum.map(args, &extract_single_param/1)
       |> Enum.reject(&is_nil/1)
 
     {:ok, params}
@@ -1232,22 +1322,82 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   defp extract_method_params(%{"type" => "args", "children" => args}) do
     params =
-      Enum.map(args, fn
-        %{"type" => "arg", "children" => [name]} when is_binary(name) ->
-          {:param, [], name}
-
-        %{"type" => "arg", "children" => [name]} when is_atom(name) ->
-          {:param, [], Atom.to_string(name)}
-
-        _ ->
-          nil
-      end)
+      Enum.map(args, &extract_single_param/1)
       |> Enum.reject(&is_nil/1)
 
     {:ok, params}
   end
 
   defp extract_method_params(_), do: {:ok, []}
+
+  # Extract a single parameter node into {:param, meta, name} format
+  # Required positional parameter: def foo(x)
+  defp extract_single_param(%{"type" => "arg", "children" => [name]}) do
+    {:param, [], normalize_param_name(name)}
+  end
+
+  # Optional positional parameter with default: def foo(x = 1)
+  defp extract_single_param(%{"type" => "optarg", "children" => [name, default_value]}) do
+    default_meta =
+      case transform(default_value) do
+        {:ok, meta, _} -> meta
+        _ -> nil
+      end
+
+    {:param, [default: default_meta], normalize_param_name(name)}
+  end
+
+  # Required keyword parameter: def foo(name:)
+  defp extract_single_param(%{"type" => "kwarg", "children" => [name]}) do
+    {:param, [keyword: true], normalize_param_name(name)}
+  end
+
+  # Optional keyword parameter with default: def foo(name: "default")
+  defp extract_single_param(%{"type" => "kwoptarg", "children" => [name, default_value]}) do
+    default_meta =
+      case transform(default_value) do
+        {:ok, meta, _} -> meta
+        _ -> nil
+      end
+
+    {:param, [keyword: true, default: default_meta], normalize_param_name(name)}
+  end
+
+  # Rest parameter (splat): def foo(*args)
+  defp extract_single_param(%{"type" => "restarg", "children" => [name]}) do
+    {:param, [rest: true], normalize_param_name(name)}
+  end
+
+  # Anonymous rest parameter: def foo(*)
+  defp extract_single_param(%{"type" => "restarg", "children" => []}) do
+    {:param, [rest: true], "*"}
+  end
+
+  # Keyword rest parameter (double splat): def foo(**opts)
+  defp extract_single_param(%{"type" => "kwrestarg", "children" => [name]}) do
+    {:param, [keyword_rest: true], normalize_param_name(name)}
+  end
+
+  # Anonymous keyword rest parameter: def foo(**)
+  defp extract_single_param(%{"type" => "kwrestarg", "children" => []}) do
+    {:param, [keyword_rest: true], "**"}
+  end
+
+  # Block parameter: def foo(&block)
+  defp extract_single_param(%{"type" => "blockarg", "children" => [name]}) do
+    {:param, [block: true], normalize_param_name(name)}
+  end
+
+  # Forward arguments (...) Ruby 2.7+
+  defp extract_single_param(%{"type" => "forward_arg", "children" => []}) do
+    {:param, [forward: true], "..."}
+  end
+
+  # Catch-all for unrecognized parameter types
+  defp extract_single_param(_), do: nil
+
+  defp normalize_param_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp normalize_param_name(name) when is_binary(name), do: name
 
   defp extract_symbol_name(%{"type" => "sym", "children" => [name]}) when is_atom(name) do
     Atom.to_string(name)

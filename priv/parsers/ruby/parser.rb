@@ -62,11 +62,14 @@ module Metastatic
     def self.serialize_location(loc)
       return nil unless loc && loc.expression
 
+      expr = loc.expression
       {
-        begin_pos: loc.expression.begin_pos,
-        end_pos: loc.expression.end_pos,
-        begin_line: loc.expression.line,
-        begin_column: loc.expression.column
+        begin_pos: expr.begin_pos,
+        end_pos: expr.end_pos,
+        begin_line: expr.line,
+        begin_column: expr.column,
+        end_line: expr.last_line,
+        end_column: expr.last_column
       }
     rescue StandardError
       nil

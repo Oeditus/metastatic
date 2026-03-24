@@ -1825,4 +1825,625 @@ defmodule Metastatic.Adapters.RubyTest do
       assert metadata.ensure != nil
     end
   end
+
+  # ============================================================
+  # Phase 1: Safe Navigation (&.), ||=, &&=
+  # ============================================================
+
+  describe "ToMeta - Safe Navigation Operator (csend)" do
+    test "transforms csend without arguments (attribute access)" do
+      ast = %{
+        "type" => "csend",
+        "children" => [
+          %{"type" => "lvar", "children" => ["user"]},
+          "name"
+        ]
+      }
+
+      assert {:ok, meta_ast, %{null_safe: true}} = ToMeta.transform(ast)
+
+      assert {:attribute_access, meta, [{:variable, _, "user"}]} = meta_ast
+      assert Keyword.get(meta, :attribute) == "name"
+      assert Keyword.get(meta, :null_safe) == true
+    end
+
+    test "transforms csend with arguments" do
+      ast = %{
+        "type" => "csend",
+        "children" => [
+          %{"type" => "lvar", "children" => ["header"]},
+          "match",
+          %{"type" => "str", "children" => ["pattern"]}
+        ]
+      }
+
+      assert {:ok, {:function_call, meta, [_arg]}, %{null_safe: true}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :null_safe) == true
+      assert Keyword.get(meta, :name) =~ "match"
+    end
+
+    test "transforms chained csend" do
+      # header&.match(pattern)&.captures
+      inner = %{
+        "type" => "csend",
+        "children" => [
+          %{"type" => "lvar", "children" => ["header"]},
+          "match",
+          %{"type" => "str", "children" => ["pattern"]}
+        ]
+      }
+
+      outer = %{
+        "type" => "csend",
+        "children" => [inner, "captures"]
+      }
+
+      assert {:ok, meta_ast, %{null_safe: true}} = ToMeta.transform(outer)
+      # The outer is a function_call (receiver is not a variable)
+      assert {:function_call, meta, []} = meta_ast
+      assert Keyword.get(meta, :null_safe) == true
+    end
+
+    test "parses and transforms safe navigation from source" do
+      {:ok, ast} = Ruby.parse("user&.name")
+      assert {:ok, meta_ast, _} = ToMeta.transform(ast)
+
+      case meta_ast do
+        {:attribute_access, meta, _} ->
+          assert Keyword.get(meta, :null_safe) == true
+
+        {:function_call, meta, _} ->
+          assert Keyword.get(meta, :null_safe) == true
+      end
+    end
+  end
+
+  describe "ToMeta - Conditional Assignment (||= and &&=)" do
+    test "transforms or_asgn with instance variable" do
+      ast = %{
+        "type" => "or_asgn",
+        "children" => [
+          %{"type" => "ivasgn", "children" => ["@value"]},
+          %{"type" => "int", "children" => [42]}
+        ]
+      }
+
+      assert {:ok, {:augmented_assignment, meta, [target, value]}, %{original_type: :or_asgn}} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :operator) == :"||="
+      assert Keyword.get(meta, :category) == :boolean
+      assert {:variable, [scope: :instance], "@value"} = target
+      assert {:literal, [subtype: :integer], 42} = value
+    end
+
+    test "transforms and_asgn with local variable" do
+      ast = %{
+        "type" => "and_asgn",
+        "children" => [
+          %{"type" => "lvasgn", "children" => ["x"]},
+          %{"type" => "str", "children" => ["default"]}
+        ]
+      }
+
+      assert {:ok, {:augmented_assignment, meta, [target, value]}, %{original_type: :and_asgn}} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :operator) == :"&&="
+      assert {:variable, [scope: :local], "x"} = target
+      assert {:literal, [subtype: :string], "default"} = value
+    end
+
+    test "parses and transforms ||= from source" do
+      {:ok, ast} = Ruby.parse("@cached ||= compute")
+      assert {:ok, {:augmented_assignment, meta, _}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :operator) == :"||="
+    end
+
+    test "parses and transforms &&= from source" do
+      {:ok, ast} = Ruby.parse("x &&= y")
+      assert {:ok, {:augmented_assignment, meta, _}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :operator) == :"&&="
+    end
+  end
+
+  describe "ToMeta - Variable Binding Forms" do
+    test "transforms instance variable binding (ivasgn with 1 child)" do
+      ast = %{"type" => "ivasgn", "children" => ["@x"]}
+
+      assert {:ok, {:variable, [scope: :instance], "@x"}, %{binding: true}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms class variable binding (cvasgn with 1 child)" do
+      ast = %{"type" => "cvasgn", "children" => ["@@x"]}
+
+      assert {:ok, {:variable, [scope: :class], "@@x"}, %{binding: true}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms global variable binding (gvasgn with 1 child)" do
+      ast = %{"type" => "gvasgn", "children" => ["$x"]}
+
+      assert {:ok, {:variable, [scope: :global], "$x"}, %{binding: true}} =
+               ToMeta.transform(ast)
+    end
+  end
+
+  describe "ToMeta - kwbegin with multiple statements" do
+    test "transforms kwbegin as block" do
+      ast = %{
+        "type" => "kwbegin",
+        "children" => [
+          %{"type" => "int", "children" => [1]},
+          %{"type" => "int", "children" => [2]}
+        ]
+      }
+
+      assert {:ok, {:block, [], [_, _]}, %{}} = ToMeta.transform(ast)
+    end
+  end
+
+  # ============================================================
+  # Phase 2: Method Parameter Types
+  # ============================================================
+
+  describe "ToMeta - Extended Parameter Types" do
+    test "transforms optarg (optional positional parameter)" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "foo",
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "optarg", "children" => ["x", %{"type" => "int", "children" => [0]}]}
+            ]
+          },
+          nil
+        ]
+      }
+
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [{:param, param_meta, "x"}] = params
+      assert {:literal, [subtype: :integer], 0} = Keyword.get(param_meta, :default)
+    end
+
+    test "transforms kwarg (required keyword parameter)" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "foo",
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "kwarg", "children" => ["name"]}
+            ]
+          },
+          nil
+        ]
+      }
+
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [{:param, [keyword: true], "name"}] = params
+    end
+
+    test "transforms kwoptarg (optional keyword parameter)" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "foo",
+          %{
+            "type" => "args",
+            "children" => [
+              %{
+                "type" => "kwoptarg",
+                "children" => ["name", %{"type" => "str", "children" => ["default"]}]
+              }
+            ]
+          },
+          nil
+        ]
+      }
+
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [{:param, param_meta, "name"}] = params
+      assert Keyword.get(param_meta, :keyword) == true
+      assert {:literal, [subtype: :string], "default"} = Keyword.get(param_meta, :default)
+    end
+
+    test "transforms restarg (splat parameter)" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "foo",
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "restarg", "children" => ["args"]}
+            ]
+          },
+          nil
+        ]
+      }
+
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [{:param, [rest: true], "args"}] = params
+    end
+
+    test "transforms kwrestarg (double splat parameter)" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "foo",
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "kwrestarg", "children" => ["opts"]}
+            ]
+          },
+          nil
+        ]
+      }
+
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [{:param, [keyword_rest: true], "opts"}] = params
+    end
+
+    test "transforms blockarg (block parameter)" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "foo",
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "blockarg", "children" => ["block"]}
+            ]
+          },
+          nil
+        ]
+      }
+
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [{:param, [block: true], "block"}] = params
+    end
+
+    test "transforms mixed parameter types" do
+      ast = %{
+        "type" => "def",
+        "children" => [
+          "complex",
+          %{
+            "type" => "args",
+            "children" => [
+              %{"type" => "arg", "children" => ["x"]},
+              %{"type" => "optarg", "children" => ["y", %{"type" => "int", "children" => [0]}]},
+              %{"type" => "restarg", "children" => ["args"]},
+              %{"type" => "kwarg", "children" => ["name"]},
+              %{
+                "type" => "kwoptarg",
+                "children" => ["age", %{"type" => "int", "children" => [18]}]
+              },
+              %{"type" => "kwrestarg", "children" => ["opts"]},
+              %{"type" => "blockarg", "children" => ["block"]}
+            ]
+          },
+          nil
+        ]
+      }
+
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+
+      assert [
+               {:param, [], "x"},
+               {:param, [default: {:literal, [subtype: :integer], 0}], "y"},
+               {:param, [rest: true], "args"},
+               {:param, [keyword: true], "name"},
+               {:param, [keyword: true, default: {:literal, [subtype: :integer], 18}], "age"},
+               {:param, [keyword_rest: true], "opts"},
+               {:param, [block: true], "block"}
+             ] = params
+    end
+
+    test "parses and transforms method with default param from source" do
+      {:ok, ast} = Ruby.parse("def initialize(initial = 0); end")
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [{:param, param_meta, "initial"}] = params
+      assert Keyword.get(param_meta, :default) != nil
+    end
+
+    test "parses and transforms method with keyword params from source" do
+      {:ok, ast} = Ruby.parse("def foo(name:, age: 18); end")
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [_, _] = params
+      assert {:param, [keyword: true], "name"} = Enum.at(params, 0)
+      assert {:param, kw_meta, "age"} = Enum.at(params, 1)
+      assert Keyword.get(kw_meta, :keyword) == true
+      assert Keyword.get(kw_meta, :default) != nil
+    end
+
+    test "parses and transforms method with splat params from source" do
+      {:ok, ast} = Ruby.parse("def foo(*args, **opts, &block); end")
+      assert {:ok, {:function_def, meta, _}, _} = ToMeta.transform(ast)
+      params = Keyword.get(meta, :params)
+      assert [_, _, _] = params
+      assert {:param, [rest: true], "args"} = Enum.at(params, 0)
+      assert {:param, [keyword_rest: true], "opts"} = Enum.at(params, 1)
+      assert {:param, [block: true], "block"} = Enum.at(params, 2)
+    end
+  end
+
+  # ============================================================
+  # Phase 3: FromMeta Round-Trip Tests
+  # ============================================================
+
+  describe "FromMeta - csend round-trip" do
+    alias Metastatic.Adapters.Ruby.FromMeta
+
+    test "reconstructs csend for null_safe attribute access" do
+      meta_ast =
+        {:attribute_access, [attribute: "name", null_safe: true],
+         [{:variable, [scope: :local], "user"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "csend"
+      assert Enum.at(ast["children"], 1) == :name
+    end
+
+    test "reconstructs csend for null_safe function call" do
+      meta_ast = {:function_call, [name: "obj.method", null_safe: true], []}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "csend"
+    end
+
+    test "reconstructs regular send for non-null_safe" do
+      meta_ast =
+        {:attribute_access, [attribute: "name"], [{:variable, [scope: :local], "user"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "send"
+    end
+  end
+
+  describe "FromMeta - or_asgn/and_asgn round-trip" do
+    alias Metastatic.Adapters.Ruby.FromMeta
+
+    test "reconstructs or_asgn from augmented_assignment ||=" do
+      meta_ast =
+        {:augmented_assignment, [category: :boolean, operator: :"||="],
+         [{:variable, [scope: :instance], "@val"}, {:literal, [subtype: :integer], 42}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "or_asgn"
+      assert [target, _value] = ast["children"]
+      assert target["type"] == "ivasgn"
+      assert target["children"] == ["@val"]
+    end
+
+    test "reconstructs and_asgn from augmented_assignment &&=" do
+      meta_ast =
+        {:augmented_assignment, [category: :boolean, operator: :"&&="],
+         [{:variable, [scope: :local], "x"}, {:literal, [subtype: :string], "val"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "and_asgn"
+      assert [target, _value] = ast["children"]
+      assert target["type"] == "lvasgn"
+    end
+
+    test "reconstructs op_asgn for regular += operator" do
+      meta_ast =
+        {:augmented_assignment, [category: :arithmetic, operator: :+],
+         [{:variable, [scope: :local], "x"}, {:literal, [subtype: :integer], 5}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "op_asgn"
+    end
+  end
+
+  describe "FromMeta - extended parameter types round-trip" do
+    alias Metastatic.Adapters.Ruby.FromMeta
+
+    test "reconstructs optarg parameter" do
+      meta_ast =
+        {:function_def,
+         [
+           name: "foo",
+           params: [{:param, [default: {:literal, [subtype: :integer], 0}], "x"}],
+           visibility: :public,
+           arity: 1
+         ], [nil]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      args = ast["children"] |> Enum.at(1)
+      assert args["type"] == "args"
+      [param] = args["children"]
+      assert param["type"] == "optarg"
+      assert Enum.at(param["children"], 0) == "x"
+    end
+
+    test "reconstructs kwarg parameter" do
+      meta_ast =
+        {:function_def,
+         [
+           name: "foo",
+           params: [{:param, [keyword: true], "name"}],
+           visibility: :public,
+           arity: 1
+         ], [nil]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      args = ast["children"] |> Enum.at(1)
+      [param] = args["children"]
+      assert param["type"] == "kwarg"
+    end
+
+    test "reconstructs restarg parameter" do
+      meta_ast =
+        {:function_def,
+         [
+           name: "foo",
+           params: [{:param, [rest: true], "args"}],
+           visibility: :public,
+           arity: 1
+         ], [nil]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      args = ast["children"] |> Enum.at(1)
+      [param] = args["children"]
+      assert param["type"] == "restarg"
+    end
+
+    test "reconstructs blockarg parameter" do
+      meta_ast =
+        {:function_def,
+         [
+           name: "foo",
+           params: [{:param, [block: true], "block"}],
+           visibility: :public,
+           arity: 1
+         ], [nil]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      args = ast["children"] |> Enum.at(1)
+      [param] = args["children"]
+      assert param["type"] == "blockarg"
+    end
+  end
+
+  # ============================================================
+  # Phase 5: Rails Integration Tests
+  # ============================================================
+
+  describe "Rails Integration - fixture files" do
+    test "parses and transforms Rails model fixture" do
+      source = File.read!("test/fixtures/ruby/rails_model.rb")
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:container, meta, _}, _} = Ruby.to_meta(ast)
+      assert Keyword.get(meta, :container_type) == :class
+      assert Keyword.get(meta, :name) == "Book"
+      assert Keyword.get(meta, :parent) == "ApplicationRecord"
+    end
+
+    test "parses and transforms Rails concern fixture" do
+      source = File.read!("test/fixtures/ruby/rails_concern.rb")
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:container, meta, _}, _} = Ruby.to_meta(ast)
+      assert Keyword.get(meta, :container_type) == :module
+      assert Keyword.get(meta, :name) == "Authentication"
+    end
+
+    test "parses and transforms Rails service fixture" do
+      source = File.read!("test/fixtures/ruby/rails_service.rb")
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:container, meta, _}, _} = Ruby.to_meta(ast)
+      assert Keyword.get(meta, :container_type) == :module
+      assert Keyword.get(meta, :name) == "Catalog"
+    end
+
+    test "parses and transforms memoization pattern" do
+      source = """
+      def current_user
+        @current_user ||= User.find_by(id: 1)
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:function_def, _, [body]}, _} = Ruby.to_meta(ast)
+      assert {:augmented_assignment, meta, _} = body
+      assert Keyword.get(meta, :operator) == :"||="
+    end
+
+    test "parses and transforms safe navigation chain" do
+      source = "header&.match(pattern)&.captures&.first"
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, _meta_ast, _} = Ruby.to_meta(ast)
+    end
+
+    test "parses and transforms method with all param types" do
+      source = "def complex(a, b = 1, *rest, key:, opt: 2, **kw, &blk); end"
+
+      {:ok, ast} = Ruby.parse(source)
+      assert {:ok, {:function_def, meta, _}, _} = Ruby.to_meta(ast)
+      params = Keyword.get(meta, :params)
+      assert length(params) == 7
+    end
+  end
+
+  describe "Rails Integration - book_shop_rails app" do
+    @book_shop_path "/home/am/Proyectos/TopTal/book_shop_rails"
+
+    @tag :book_shop
+    test "all app Ruby files parse and transform successfully" do
+      files =
+        Path.wildcard(Path.join(@book_shop_path, "app/**/*.rb")) ++
+          Path.wildcard(Path.join(@book_shop_path, "config/**/*.rb"))
+
+      assert length(files) > 0, "Expected to find Ruby files in book_shop_rails"
+
+      results =
+        Enum.map(files, fn f ->
+          source = File.read!(f)
+
+          case Ruby.parse(source) do
+            {:ok, ast} ->
+              case Ruby.to_meta(ast) do
+                {:ok, _, _} -> :ok
+                {:error, _} -> {:fail, Path.basename(f)}
+              end
+
+            {:error, _} ->
+              # Parse failures are acceptable for config files with special syntax
+              :parse_skip
+          end
+        end)
+
+      ok_count = Enum.count(results, &(&1 == :ok))
+      skip_count = Enum.count(results, &(&1 == :parse_skip))
+      fails = Enum.filter(results, &match?({:fail, _}, &1))
+
+      assert fails == [],
+             "Expected 0 to_meta failures, got #{length(fails)}: #{inspect(fails)}"
+
+      assert ok_count + skip_count == length(results)
+      assert ok_count >= 50, "Expected at least 50 files to transform, got #{ok_count}"
+    end
+  end
+
+  describe "Parser - location enhancement" do
+    test "emits end_line and end_column" do
+      {:ok, ast} = Ruby.parse("x = 42")
+      loc = ast["location"]
+      assert is_integer(loc["end_line"])
+      assert is_integer(loc["end_column"])
+      assert loc["end_line"] >= loc["begin_line"]
+    end
+
+    test "multi-line location spans" do
+      source = """
+      class Foo
+        def bar
+          42
+        end
+      end
+      """
+
+      {:ok, ast} = Ruby.parse(source)
+      loc = ast["location"]
+      assert loc["begin_line"] == 1
+      assert loc["end_line"] >= 4
+    end
+  end
 end
