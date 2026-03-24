@@ -36,6 +36,8 @@ defmodule Metastatic.Analysis.Duplication.Similarity do
   alias Metastatic.Analysis.Duplication.Fingerprint
   alias Metastatic.AST
 
+  @dialyzer :no_opaque
+
   @doc """
   Calculates overall similarity between two ASTs.
 

@@ -53,6 +53,7 @@ defmodule Mix.Tasks.Metastatic.Inspect do
 
   use Mix.Task
   @dialyzer {:no_return, run: 1}
+  @dialyzer :no_opaque
 
   alias Metastatic.{Builder, CLI}
   alias Metastatic.CLI.{Formatter, Inspector}

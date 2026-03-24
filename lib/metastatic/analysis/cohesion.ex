@@ -89,6 +89,8 @@ defmodule Metastatic.Analysis.Cohesion do
         1.0
     """
 
+  @dialyzer :no_opaque
+
   @impl Metastatic.Document.Analyzer
   def handle_analyze(%Document{ast: ast}, _opts \\ []) do
     with {:ok, container_type, container_name, members} <- extract_container(ast),

@@ -27,6 +27,8 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
 
   alias Metastatic.AST
 
+  @dialyzer :no_opaque
+
   @type t :: %{
           statement_count: non_neg_integer(),
           return_points: non_neg_integer(),

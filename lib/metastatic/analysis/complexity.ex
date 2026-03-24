@@ -103,6 +103,8 @@ defmodule Metastatic.Analysis.Complexity do
         1
     """
 
+  @dialyzer :no_opaque
+
   @impl Metastatic.Document.Analyzer
   def handle_analyze(%Document{ast: ast, metadata: metadata} = doc, opts \\ []) do
     thresholds = Keyword.get(opts, :thresholds, %{})

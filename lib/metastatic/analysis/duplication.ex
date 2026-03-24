@@ -51,6 +51,8 @@ defmodule Metastatic.Analysis.Duplication do
   alias Metastatic.Analysis.Duplication.{Fingerprint, Result, Similarity}
   alias Metastatic.{AST, Document}
 
+  @dialyzer :no_opaque
+
   @typedoc """
   Options for duplication detection.
 

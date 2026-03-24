@@ -60,7 +60,7 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
   @shortdoc "Detects code duplication across source files"
 
   use Mix.Task
-  @dialyzer {:no_return, run: 1}
+  @dialyzer {:no_return, [run: 1, scan_directory: 2]}
 
   alias Metastatic.Analysis.Duplication
   alias Metastatic.Analysis.Duplication.Reporter
@@ -128,7 +128,7 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
       |> Enum.filter(&(Path.extname(&1) in @supported_extensions and not File.dir?(&1)))
       |> Enum.sort()
 
-    if length(files) < 2 do
+    unless match?([_, _ | _], files) do
       Mix.shell().info(
         "Found #{length(files)} supported file(s) in #{dir_path} - need at least 2"
       )
