@@ -108,44 +108,45 @@ defmodule Metastatic.Analysis.BusinessLogic.SensitiveDataExposure do
   end
 
   @impl true
-  # Detect logging calls with potentially sensitive data
+  # Detect logging calls with potentially sensitive data,
+  # and inspect/toString on sensitive objects
   def analyze({:function_call, meta, args} = node, context) when is_list(meta) do
     func_name = Keyword.get(meta, :name, "")
 
-    if logging_function?(func_name) do
-      check_logging_args(node, func_name, args, context)
-    else
-      []
-    end
-  end
+    cond do
+      logging_function?(func_name) ->
+        check_logging_args(node, func_name, args, context)
 
-  # Detect inspect/toString on sensitive objects
-  def analyze({:function_call, meta, [arg]} = node, context) when is_list(meta) do
-    func_name = Keyword.get(meta, :name, "")
+      func_name in ["inspect", "Kernel.inspect", "toString", "to_string", "__str__"] ->
+        case args do
+          [arg] ->
+            if sensitive_object?(arg, context) do
+              [
+                Analyzer.issue(
+                  analyzer: __MODULE__,
+                  category: :security,
+                  severity: :warning,
+                  message:
+                    "Potential sensitive data exposure: '#{func_name}' on potentially sensitive object",
+                  node: node,
+                  metadata: %{
+                    cwe: 200,
+                    function: func_name,
+                    suggestion:
+                      "Select specific non-sensitive fields instead of inspecting entire object"
+                  }
+                )
+              ]
+            else
+              []
+            end
 
-    if func_name in ["inspect", "Kernel.inspect", "toString", "to_string", "__str__"] do
-      if sensitive_object?(arg, context) do
-        [
-          Analyzer.issue(
-            analyzer: __MODULE__,
-            category: :security,
-            severity: :warning,
-            message:
-              "Potential sensitive data exposure: '#{func_name}' on potentially sensitive object",
-            node: node,
-            metadata: %{
-              cwe: 200,
-              function: func_name,
-              suggestion:
-                "Select specific non-sensitive fields instead of inspecting entire object"
-            }
-          )
-        ]
-      else
+          _ ->
+            []
+        end
+
+      true ->
         []
-      end
-    else
-      []
     end
   end
 

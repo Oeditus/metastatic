@@ -369,18 +369,15 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
   defp find_function_in_body(_body, _func_name), do: :not_found
 
-  defp display_scope_info(_document, :full, nil) do
-    # No special message for full file analysis
+  defp display_scope_info(document, :full, nil) do
+    if module_file?(document) do
+      Mix.shell().info("Note: Analyzing entire module (includes all nested functions).\n")
+    end
+
     :ok
   end
 
   defp display_scope_info(_document, _scope, scope_info) when is_binary(scope_info) do
     Mix.shell().info("Note: Analyzing #{scope_info}.\n")
-  end
-
-  defp display_scope_info(document, :full, nil) do
-    if module_file?(document) do
-      Mix.shell().info("Note: Analyzing entire module (includes all nested functions).\n")
-    end
   end
 end

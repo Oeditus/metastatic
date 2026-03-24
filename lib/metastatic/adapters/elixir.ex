@@ -167,14 +167,6 @@ defmodule Metastatic.Adapters.Elixir do
       {:|>, _meta, [left, right]} ->
         [left, right]
 
-      # Function call: {:function, meta, args}
-      {func, _meta, args} when is_atom(func) and is_list(args) ->
-        args
-
-      # Remote call: {{:., meta1, [module, func]}, meta2, args}
-      {{:., _meta1, [_module, _func]}, _meta2, args} when is_list(args) ->
-        args
-
       # Match operator: {:=, meta, [left, right]}
       {:=, _meta, [left, right]} ->
         [left, right]
@@ -186,6 +178,14 @@ defmodule Metastatic.Adapters.Elixir do
       # Module attribute: {:@, meta, [{name, meta2, [value]}]}
       {:@, _meta, [{_name, _meta2, [value]}]} ->
         [value]
+
+      # Remote call: {{:., meta1, [module, func]}, meta2, args}
+      {{:., _meta1, [_module, _func]}, _meta2, args} when is_list(args) ->
+        args
+
+      # Function call: {:function, meta, args} (general case, must be last)
+      {func, _meta, args} when is_atom(func) and is_list(args) ->
+        args
 
       _ ->
         []

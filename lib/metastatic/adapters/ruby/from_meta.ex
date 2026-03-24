@@ -19,6 +19,25 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   """
   @spec transform(term(), map()) :: {:ok, term()} | {:error, String.t()}
 
+  # Literal ranges (must be before general literal handler due to tuple value)
+
+  def transform({:literal, meta, {start_val, end_val}}, _metadata) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype)
+    inclusive = Keyword.get(meta, :inclusive, true)
+
+    case subtype do
+      :range ->
+        with {:ok, start_ast} <- transform(start_val, %{}),
+             {:ok, end_ast} <- transform(end_val, %{}) do
+          type = if inclusive, do: "irange", else: "erange"
+          {:ok, %{"type" => type, "children" => [start_ast, end_ast]}}
+        end
+
+      _ ->
+        {:error, "Unknown tuple literal subtype: #{subtype}"}
+    end
+  end
+
   # M2.1 Core Layer - Literals (New 3-tuple format)
 
   def transform({:literal, meta, value}, _metadata) when is_list(meta) do
@@ -377,26 +396,7 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
     end
   end
 
-  # Literal ranges
-
-  def transform({:literal, meta, {start_val, end_val}}, _metadata) when is_list(meta) do
-    subtype = Keyword.get(meta, :subtype)
-    inclusive = Keyword.get(meta, :inclusive, true)
-
-    case subtype do
-      :range ->
-        with {:ok, start_ast} <- transform(start_val, %{}),
-             {:ok, end_ast} <- transform(end_val, %{}) do
-          type = if inclusive, do: "irange", else: "erange"
-          {:ok, %{"type" => type, "children" => [start_ast, end_ast]}}
-        end
-
-      _ ->
-        {:error, "Unknown tuple literal subtype: #{subtype}"}
-    end
-  end
-
-  # M2.3 Native Layer - Passthrough (New 3-tuple format)
+  # M2.3 Native Layer
 
   def transform({:language_specific, meta, original_ast}, _metadata) when is_list(meta) do
     {:ok, original_ast}
