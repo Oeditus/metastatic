@@ -170,7 +170,8 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Multiple boolean operations - chain them
-  def transform(%{"_type" => "BoolOp", "op" => op, "values" => values}) when length(values) > 2 do
+  def transform(%{"_type" => "BoolOp", "op" => op, "values" => values} = node)
+      when length(values) > 2 do
     with {:ok, op_meta} <- transform_bool_op(op),
          {:ok, transformed_values} <- transform_list(values) do
       # Chain: a and b and c → (a and b) and c
@@ -182,7 +183,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
           {:binary_op, [category: :boolean, operator: op_meta], [acc, value]}
         end)
 
-      {:ok, result, %{}}
+      {:ok, add_location(result, node), %{}}
     end
   end
 
@@ -237,12 +238,12 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  def transform(%{"_type" => "Break"}) do
-    {:ok, {:early_return, [kind: :break], [nil]}, %{}}
+  def transform(%{"_type" => "Break"} = node) do
+    {:ok, add_location({:early_return, [kind: :break], [nil]}, node), %{}}
   end
 
-  def transform(%{"_type" => "Continue"}) do
-    {:ok, {:early_return, [kind: :continue], [nil]}, %{}}
+  def transform(%{"_type" => "Continue"} = node) do
+    {:ok, add_location({:early_return, [kind: :continue], [nil]}, node), %{}}
   end
 
   # Assignment - M2.1 Core Layer
@@ -289,7 +290,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Augmented assignment: x += 1, x *= 2, etc.
   # Desugar to: x = x + 1
-  def transform(%{"_type" => "AugAssign", "target" => target, "op" => op, "value" => value}) do
+  def transform(
+        %{"_type" => "AugAssign", "target" => target, "op" => op, "value" => value} = node
+      ) do
     with {:ok, target_meta, target_metadata} <- transform(target),
          {:ok, {category, operator}} <- transform_binop(op),
          {:ok, value_meta, _} <- transform(value) do
@@ -303,7 +306,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         augmented_op: operator
       }
 
-      {:ok, {:assignment, [], [target_meta, desugared_value]}, metadata}
+      {:ok, add_location({:assignment, [], [target_meta, desugared_value]}, node), metadata}
     end
   end
 
@@ -348,9 +351,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Tuples - Used in patterns and values
-  def transform(%{"_type" => "Tuple", "elts" => elements}) do
+  def transform(%{"_type" => "Tuple", "elts" => elements} = node) do
     with {:ok, elements_meta} <- transform_list(elements) do
-      {:ok, {:tuple, [], elements_meta}, %{}}
+      {:ok, add_location({:tuple, [], elements_meta}, node), %{}}
     end
   end
 
@@ -377,11 +380,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Lambdas - M2.2 Extended Layer
 
-  def transform(%{"_type" => "Lambda", "args" => args, "body" => body}) do
+  def transform(%{"_type" => "Lambda", "args" => args, "body" => body} = node) do
     with {:ok, params} <- extract_lambda_params(args),
          {:ok, body_meta, _} <- transform(body) do
       # Lambdas don't capture variables explicitly in Python AST
-      {:ok, {:lambda, [params: params, captures: []], [body_meta]}, %{}}
+      {:ok, add_location({:lambda, [params: params, captures: []], [body_meta]}, node), %{}}
     end
   end
 
@@ -410,17 +413,21 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Exception Handling - M2.2 Extended Layer
 
-  def transform(%{
-        "_type" => "Try",
-        "body" => body,
-        "handlers" => handlers,
-        "orelse" => _orelse,
-        "finalbody" => finalbody
-      }) do
+  def transform(
+        %{
+          "_type" => "Try",
+          "body" => body,
+          "handlers" => handlers,
+          "orelse" => _orelse,
+          "finalbody" => finalbody
+        } = node
+      ) do
     with {:ok, body_meta, _} <- transform_body(body),
          {:ok, rescue_clauses} <- transform_exception_handlers(handlers),
          {:ok, finally_meta, _} <- transform_body_or_nil(finalbody) do
-      {:ok, {:exception_handling, [], [body_meta, rescue_clauses, finally_meta]}, %{}}
+      {:ok,
+       add_location({:exception_handling, [], [body_meta, rescue_clauses, finally_meta]}, node),
+       %{}}
     end
   end
 

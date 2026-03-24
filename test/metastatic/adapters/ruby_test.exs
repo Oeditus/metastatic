@@ -956,7 +956,8 @@ defmodule Metastatic.Adapters.RubyTest do
     test "parses and transforms method call" do
       {:ok, ast} = Ruby.parse("hello")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:function_call, [name: "hello"], []} = meta_ast
+      assert {:function_call, meta, []} = meta_ast
+      assert Keyword.get(meta, :name) == "hello"
     end
   end
 
@@ -1757,7 +1758,8 @@ defmodule Metastatic.Adapters.RubyTest do
       assert Keyword.get(meta, :container_type) == :class
       assert Keyword.get(meta, :name) == "Dog"
       assert Keyword.get(meta, :parent) == "Animal"
-      assert {:literal, [subtype: :constant], "Animal"} = superclass
+      assert {:literal, meta, "Animal"} = superclass
+      assert Keyword.get(meta, :subtype) == :constant
     end
 
     test "parses and transforms module with methods" do
@@ -1806,7 +1808,8 @@ defmodule Metastatic.Adapters.RubyTest do
       # Scrutinee is a variable reference
       assert {:variable, _, "y"} = scrutinee
       assert [_, _] = branches
-      assert {:literal, [subtype: :symbol], :other} = else_branch
+      assert {:literal, meta, :other} = else_branch
+      assert Keyword.get(meta, :subtype) == :symbol
     end
 
     test "parses and transforms begin/rescue/ensure" do
