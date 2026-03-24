@@ -257,7 +257,12 @@ defmodule Metastatic.Analysis.Security do
         description: "Hardcoded #{type} detected in source code",
         recommendation: "Use environment variables or secure vaults for secrets",
         cwe: 798,
-        context: %{type: type, value_preview: String.slice(value, 0, 20) <> "...", line: line, col: col}
+        context: %{
+          type: type,
+          value_preview: String.slice(value, 0, 20) <> "...",
+          line: line,
+          col: col
+        }
       }
     end) ++ vulns
   end
