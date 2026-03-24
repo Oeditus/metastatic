@@ -206,7 +206,7 @@ defmodule Metastatic.Analysis.Security do
 
     vulns_from_calls =
       Enum.flat_map(dangerous_calls, fn
-        {func_name, {category, severity, cwe}} when is_binary(func_name) ->
+        {func_name, {category, severity, cwe}, line, col} when is_binary(func_name) ->
           [
             %{
               category: category,
@@ -214,7 +214,7 @@ defmodule Metastatic.Analysis.Security do
               description: "Dangerous function '#{func_name}' detected",
               recommendation: get_recommendation(category, func_name),
               cwe: cwe,
-              context: %{function: func_name}
+              context: %{function: func_name, line: line, col: col}
             }
           ]
 
@@ -237,7 +237,7 @@ defmodule Metastatic.Analysis.Security do
 
           case Map.get(patterns, name) do
             nil -> acc
-            pattern -> [{name, pattern} | acc]
+            pattern -> [{name, pattern, Keyword.get(meta, :line), Keyword.get(meta, :col)} | acc]
           end
 
         _ ->
@@ -250,14 +250,14 @@ defmodule Metastatic.Analysis.Security do
   defp detect_hardcoded_secrets(vulns, ast) do
     secrets = find_hardcoded_secrets(ast)
 
-    Enum.map(secrets, fn {type, value} ->
+    Enum.map(secrets, fn {type, value, line, col} ->
       %{
         category: :hardcoded_secret,
         severity: :high,
         description: "Hardcoded #{type} detected in source code",
         recommendation: "Use environment variables or secure vaults for secrets",
         cwe: 798,
-        context: %{type: type, value_preview: String.slice(value, 0, 20) <> "..."}
+        context: %{type: type, value_preview: String.slice(value, 0, 20) <> "...", line: line, col: col}
       }
     end) ++ vulns
   end
@@ -267,8 +267,11 @@ defmodule Metastatic.Analysis.Security do
     walk_ast(ast, [], fn node, acc ->
       with {:literal, meta, value} when is_list(meta) and is_binary(value) <- node,
            :string <- Keyword.get(meta, :subtype) do
+        line = Keyword.get(meta, :line)
+        col = Keyword.get(meta, :col)
+
         Enum.reduce(secret_patterns(), acc, fn {type, pattern}, acc ->
-          if Regex.match?(pattern, value), do: [{type, value} | acc], else: acc
+          if Regex.match?(pattern, value), do: [{type, value, line, col} | acc], else: acc
         end)
       else
         _ ->
@@ -281,14 +284,14 @@ defmodule Metastatic.Analysis.Security do
   defp detect_weak_crypto(vulns, ast) do
     weak_crypto_calls = find_weak_crypto(ast)
 
-    Enum.map(weak_crypto_calls, fn algo ->
+    Enum.map(weak_crypto_calls, fn {algo, line, col} ->
       %{
         category: :weak_crypto,
         severity: :medium,
         description: "Weak cryptographic algorithm '#{algo}' detected",
         recommendation: "Use SHA-256, SHA-3, or bcrypt for hashing; AES for encryption",
         cwe: 327,
-        context: %{algorithm: algo}
+        context: %{algorithm: algo, line: line, col: col}
       }
     end) ++ vulns
   end
@@ -301,7 +304,7 @@ defmodule Metastatic.Analysis.Security do
           name = Keyword.get(meta, :name, "")
 
           if Enum.any?(@weak_crypto, &String.contains?(name, &1)) do
-            [name | acc]
+            [{name, Keyword.get(meta, :line), Keyword.get(meta, :col)} | acc]
           else
             acc
           end
@@ -310,7 +313,7 @@ defmodule Metastatic.Analysis.Security do
           subtype = Keyword.get(meta, :subtype)
 
           if subtype == :string and Enum.any?(@weak_crypto, &String.contains?(value, &1)) do
-            [value | acc]
+            [{value, Keyword.get(meta, :line), Keyword.get(meta, :col)} | acc]
           else
             acc
           end
@@ -325,14 +328,14 @@ defmodule Metastatic.Analysis.Security do
   defp detect_insecure_protocols(vulns, ast) do
     insecure_urls = find_insecure_urls(ast)
 
-    Enum.map(insecure_urls, fn url ->
+    Enum.map(insecure_urls, fn {url, line, col} ->
       %{
         category: :insecure_protocol,
         severity: :medium,
         description: "Insecure HTTP URL detected: #{url}",
         recommendation: "Use HTTPS instead of HTTP for secure communication",
         cwe: 319,
-        context: %{url: url}
+        context: %{url: url, line: line, col: col}
       }
     end) ++ vulns
   end
@@ -345,7 +348,7 @@ defmodule Metastatic.Analysis.Security do
           subtype = Keyword.get(meta, :subtype)
 
           if subtype == :string and String.starts_with?(value, "http://") do
-            [value | acc]
+            [{value, Keyword.get(meta, :line), Keyword.get(meta, :col)} | acc]
           else
             acc
           end

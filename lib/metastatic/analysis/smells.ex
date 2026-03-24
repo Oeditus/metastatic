@@ -122,7 +122,7 @@ defmodule Metastatic.Analysis.Smells do
                 statement_count: func.statements,
                 threshold: thresholds.max_statements
               },
-              location: %{function: func.name}
+              location: %{function: func.name, line: Map.get(func, :line)}
             }
           end)
 
@@ -182,7 +182,7 @@ defmodule Metastatic.Analysis.Smells do
                 max_nesting: func.max_nesting,
                 threshold: thresholds.max_nesting
               },
-              location: %{function: func.name}
+              location: %{function: func.name, line: Map.get(func, :line)}
             }
           end)
 
@@ -234,10 +234,11 @@ defmodule Metastatic.Analysis.Smells do
   # 3-tuple format
   defp find_magic_numbers(ast, context, current_line) do
     case ast do
-      {:binary_op, _meta, [left, right]} ->
+      {:binary_op, meta, [left, right]} when is_list(meta) ->
+        line = Keyword.get(meta, :line, current_line)
         # Check for numeric literals in binary operations
-        find_magic_numbers(left, [:binary_op | context], current_line) ++
-          find_magic_numbers(right, [:binary_op | context], current_line)
+        find_magic_numbers(left, [:binary_op | context], line) ++
+          find_magic_numbers(right, [:binary_op | context], line)
 
       {:literal, meta, value} when is_list(meta) ->
         subtype = Keyword.get(meta, :subtype)
@@ -263,19 +264,23 @@ defmodule Metastatic.Analysis.Smells do
             []
         end
 
-      {:unary_op, _meta, [operand]} ->
-        find_magic_numbers(operand, [:unary_op | context], current_line)
+      {:unary_op, meta, [operand]} when is_list(meta) ->
+        line = Keyword.get(meta, :line, current_line)
+        find_magic_numbers(operand, [:unary_op | context], line)
 
-      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
-        find_magic_numbers(cond_expr, context, current_line) ++
-          find_magic_numbers(then_br, context, current_line) ++
-          find_magic_numbers(else_br, context, current_line)
+      {:conditional, meta, [cond_expr, then_br, else_br]} when is_list(meta) ->
+        line = Keyword.get(meta, :line, current_line)
+
+        find_magic_numbers(cond_expr, context, line) ++
+          find_magic_numbers(then_br, context, line) ++
+          find_magic_numbers(else_br, context, line)
 
       {:block, _meta, statements} when is_list(statements) ->
         Enum.flat_map(statements, &find_magic_numbers(&1, context, current_line))
 
-      {:function_call, _meta, args} when is_list(args) ->
-        Enum.flat_map(args, &find_magic_numbers(&1, context, current_line))
+      {:function_call, meta, args} when is_list(meta) and is_list(args) ->
+        line = Keyword.get(meta, :line, current_line)
+        Enum.flat_map(args, &find_magic_numbers(&1, context, line))
 
       {:language_specific, meta, native_ast} when is_list(meta) ->
         # Extract line information from language-specific wrapper
@@ -314,19 +319,20 @@ defmodule Metastatic.Analysis.Smells do
   # 3-tuple format
   defp find_complex_conditionals(ast, depth, current_line) do
     case ast do
-      {:conditional, _meta, [cond_expr, then_br, else_br]} ->
+      {:conditional, meta, [cond_expr, then_br, else_br]} when is_list(meta) ->
+        line = Keyword.get(meta, :line, current_line)
         cond_depth = count_boolean_depth(cond_expr, 0)
 
         results =
           if cond_depth > 2 do
-            [{cond_depth, current_line}]
+            [{cond_depth, line}]
           else
             []
           end
 
         results ++
-          find_complex_conditionals(then_br, depth, current_line) ++
-          find_complex_conditionals(else_br, depth, current_line)
+          find_complex_conditionals(then_br, depth, line) ++
+          find_complex_conditionals(else_br, depth, line)
 
       {:block, _meta, statements} when is_list(statements) ->
         Enum.flat_map(statements, &find_complex_conditionals(&1, depth, current_line))

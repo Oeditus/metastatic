@@ -293,6 +293,12 @@ defmodule Metastatic.Analysis.Complexity do
           _ -> "unknown"
         end
 
+      line =
+        case native_ast do
+          %{"line" => l} -> l
+          _ -> Keyword.get(meta, :line)
+        end
+
       body =
         case native_ast do
           %{"body" => b} -> b
@@ -304,6 +310,7 @@ defmodule Metastatic.Analysis.Complexity do
 
         %{
           name: function_name,
+          line: line,
           cyclomatic: Cyclomatic.calculate(body),
           cognitive: Cognitive.calculate(body),
           max_nesting: Nesting.calculate(body),
@@ -324,6 +331,7 @@ defmodule Metastatic.Analysis.Complexity do
   # Children can be a single body element or a list of statements
   defp analyze_function_def({:function_def, meta, children}) when is_list(meta) do
     name = Keyword.get(meta, :name, "unknown")
+    line = Keyword.get(meta, :line)
 
     # Wrap children in a block for consistent analysis
     body =
@@ -337,6 +345,7 @@ defmodule Metastatic.Analysis.Complexity do
 
     %{
       name: name,
+      line: line,
       cyclomatic: Cyclomatic.calculate(body),
       cognitive: Cognitive.calculate(body),
       max_nesting: Nesting.calculate(body),
