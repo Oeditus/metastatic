@@ -402,35 +402,22 @@ defmodule Metastatic.Adapter do
   @doc """
   Detect language from file extension.
 
+  Delegates to `Metastatic.Languages.detect_language/1`, converting the
+  error format for backward compatibility.
+
   ## Examples
 
       iex> Metastatic.Adapter.detect_language("script.py")
       {:ok, :python}
-
-      iex> Metastatic.Adapter.detect_language("app.js")
-      {:ok, :javascript}
 
       iex> Metastatic.Adapter.detect_language("unknown.xyz")
       {:error, :unknown_extension}
   """
   @spec detect_language(String.t()) :: {:ok, atom()} | {:error, :unknown_extension}
   def detect_language(filename) do
-    extension = Path.extname(filename)
-
-    # This would be populated by registered adapters
-    # For now, basic mapping
-    case extension do
-      ".py" -> {:ok, :python}
-      ".js" -> {:ok, :javascript}
-      ".jsx" -> {:ok, :javascript}
-      ".ts" -> {:ok, :typescript}
-      ".tsx" -> {:ok, :typescript}
-      ".ex" -> {:ok, :elixir}
-      ".exs" -> {:ok, :elixir}
-      ".rb" -> {:ok, :ruby}
-      ".go" -> {:ok, :go}
-      ".rs" -> {:ok, :rust}
-      _ -> {:error, :unknown_extension}
+    case Metastatic.Languages.detect_language(filename) do
+      {:ok, lang} -> {:ok, lang}
+      {:error, _} -> {:error, :unknown_extension}
     end
   end
 

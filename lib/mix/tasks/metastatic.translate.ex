@@ -141,25 +141,13 @@ defmodule Mix.Tasks.Metastatic.Translate do
 
   @spec parse_language(String.t(), String.t()) :: {:ok, atom()} | {:error, String.t()}
   defp parse_language(lang_str, opt_name) do
-    case String.downcase(lang_str) do
-      "python" ->
-        {:ok, :python}
+    case CLI.parse_language(lang_str) do
+      {:ok, lang} ->
+        {:ok, lang}
 
-      "elixir" ->
-        {:ok, :elixir}
-
-      "erlang" ->
-        {:ok, :erlang}
-
-      "ruby" ->
-        {:ok, :ruby}
-
-      "haskell" ->
-        {:ok, :haskell}
-
-      _ ->
+      {:error, _} ->
         {:error,
-         "Invalid --#{opt_name} language: #{lang_str}. Supported: python, elixir, erlang, ruby, haskell"}
+         "Invalid --#{opt_name} language: #{lang_str}. Supported: #{Metastatic.Languages.supported_languages_string()}"}
     end
   end
 

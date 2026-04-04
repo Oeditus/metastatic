@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Metastatic.Complexity do
 
   alias Metastatic.Analysis.Complexity
   alias Metastatic.Analysis.Complexity.Formatter
-  alias Metastatic.Builder
+  alias Metastatic.{Builder, CLI}
 
   @impl Mix.Task
   def run(args) do
@@ -147,43 +147,25 @@ defmodule Mix.Tasks.Metastatic.Complexity do
   end
 
   defp parse_language(nil), do: nil
-  defp parse_language("python"), do: :python
-  defp parse_language("elixir"), do: :elixir
-  defp parse_language("erlang"), do: :erlang
-  defp parse_language("ruby"), do: :ruby
-  defp parse_language("haskell"), do: :haskell
 
-  defp parse_language(other) do
-    Mix.shell().error("Unknown language: #{other}")
-    Mix.shell().info("Valid languages: python, elixir, erlang, ruby, haskell")
-    exit({:shutdown, 2})
+  defp parse_language(lang_str) do
+    case CLI.parse_language(lang_str) do
+      {:ok, lang} ->
+        lang
+
+      {:error, reason} ->
+        Mix.shell().error(reason)
+        exit({:shutdown, 2})
+    end
   end
 
   defp detect_language(file) do
-    case Path.extname(file) do
-      ".py" ->
-        :python
+    case CLI.detect_language(file) do
+      {:ok, lang} ->
+        lang
 
-      ".ex" ->
-        :elixir
-
-      ".exs" ->
-        :elixir
-
-      ".erl" ->
-        :erlang
-
-      ".hrl" ->
-        :erlang
-
-      ".rb" ->
-        :ruby
-
-      ".hs" ->
-        :haskell
-
-      other ->
-        Mix.shell().error("Cannot detect language from extension: #{other}")
+      {:error, _} ->
+        Mix.shell().error("Cannot detect language from extension: #{Path.extname(file)}")
         Mix.shell().info("Please specify --language option")
         exit({:shutdown, 2})
     end

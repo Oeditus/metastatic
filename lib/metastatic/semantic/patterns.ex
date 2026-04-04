@@ -45,8 +45,8 @@ defmodule Metastatic.Semantic.Patterns do
           extract_target: :first_arg | :receiver | :none | nil
         }
 
-  @typedoc "Language identifier"
-  @type language :: :elixir | :python | :ruby | :javascript | :erlang | :haskell | atom()
+  @typedoc "Language identifier (see `Metastatic.Languages.supported_languages/0` for current list)"
+  @type language :: :elixir | :python | :ruby | :erlang | :haskell | atom()
 
   # ----- Public API -----
 

@@ -22,12 +22,9 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
 
   ## Supported Languages
 
-  Language is auto-detected from file extension:
-
-    * `.py` - Python
-    * `.ex`, `.exs` - Elixir
-    * `.erl`, `.hrl` - Erlang
-    * `.rb` - Ruby
+  Language is auto-detected from file extension.
+  See `Metastatic.Languages` for the current list of supported languages
+  and file extensions.
 
   ## Examples
 
@@ -64,9 +61,7 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
 
   alias Metastatic.Analysis.Duplication
   alias Metastatic.Analysis.Duplication.Reporter
-  alias Metastatic.Builder
-
-  @supported_extensions ~w(.py .ex .exs .erl .hrl .rb)
+  alias Metastatic.{Builder, Languages}
 
   @impl Mix.Task
   def run(args) do
@@ -125,7 +120,9 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
       dir_path
       |> Path.join("**/*")
       |> Path.wildcard()
-      |> Enum.filter(&(Path.extname(&1) in @supported_extensions and not File.dir?(&1)))
+      |> Enum.filter(
+        &(Path.extname(&1) in Languages.supported_extensions() and not File.dir?(&1))
+      )
       |> Enum.sort()
 
     unless match?([_, _ | _], files) do
@@ -204,14 +201,9 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
   end
 
   defp detect_language(file) do
-    case Path.extname(file) do
-      ".py" -> {:ok, :python}
-      ".ex" -> {:ok, :elixir}
-      ".exs" -> {:ok, :elixir}
-      ".erl" -> {:ok, :erlang}
-      ".hrl" -> {:ok, :erlang}
-      ".rb" -> {:ok, :ruby}
-      _ -> :unsupported
+    case Languages.detect_language(file) do
+      {:ok, lang} -> {:ok, lang}
+      {:error, _} -> :unsupported
     end
   end
 end

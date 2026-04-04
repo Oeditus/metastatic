@@ -152,9 +152,12 @@ defmodule Metastatic.CLI.Translator do
   end
 
   @spec extension_for_language(language()) :: String.t()
-  defp extension_for_language(:python), do: ".py"
-  defp extension_for_language(:elixir), do: ".ex"
-  defp extension_for_language(:erlang), do: ".erl"
+  defp extension_for_language(lang) do
+    case Metastatic.Languages.extension_for_language(lang) do
+      {:ok, ext} -> ext
+      {:error, _} -> raise "No extension known for language: #{lang}"
+    end
+  end
 
   @spec list_source_files(file_path(), language()) :: {:ok, [file_path()]} | {:error, String.t()}
   defp list_source_files(dir, language) do

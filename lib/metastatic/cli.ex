@@ -9,11 +9,15 @@ defmodule Metastatic.CLI do
   - Success/error reporting
   """
 
+  alias Metastatic.Languages
+
   @type language :: atom()
   @type file_path :: String.t()
 
   @doc """
   Get adapter for a given language.
+
+  Delegates to `Metastatic.Languages.get_adapter/1`.
 
   ## Examples
 
@@ -21,19 +25,15 @@ defmodule Metastatic.CLI do
       {:ok, Metastatic.Adapters.Python}
 
       iex> Metastatic.CLI.get_adapter(:unknown)
-      {:error, "Unsupported language: unknown"}
+      {:error, "Unsupported language: unknown. Supported: elixir, erlang, haskell, python, ruby"}
   """
   @spec get_adapter(language()) :: {:ok, module()} | {:error, String.t()}
-  def get_adapter(:python), do: {:ok, Metastatic.Adapters.Python}
-  def get_adapter(:elixir), do: {:ok, Metastatic.Adapters.Elixir}
-  def get_adapter(:erlang), do: {:ok, Metastatic.Adapters.Erlang}
-
-  def get_adapter(lang) do
-    {:error, "Unsupported language: #{lang}. Supported: python, elixir, erlang"}
-  end
+  defdelegate get_adapter(language), to: Languages
 
   @doc """
   Detect language from file extension.
+
+  Delegates to `Metastatic.Languages.detect_language/1`.
 
   ## Examples
 
@@ -46,20 +46,33 @@ defmodule Metastatic.CLI do
       iex> Metastatic.CLI.detect_language("foo.erl")
       {:ok, :erlang}
 
+      iex> Metastatic.CLI.detect_language("foo.rb")
+      {:ok, :ruby}
+
       iex> Metastatic.CLI.detect_language("foo.txt")
       {:error, "Cannot detect language from extension: .txt"}
   """
   @spec detect_language(file_path()) :: {:ok, language()} | {:error, String.t()}
-  def detect_language(path) do
-    case Path.extname(path) do
-      ".py" -> {:ok, :python}
-      ".ex" -> {:ok, :elixir}
-      ".exs" -> {:ok, :elixir}
-      ".erl" -> {:ok, :erlang}
-      ".hrl" -> {:ok, :erlang}
-      ext -> {:error, "Cannot detect language from extension: #{ext}"}
-    end
-  end
+  defdelegate detect_language(path), to: Languages
+
+  @doc """
+  Parse a language string from CLI options into an atom.
+
+  Delegates to `Metastatic.Languages.parse_language/1`.
+
+  ## Examples
+
+      iex> Metastatic.CLI.parse_language("python")
+      {:ok, :python}
+
+      iex> Metastatic.CLI.parse_language(nil)
+      nil
+
+      iex> Metastatic.CLI.parse_language("brainfuck")
+      {:error, "Invalid language: brainfuck. Supported: elixir, erlang, haskell, python, ruby"}
+  """
+  @spec parse_language(String.t() | nil) :: {:ok, atom()} | {:error, String.t()} | nil
+  defdelegate parse_language(lang_str), to: Languages
 
   @doc """
   Read file contents.

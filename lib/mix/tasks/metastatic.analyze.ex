@@ -112,25 +112,9 @@ defmodule Mix.Tasks.Metastatic.Analyze do
         end
 
       lang_str ->
-        case String.downcase(lang_str) do
-          "python" ->
-            {:ok, :python}
-
-          "elixir" ->
-            {:ok, :elixir}
-
-          "erlang" ->
-            {:ok, :erlang}
-
-          "ruby" ->
-            {:ok, :ruby}
-
-          "haskell" ->
-            {:ok, :haskell}
-
-          _ ->
-            {:error,
-             "Invalid language: #{lang_str}. Supported: python, elixir, erlang, ruby, haskell"}
+        case CLI.parse_language(lang_str) do
+          {:ok, lang} -> {:ok, lang}
+          {:error, reason} -> {:error, reason}
         end
     end
   end

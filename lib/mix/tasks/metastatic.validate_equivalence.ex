@@ -140,25 +140,13 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
         end
 
       lang_str ->
-        case String.downcase(lang_str) do
-          "python" ->
-            {:ok, :python}
+        case CLI.parse_language(lang_str) do
+          {:ok, lang} ->
+            {:ok, lang}
 
-          "elixir" ->
-            {:ok, :elixir}
-
-          "erlang" ->
-            {:ok, :erlang}
-
-          "ruby" ->
-            {:ok, :ruby}
-
-          "haskell" ->
-            {:ok, :haskell}
-
-          _ ->
+          {:error, _} ->
             {:error,
-             "Invalid language for #{opt_key}: #{lang_str}. Supported: python, elixir, erlang, ruby, haskell"}
+             "Invalid language for #{opt_key}: #{lang_str}. Supported: #{Metastatic.Languages.supported_languages_string()}"}
         end
     end
   end
