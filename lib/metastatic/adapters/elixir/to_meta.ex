@@ -512,7 +512,9 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp post_transform({:__attr_marker__, [], nil}, ctx) do
     case Map.pop(ctx, :pending_attr) do
       # Type annotation attributes: @spec, @type, @typep, @callback, @macrocallback
-      {{:@, meta, [{attr_name, _attr_meta, [value]}]}, new_ctx}
+      # The args list may contain constraint keywords, e.g.
+      #   @type(name :: def, key: constraint)  →  [type_def, [key: constraint]]
+      {{:@, meta, [{attr_name, _attr_meta, [value | _constraints]}]}, new_ctx}
       when attr_name in [:spec, :type, :typep, :callback, :macrocallback] ->
         {func_name, arity} = extract_type_annotation_info(attr_name, value)
         type_expr = {:language_specific, [language: :elixir, hint: :type_expr], value}
