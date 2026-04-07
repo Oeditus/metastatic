@@ -66,12 +66,12 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   @spec transform(map()) :: {:ok, term(), map()} | {:error, String.t()}
 
   # Module - top-level container
-  def transform(%{"_type" => "Module", "body" => body}) do
+  def transform(%{"_type" => "Module", "body" => body} = node) do
     with {:ok, statements} <- transform_list(body) do
       case statements do
-        [] -> {:ok, {:block, [], []}, %{}}
+        [] -> {:ok, add_location({:block, [], []}, node), %{}}
         [single] -> {:ok, single, %{}}
-        multiple -> {:ok, {:block, [], multiple}, %{}}
+        multiple -> {:ok, add_location({:block, [], multiple}, node), %{}}
       end
     end
   end
@@ -90,28 +90,28 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Legacy literal nodes (Python 3.7 compatibility)
-  def transform(%{"_type" => "Num", "n" => value}) when is_integer(value) do
-    {:ok, {:literal, [subtype: :integer], value}, %{}}
+  def transform(%{"_type" => "Num", "n" => value} = node) when is_integer(value) do
+    {:ok, add_location({:literal, [subtype: :integer], value}, node), %{}}
   end
 
-  def transform(%{"_type" => "Num", "n" => value}) when is_float(value) do
-    {:ok, {:literal, [subtype: :float], value}, %{}}
+  def transform(%{"_type" => "Num", "n" => value} = node) when is_float(value) do
+    {:ok, add_location({:literal, [subtype: :float], value}, node), %{}}
   end
 
-  def transform(%{"_type" => "Str", "s" => value}) do
-    {:ok, {:literal, [subtype: :string], value}, %{}}
+  def transform(%{"_type" => "Str", "s" => value} = node) do
+    {:ok, add_location({:literal, [subtype: :string], value}, node), %{}}
   end
 
-  def transform(%{"_type" => "NameConstant", "value" => true}) do
-    {:ok, {:literal, [subtype: :boolean], true}, %{}}
+  def transform(%{"_type" => "NameConstant", "value" => true} = node) do
+    {:ok, add_location({:literal, [subtype: :boolean], true}, node), %{}}
   end
 
-  def transform(%{"_type" => "NameConstant", "value" => false}) do
-    {:ok, {:literal, [subtype: :boolean], false}, %{}}
+  def transform(%{"_type" => "NameConstant", "value" => false} = node) do
+    {:ok, add_location({:literal, [subtype: :boolean], false}, node), %{}}
   end
 
-  def transform(%{"_type" => "NameConstant", "value" => nil}) do
-    {:ok, {:literal, [subtype: :null], nil}, %{}}
+  def transform(%{"_type" => "NameConstant", "value" => nil} = node) do
+    {:ok, add_location({:literal, [subtype: :null], nil}, node), %{}}
   end
 
   # Variables - M2.1 Core Layer
@@ -266,7 +266,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Multiple assignment: x = y = 5
   # Python allows chaining: a = b = c = 5
   # Transform to nested assignments: a = (b = (c = 5))
-  def transform(%{"_type" => "Assign", "targets" => targets, "value" => value})
+  def transform(%{"_type" => "Assign", "targets" => targets, "value" => value} = node)
       when length(targets) > 1 do
     with {:ok, value_meta, value_metadata} <- transform(value) do
       # Build nested assignments from right to left
@@ -280,7 +280,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
               value_metadata: %{}
             }
 
-            {:ok, {:assignment, [], [target_meta, current_value]}, metadata}
+            {:ok, add_location({:assignment, [], [target_meta, current_value]}, node), metadata}
           end
         end)
 
@@ -312,7 +312,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Annotated assignment: x: int = 5 (Python 3.6+)
   # Ignore the annotation for now
-  def transform(%{"_type" => "AnnAssign", "target" => target, "value" => value})
+  def transform(%{"_type" => "AnnAssign", "target" => target, "value" => value} = node)
       when not is_nil(value) do
     with {:ok, target_meta, target_metadata} <- transform(target),
          {:ok, value_meta, value_metadata} <- transform(value) do
@@ -321,7 +321,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         value_metadata: value_metadata
       }
 
-      {:ok, {:assignment, [], [target_meta, value_meta]}, metadata}
+      {:ok, add_location({:assignment, [], [target_meta, value_meta]}, node), metadata}
     end
   end
 
@@ -391,18 +391,20 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Collection Operations - M2.2 Extended Layer
 
   # Simple list comprehension without filters → map
-  def transform(%{
-        "_type" => "ListComp",
-        "elt" => elt,
-        "generators" => [%{"target" => target, "iter" => iter, "ifs" => []}]
-      }) do
+  def transform(
+        %{
+          "_type" => "ListComp",
+          "elt" => elt,
+          "generators" => [%{"target" => target, "iter" => iter, "ifs" => []}]
+        } = node
+      ) do
     with {:ok, target_meta, _} <- transform(target),
          {:ok, iter_meta, _} <- transform(iter),
          {:ok, elt_meta, _} <- transform(elt) do
       # Convert to: {:collection_op, [op_type: :map], [lambda, collection]}
       param_name = extract_variable_name(target_meta)
       lambda = {:lambda, [params: [{:param, [], param_name}], captures: []], [elt_meta]}
-      {:ok, {:collection_op, [op_type: :map], [lambda, iter_meta]}, %{}}
+      {:ok, add_location({:collection_op, [op_type: :map], [lambda, iter_meta]}, node), %{}}
     end
   end
 

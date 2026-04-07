@@ -239,7 +239,8 @@ defmodule Metastatic.Analysis.Complexity do
   end
 
   # 3-tuple format: {:container, meta, children}
-  # Children can be a list of function definitions directly, or a single body element
+  # Children can be a list of function definitions directly, or a single body element.
+  # Recursively descends into nested :container nodes to find :function_def at any depth.
   defp extract_per_function_metrics({:container, meta, children}, _doc_metadata)
        when is_list(meta) and is_list(children) do
     members =
@@ -253,15 +254,47 @@ defmodule Metastatic.Analysis.Complexity do
           children
       end
 
-    members
-    |> Enum.filter(&match?(ast when is_tuple(ast) and elem(ast, 0) == :function_def, &1))
-    |> Enum.map(&analyze_function_def/1)
-    |> Enum.reject(&is_nil/1)
+    collect_function_defs_recursive(members)
   end
 
   defp extract_per_function_metrics(_ast, _metadata) do
     []
   end
+
+  # Recursively collect function_def nodes from a list of members,
+  # descending into nested :container and :block nodes.
+  defp collect_function_defs_recursive(members) when is_list(members) do
+    Enum.flat_map(members, fn
+      {:function_def, _, _} = node ->
+        case analyze_function_def(node) do
+          nil -> []
+          result -> [result]
+        end
+
+      {:container, meta, children} when is_list(meta) and is_list(children) ->
+        inner =
+          case children do
+            [{:block, _, statements}] when is_list(statements) -> statements
+            _ -> children
+          end
+
+        collect_function_defs_recursive(inner)
+
+      {:block, _, statements} when is_list(statements) ->
+        collect_function_defs_recursive(statements)
+
+      {:language_specific, _, _} = node ->
+        case analyze_function(node) do
+          nil -> []
+          result -> [result]
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp collect_function_defs_recursive(_), do: []
 
   # 3-tuple format: {:block, meta, statements}
   defp extract_functions_from_body({:block, _meta, statements}) when is_list(statements) do

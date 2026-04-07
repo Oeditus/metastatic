@@ -585,15 +585,15 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # Block with receiver (iterator methods: each, map, select, reduce, etc.)
   # Structure: block [send [collection, method, ...args], args [param...], body]
-  def transform(%{"type" => "block", "children" => [send_node, args_node, body]}) do
+  def transform(%{"type" => "block", "children" => [send_node, args_node, body]} = ast) do
     case send_node do
       # Lambda: lambda { |x| body } or ->(x) { body }
       %{"type" => "send", "children" => [nil, "lambda"]} ->
-        transform_lambda(args_node, body)
+        transform_lambda(args_node, body, ast)
 
       # Iterator methods: [1,2,3].each { |x| ... }
       %{"type" => "send", "children" => [collection, method | method_args]} ->
-        transform_iterator_method(collection, method, method_args, args_node, body)
+        transform_iterator_method(collection, method, method_args, args_node, body, ast)
 
       _ ->
         {:error, "Unsupported block construct: #{inspect(send_node)}"}
@@ -1070,6 +1070,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, receiver_meta, _} <- transform(receiver),
          {:ok, arg_meta, _} <- transform(arg) do
       qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
+
       {:ok, {:function_call, [name: qualified_name], [arg_meta]}, %{call_type: :instance}}
     end
   end
@@ -1087,10 +1088,10 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   end
 
   # Transform lambda
-  defp transform_lambda(args_node, body) do
+  defp transform_lambda(args_node, body, block_ast) do
     with {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
-      {:ok, {:lambda, [params: params, captures: []], [body_meta]}, %{}}
+      {:ok, add_location({:lambda, [params: params, captures: []], [body_meta]}, block_ast), %{}}
     end
   end
 
@@ -1106,38 +1107,38 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp extract_lambda_params(_), do: {:ok, []}
 
   # Transform iterator methods (map, each, select, reduce, proc, etc.)
-  defp transform_iterator_method(collection, method, method_args, args_node, body) do
+  defp transform_iterator_method(collection, method, method_args, args_node, body, block_ast) do
     method_atom = normalize_op(method)
 
     case method_atom do
       m when m in [:each, :map, :select, :filter, :reject] ->
-        transform_map_like_iterator(collection, m, args_node, body)
+        transform_map_like_iterator(collection, m, args_node, body, block_ast)
 
       :reduce ->
-        transform_reduce_iterator(collection, method_args, args_node, body)
+        transform_reduce_iterator(collection, method_args, args_node, body, block_ast)
 
       :proc ->
         # proc { |x| body } - treat as lambda with :proc hint
-        transform_proc(args_node, body)
+        transform_proc(args_node, body, block_ast)
 
       :tap ->
         # Object#tap - yields self to block, returns self
-        transform_map_like_iterator(collection, :tap, args_node, body)
+        transform_map_like_iterator(collection, :tap, args_node, body, block_ast)
 
       :times ->
         # Integer#times - iterate n times
-        transform_times_iterator(collection, args_node, body)
+        transform_times_iterator(collection, args_node, body, block_ast)
 
       :upto ->
         # Integer#upto - iterate from n upto m
-        transform_upto_iterator(collection, method_args, args_node, body)
+        transform_upto_iterator(collection, method_args, args_node, body, block_ast)
 
       :downto ->
         # Integer#downto - iterate from n down to m
-        transform_downto_iterator(collection, method_args, args_node, body)
+        transform_downto_iterator(collection, method_args, args_node, body, block_ast)
 
       :each_with_index ->
-        transform_map_like_iterator(collection, :each_with_index, args_node, body)
+        transform_map_like_iterator(collection, :each_with_index, args_node, body, block_ast)
 
       :each_with_object ->
         transform_reduce_like_iterator(
@@ -1145,160 +1146,190 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
           :each_with_object,
           method_args,
           args_node,
-          body
+          body,
+          block_ast
         )
 
       :inject ->
         # inject is an alias for reduce
-        transform_reduce_iterator(collection, method_args, args_node, body)
+        transform_reduce_iterator(collection, method_args, args_node, body, block_ast)
 
       :find ->
-        transform_map_like_iterator(collection, :find, args_node, body)
+        transform_map_like_iterator(collection, :find, args_node, body, block_ast)
 
       :detect ->
         # detect is alias for find
-        transform_map_like_iterator(collection, :find, args_node, body)
+        transform_map_like_iterator(collection, :find, args_node, body, block_ast)
 
       :sort_by ->
-        transform_map_like_iterator(collection, :sort_by, args_node, body)
+        transform_map_like_iterator(collection, :sort_by, args_node, body, block_ast)
 
       :group_by ->
-        transform_map_like_iterator(collection, :group_by, args_node, body)
+        transform_map_like_iterator(collection, :group_by, args_node, body, block_ast)
 
       :partition ->
-        transform_map_like_iterator(collection, :partition, args_node, body)
+        transform_map_like_iterator(collection, :partition, args_node, body, block_ast)
 
       :flat_map ->
-        transform_map_like_iterator(collection, :flat_map, args_node, body)
+        transform_map_like_iterator(collection, :flat_map, args_node, body, block_ast)
 
       :take_while ->
-        transform_map_like_iterator(collection, :take_while, args_node, body)
+        transform_map_like_iterator(collection, :take_while, args_node, body, block_ast)
 
       :drop_while ->
-        transform_map_like_iterator(collection, :drop_while, args_node, body)
+        transform_map_like_iterator(collection, :drop_while, args_node, body, block_ast)
 
       :all? ->
-        transform_map_like_iterator(collection, :all?, args_node, body)
+        transform_map_like_iterator(collection, :all?, args_node, body, block_ast)
 
       :any? ->
-        transform_map_like_iterator(collection, :any?, args_node, body)
+        transform_map_like_iterator(collection, :any?, args_node, body, block_ast)
 
       :none? ->
-        transform_map_like_iterator(collection, :none?, args_node, body)
+        transform_map_like_iterator(collection, :none?, args_node, body, block_ast)
 
       :one? ->
-        transform_map_like_iterator(collection, :one?, args_node, body)
+        transform_map_like_iterator(collection, :one?, args_node, body, block_ast)
 
       :count ->
-        transform_map_like_iterator(collection, :count, args_node, body)
+        transform_map_like_iterator(collection, :count, args_node, body, block_ast)
 
       :sum ->
-        transform_map_like_iterator(collection, :sum, args_node, body)
+        transform_map_like_iterator(collection, :sum, args_node, body, block_ast)
 
       :min_by ->
-        transform_map_like_iterator(collection, :min_by, args_node, body)
+        transform_map_like_iterator(collection, :min_by, args_node, body, block_ast)
 
       :max_by ->
-        transform_map_like_iterator(collection, :max_by, args_node, body)
+        transform_map_like_iterator(collection, :max_by, args_node, body, block_ast)
 
       _ ->
         # Generic block call - still transform it as a collection operation with custom op_type
-        transform_generic_block(collection, method_atom, method_args, args_node, body)
+        transform_generic_block(collection, method_atom, method_args, args_node, body, block_ast)
     end
   end
 
   # Transform proc { |x| body }
-  defp transform_proc(args_node, body) do
+  defp transform_proc(args_node, body, block_ast) do
     with {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
-      {:ok, {:lambda, [params: params, captures: [], kind: :proc], [body_meta]}, %{kind: :proc}}
+      {:ok,
+       add_location(
+         {:lambda, [params: params, captures: [], kind: :proc], [body_meta]},
+         block_ast
+       ), %{kind: :proc}}
     end
   end
 
   # Transform times iterator: 5.times { |i| ... }
-  defp transform_times_iterator(count_node, args_node, body) do
+  defp transform_times_iterator(count_node, args_node, body, block_ast) do
     with {:ok, count_meta, _} <- transform(count_node),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
-      {:ok, {:collection_op, [op_type: :times], [lambda, count_meta]}, %{}}
+
+      {:ok, add_location({:collection_op, [op_type: :times], [lambda, count_meta]}, block_ast),
+       %{}}
     end
   end
 
   # Transform upto iterator: 1.upto(10) { |i| ... }
-  defp transform_upto_iterator(start_node, [end_node], args_node, body) do
+  defp transform_upto_iterator(start_node, [end_node], args_node, body, block_ast) do
     with {:ok, start_meta, _} <- transform(start_node),
          {:ok, end_meta, _} <- transform(end_node),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
       range = {:literal, [subtype: :range, inclusive: true], {start_meta, end_meta}}
-      {:ok, {:collection_op, [op_type: :each], [lambda, range]}, %{original: :upto}}
+
+      {:ok, add_location({:collection_op, [op_type: :each], [lambda, range]}, block_ast),
+       %{original: :upto}}
     end
   end
 
-  defp transform_upto_iterator(_start_node, _args, _args_node, _body) do
+  defp transform_upto_iterator(_start_node, _args, _args_node, _body, _block_ast) do
     {:error, "Invalid upto iterator: expected exactly one argument"}
   end
 
   # Transform downto iterator: 10.downto(1) { |i| ... }
-  defp transform_downto_iterator(start_node, [end_node], args_node, body) do
+  defp transform_downto_iterator(start_node, [end_node], args_node, body, block_ast) do
     with {:ok, start_meta, _} <- transform(start_node),
          {:ok, end_meta, _} <- transform(end_node),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
       # Downto is a reverse range
-      {:ok, {:collection_op, [op_type: :downto], [lambda, start_meta, end_meta]}, %{}}
+
+      {:ok,
+       add_location(
+         {:collection_op, [op_type: :downto], [lambda, start_meta, end_meta]},
+         block_ast
+       ), %{}}
     end
   end
 
-  defp transform_downto_iterator(_start_node, _args, _args_node, _body) do
+  defp transform_downto_iterator(_start_node, _args, _args_node, _body, _block_ast) do
     {:error, "Invalid downto iterator: expected exactly one argument"}
   end
 
   # Transform reduce-like iterators with initial value
-  defp transform_reduce_like_iterator(collection, method, method_args, args_node, body) do
+  defp transform_reduce_like_iterator(collection, method, method_args, args_node, body, block_ast) do
     with {:ok, collection_meta, _} <- transform(collection),
          {:ok, initial_meta} <- extract_reduce_initial(method_args),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
-      {:ok, {:collection_op, [op_type: method], [lambda, collection_meta, initial_meta]}, %{}}
+
+      {:ok,
+       add_location(
+         {:collection_op, [op_type: method], [lambda, collection_meta, initial_meta]},
+         block_ast
+       ), %{}}
     end
   end
 
   # Transform generic block calls - for any method we don't specifically handle
-  defp transform_generic_block(collection, method, method_args, args_node, body) do
+  defp transform_generic_block(collection, method, method_args, args_node, body, block_ast) do
     with {:ok, collection_meta, _} <- transform_or_nil(collection),
          {:ok, method_args_meta} <- transform_list(method_args),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
 
-      {:ok, {:collection_op, [op_type: method], [lambda, collection_meta | method_args_meta]},
-       %{generic: true}}
+      {:ok,
+       add_location(
+         {:collection_op, [op_type: method], [lambda, collection_meta | method_args_meta]},
+         block_ast
+       ), %{generic: true}}
     end
   end
 
   # Transform map-like iterators (each, map, select, filter)
-  defp transform_map_like_iterator(collection, method, args_node, body) do
+  defp transform_map_like_iterator(collection, method, args_node, body, block_ast) do
     with {:ok, collection_meta, _} <- transform(collection),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
-      {:ok, {:collection_op, [op_type: method], [lambda, collection_meta]}, %{}}
+
+      {:ok,
+       add_location({:collection_op, [op_type: method], [lambda, collection_meta]}, block_ast),
+       %{}}
     end
   end
 
   # Transform reduce iterator
-  defp transform_reduce_iterator(collection, method_args, args_node, body) do
+  defp transform_reduce_iterator(collection, method_args, args_node, body, block_ast) do
     with {:ok, collection_meta, _} <- transform(collection),
          {:ok, initial_meta} <- extract_reduce_initial(method_args),
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
-      {:ok, {:collection_op, [op_type: :reduce], [lambda, collection_meta, initial_meta]}, %{}}
+
+      {:ok,
+       add_location(
+         {:collection_op, [op_type: :reduce], [lambda, collection_meta, initial_meta]},
+         block_ast
+       ), %{}}
     end
   end
 

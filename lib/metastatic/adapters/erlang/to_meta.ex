@@ -181,9 +181,9 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   # Conditionals - M2.1 Core Layer
 
   # If expression
-  def transform({:if, _line, clauses}) when is_list(clauses) do
+  def transform({:if, line, clauses}) when is_list(clauses) do
     # Erlang if is like cond - convert to nested conditionals
-    case transform_if_clauses(clauses) do
+    case transform_if_clauses(clauses, line) do
       {:ok, meta_ast} -> {:ok, meta_ast, %{original_form: :if}}
       error -> error
     end
@@ -198,6 +198,13 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   end
 
   # Blocks (multiple expressions) (New 3-tuple format)
+  def transform({:block, line, expressions}) when is_list(expressions) do
+    with {:ok, exprs_meta} <- transform_list(expressions) do
+      {:ok, {:block, line_meta(line), exprs_meta}, %{}}
+    end
+  end
+
+  # Blocks without line info (legacy form)
   def transform({:block, expressions}) when is_list(expressions) do
     with {:ok, exprs_meta} <- transform_list(expressions) do
       {:ok, {:block, [], exprs_meta}, %{}}
@@ -226,21 +233,21 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   end
 
   # Lists (cons and nil) (New 3-tuple format)
-  def transform({nil, _line}) do
-    {:ok, {:list, [], []}, %{collection_type: :list}}
+  def transform({nil, line}) do
+    {:ok, {:list, line_meta(line), []}, %{collection_type: :list}}
   end
 
-  def transform({:cons, _line, _head, _tail} = cons_node) do
+  def transform({:cons, line, _head, _tail} = cons_node) do
     case flatten_cons(cons_node) do
       {:proper, elements} ->
         with {:ok, elements_meta} <- transform_list(elements) do
-          {:ok, {:list, [], elements_meta}, %{collection_type: :list}}
+          {:ok, {:list, line_meta(line), elements_meta}, %{collection_type: :list}}
         end
 
       {:improper, elements, tail} ->
         # Improper list (tail is not nil) -- keep as language_specific
         {:ok,
-         {:language_specific, [language: :erlang, hint: :improper_list],
+         {:language_specific, [language: :erlang, hint: :improper_list] ++ line_meta(line),
           %{elements: elements, tail: tail}}, %{}}
     end
   end
@@ -266,11 +273,13 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     end
   end
 
-  defp transform_if_clauses([]) do
+  defp transform_if_clauses(clauses, line \\ 0)
+
+  defp transform_if_clauses([], _line) do
     {:ok, {:literal, [subtype: :null], nil}}
   end
 
-  defp transform_if_clauses([{:clause, _line, [], guards, body} | rest]) do
+  defp transform_if_clauses([{:clause, clause_line, [], guards, body} | rest], line) do
     # Erlang if clauses have guards instead of simple conditions
     # For now, treat guard as condition
     condition =
@@ -280,10 +289,12 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
         _ -> {:atom, 0, true}
       end
 
+    effective_line = if clause_line > 0, do: clause_line, else: line
+
     with {:ok, cond_meta, _} <- transform(condition),
          {:ok, body_meta} <- transform_body(body),
-         {:ok, else_meta} <- transform_if_clauses(rest) do
-      {:ok, {:conditional, [], [cond_meta, body_meta, else_meta]}}
+         {:ok, else_meta} <- transform_if_clauses(rest, line) do
+      {:ok, {:conditional, line_meta(effective_line), [cond_meta, body_meta, else_meta]}}
     end
   end
 

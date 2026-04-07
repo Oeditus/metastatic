@@ -160,13 +160,13 @@ defmodule Metastatic.Adapters.ErlangTest do
 
   describe "ToMeta - lists (cons flattening)" do
     test "transforms empty list" do
-      assert {:ok, {:list, [], []}, _} = ToMeta.transform({nil, 1})
+      assert {:ok, {:list, _, []}, _} = ToMeta.transform({nil, 1})
     end
 
     test "transforms single-element list" do
       # [1] in Erlang AST
       ast = {:cons, 1, {:integer, 1, 1}, {nil, 1}}
-      assert {:ok, {:list, [], elements}, _} = ToMeta.transform(ast)
+      assert {:ok, {:list, _, elements}, _} = ToMeta.transform(ast)
       assert [{:literal, _, 1}] = elements
     end
 
@@ -176,7 +176,7 @@ defmodule Metastatic.Adapters.ErlangTest do
         {:cons, 1, {:integer, 1, 1},
          {:cons, 1, {:integer, 1, 2}, {:cons, 1, {:integer, 1, 3}, {nil, 1}}}}
 
-      assert {:ok, {:list, [], elements}, _} = ToMeta.transform(ast)
+      assert {:ok, {:list, _, elements}, _} = ToMeta.transform(ast)
 
       assert [
                {:literal, _, 1},
@@ -191,7 +191,7 @@ defmodule Metastatic.Adapters.ErlangTest do
         {:cons, 1, {:integer, 1, 1},
          {:cons, 1, {:atom, 1, :hello}, {:cons, 1, {:var, 1, :X}, {nil, 1}}}}
 
-      assert {:ok, {:list, [], [_, _, _]}, _} = ToMeta.transform(ast)
+      assert {:ok, {:list, _, [_, _, _]}, _} = ToMeta.transform(ast)
     end
 
     test "transforms improper list to language_specific" do
@@ -207,8 +207,8 @@ defmodule Metastatic.Adapters.ErlangTest do
       inner = {:cons, 1, {:integer, 1, 1}, {:cons, 1, {:integer, 1, 2}, {nil, 1}}}
       ast = {:cons, 1, inner, {:cons, 1, {:integer, 1, 3}, {nil, 1}}}
 
-      assert {:ok, {:list, [], [inner_list, three]}, _} = ToMeta.transform(ast)
-      assert {:list, [], [_, _]} = inner_list
+      assert {:ok, {:list, _, [inner_list, three]}, _} = ToMeta.transform(ast)
+      assert {:list, _, [_, _]} = inner_list
       assert {:literal, _, 3} = three
     end
   end
@@ -221,7 +221,7 @@ defmodule Metastatic.Adapters.ErlangTest do
          {:cons, 1, {:integer, 1, 2}, {:cons, 1, {:integer, 1, 3}, {nil, 1}}}}
 
       assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
-      assert {:list, [], [_, _, _]} = meta_ast
+      assert {:list, _, [_, _, _]} = meta_ast
 
       assert {:ok, ast2} = FromMeta.transform(meta_ast, metadata)
       # Verify it reconstructs a proper cons chain
@@ -233,7 +233,7 @@ defmodule Metastatic.Adapters.ErlangTest do
     test "round-trips empty list" do
       ast = {nil, 1}
       assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
-      assert {:list, [], []} = meta_ast
+      assert {:list, _, []} = meta_ast
 
       assert {:ok, ast2} = FromMeta.transform(meta_ast, metadata)
       assert {nil, _} = ast2
@@ -242,7 +242,7 @@ defmodule Metastatic.Adapters.ErlangTest do
     test "round-trips single-element list" do
       ast = {:cons, 1, {:integer, 1, 42}, {nil, 1}}
       assert {:ok, meta_ast, metadata} = ToMeta.transform(ast)
-      assert {:list, [], [{:literal, _, 42}]} = meta_ast
+      assert {:list, _, [{:literal, _, 42}]} = meta_ast
 
       assert {:ok, ast2} = FromMeta.transform(meta_ast, metadata)
       assert {:cons, _, {:integer, _, 42}, {nil, _}} = ast2
