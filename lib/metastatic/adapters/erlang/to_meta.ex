@@ -273,7 +273,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     end
   end
 
-  defp transform_if_clauses(clauses, line \\ 0)
+  defp transform_if_clauses(clauses, line)
 
   defp transform_if_clauses([], _line) do
     {:ok, {:literal, [subtype: :null], nil}}
