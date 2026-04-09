@@ -1100,13 +1100,16 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Build metadata keyword list from Elixir AST meta.
   # Promotes :line and :column to top-level keys and strips them from
   # original_meta to avoid duplication.
+  # Promotes :__original_macro__ to :original_macro at the MetaAST level.
   defp build_meta(elixir_meta) when is_list(elixir_meta) do
-    stripped = Keyword.drop(elixir_meta, [:line, :column])
+    original_macro = Keyword.get(elixir_meta, :__original_macro__)
+    stripped = Keyword.drop(elixir_meta, [:line, :column, :__original_macro__])
     base = if stripped == [], do: [], else: [original_meta: stripped]
 
     base
     |> maybe_add(:line, Keyword.get(elixir_meta, :line))
     |> maybe_add(:col, Keyword.get(elixir_meta, :column))
+    |> maybe_add(:original_macro, original_macro)
   end
 
   defp build_meta(_), do: []

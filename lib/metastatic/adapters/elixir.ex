@@ -99,7 +99,7 @@ defmodule Metastatic.Adapters.Elixir do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.Adapters.Elixir.{FromMeta, ToMeta}
+  alias Metastatic.Adapters.Elixir.{FromMeta, MacroExpander, ToMeta}
   alias Metastatic.Semantic.Enricher
 
   @impl true
@@ -117,9 +117,35 @@ defmodule Metastatic.Adapters.Elixir do
     end
   end
 
+  @doc """
+  Transform Elixir AST to MetaAST, optionally expanding macros via ExPanda.
+
+  ## Options
+
+  - `:expand_macros` - when `true`, uses ExPanda to fully expand
+    macros before transformation, annotating expansion points with the
+    original surface form in `:original_macro` metadata. When `false`
+    (default), behaves as before (surface AST only).
+  - `:expander_opts` - keyword options passed through to
+    `MacroExpander.expand_and_annotate/2` (e.g. `:env`, `:file`).
+  """
   @impl true
-  def to_meta(elixir_ast) do
-    case ToMeta.transform(elixir_ast) do
+  def to_meta(elixir_ast, opts \\ []) do
+    expand? = Keyword.get(opts, :expand_macros, false)
+    expander_opts = Keyword.get(opts, :expander_opts, [])
+
+    ast_to_transform =
+      if expand? do
+        case MacroExpander.expand_and_annotate(elixir_ast, expander_opts) do
+          {:ok, annotated_ast} -> annotated_ast
+          # If expansion fails, fall back to the surface AST
+          {:error, _reason} -> elixir_ast
+        end
+      else
+        elixir_ast
+      end
+
+    case ToMeta.transform(ast_to_transform) do
       {:ok, meta_ast, metadata} ->
         # Enrich AST with semantic metadata (op_kind for DB operations, etc.)
         enriched_ast = Enricher.enrich_tree(meta_ast, :elixir)

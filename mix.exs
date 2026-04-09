@@ -57,8 +57,9 @@ defmodule Metastatic.MixProject do
 
   defp deps do
     [
-      # Core dependency
+      # Core dependencies
       {:jason, "~> 1.4"},
+      {:ex_panda, "~> 0.2"},
 
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},

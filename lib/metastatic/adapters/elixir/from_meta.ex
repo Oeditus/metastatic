@@ -77,10 +77,20 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   end
 
   # Check if this is a MetaAST node (3-tuple with atom type and keyword meta)
+  # When :original_macro metadata is present (from ExPanda expansion),
+  # restore the original surface-level macro call for round-trip fidelity.
   defp post_transform({type, meta, children} = ast, acc)
        when is_atom(type) and is_list(meta) do
     if meta_ast_type?(type) do
-      transform_node(type, meta, children, acc)
+      case Keyword.get(meta, :original_macro) do
+        nil ->
+          transform_node(type, meta, children, acc)
+
+        original_macro_ast when is_tuple(original_macro_ast) ->
+          # The stored value is the original Elixir AST macro call.
+          # Return it directly, skipping reconstruction from the expanded form.
+          {original_macro_ast, acc}
+      end
     else
       # Regular Elixir AST - pass through
       {ast, acc}
