@@ -280,6 +280,7 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapter.Registry,
         Metastatic.Adapters.Elixir,
         Metastatic.Adapters.Elixir.FromMeta,
+        Metastatic.Adapters.Elixir.MacroExpander,
         Metastatic.Adapters.Elixir.ToMeta,
         Metastatic.Adapters.Erlang,
         Metastatic.Adapters.Erlang.FromMeta,
