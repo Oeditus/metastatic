@@ -2,14 +2,14 @@
 
 ## What Is MetaAST?
 
-Imagine you speak five languages. You can describe the same idea -- "add five
-to x" -- in English, Russian, Spanish, Mandarin, or Catalan. The words differ,
+Imagine you speak five languages. You can describe the same idea—“add five
+to x”—in English, Russian, Spanish, Mandarin, or Catalan. The words differ,
 the grammar differs, but the *meaning* is the same. MetaAST is the meaning.
 
 Every programming language has its own way of representing code internally.
 Python has one, JavaScript has another, Elixir has yet another. These internal
 representations are called Abstract Syntax Trees (ASTs). A MetaAST is a
-*universal* AST -- a single, language-independent format that captures the
+*universal* AST—a single, language-independent format that captures the
 semantic essence of code regardless of which language it was written in.
 
 This lets you build a tool *once* (say, a complexity analyzer or a mutation
@@ -19,39 +19,29 @@ modification.
 ### The Analogy
 
 Think of it as sheet music. A piano, a guitar, and a violin all produce
-different sounds and require different techniques. But the *score* -- the
-notes, rhythm, dynamics -- is the same for all of them. MetaAST is the score;
+different sounds and require different techniques. But the *score*—the
+notes, rhythm, dynamics—is the same for all of them. MetaAST is the score;
 language-specific ASTs are the instruments.
 
-```
-Source Code (what you write)
-    |
-    v
-Language AST (how the compiler sees it)    <-- M1: language-specific
-    |
-    v
-MetaAST (the universal meaning)           <-- M2: this specification
-    |
-    v
-Analysis / Transformation (tools)
-    |
-    v
-Language AST (reconstructed)               <-- M1: possibly a different language
-    |
-    v
-Source Code (what you get back)
+```mermaid
+flowchart TD
+    A["Source Code<br/>(what you write)"] --> B["Language AST<br/>M1: language-specific"]
+    B --> C["MetaAST<br/>M2: this specification"]
+    C --> D["Analysis / Transformation"]
+    D --> E["Language AST<br/>M1: possibly a different language"]
+    E --> F["Source Code<br/>(what you get back)"]
 ```
 
 ### The Hierarchy
 
 MetaAST sits at level **M2** in a four-level meta-modeling hierarchy:
 
-- **M3** -- The type system. Elixir's `@type` and `@spec`. Defines what types
+- **M3**—The type system. Elixir's `@type` and `@spec`. Defines what types
   themselves *can be*.
-- **M2** -- MetaAST (this specification). Defines what AST nodes *can be*.
-- **M1** -- Language-specific ASTs. Python's `ast` module, Elixir's quoted
+- **M2**—MetaAST (this specification). Defines what AST nodes *can be*.
+- **M1**—Language-specific ASTs. Python's `ast` module, Elixir's quoted
   expressions, Ruby's parser gem. What specific code *is*.
-- **M0** -- Runtime execution. What code *does*.
+- **M0**—Runtime execution. What code *does*.
 
 Each level is an instance of the level above it. A Python AST node is an
 instance of a MetaAST type, just as a MetaAST type is an instance of an
@@ -59,7 +49,7 @@ Elixir typespec.
 
 ## For the Elixir Developer
 
-If you work with Elixir, you already know ASTs intimately -- every time you
+If you work with Elixir, you already know ASTs intimately—every time you
 write a macro, you manipulate Elixir's own 3-tuple quoted expressions:
 
 ```elixir
@@ -67,7 +57,7 @@ quote do: x + 5
 # => {:+, [context: Elixir, imports: [{1, Kernel}]], [{:x, [], Elixir}, 5]}
 ```
 
-MetaAST uses the **exact same shape** -- a 3-element tuple -- but with
+MetaAST uses the **exact same shape**—a 3-element tuple—but with
 language-neutral semantics:
 
 ```elixir
@@ -77,9 +67,9 @@ language-neutral semantics:
 
 The parallels are deliberate:
 
-- Elixir Quoted Form: `{atom, keyword, list}` -- MetaAST: `{type_atom, keyword_meta, children_or_value}`
-- Elixir type atoms: `:+`, `:def`, `:if` -- MetaAST type atoms: `:binary_op`, `:function_def`, `:conditional`
-- Elixir meta: `[context: ..., line: ...]` -- MetaAST meta: `[category: ..., operator: ..., line: ...]`
+- Elixir Quoted Form: `{atom, keyword, list}`—MetaAST: `{type_atom, keyword_meta, children_or_value}`
+- Elixir type atoms: `:+`, `:def`, `:if`—MetaAST type atoms: `:binary_op`, `:function_def`, `:conditional`
+- Elixir meta: `[context: ..., line: ...]`—MetaAST meta: `[category: ..., operator: ..., line: ...]`
 - Children: child AST nodes or values in both
 
 The key differences:
@@ -137,11 +127,11 @@ Every MetaAST node is a 3-element tuple:
 {type_atom, keyword_meta, children_or_value}
 ```
 
-- **`type_atom`** -- An atom identifying the node kind. One of the types
+- **`type_atom`**—An atom identifying the node kind. One of the types
   defined below (`:literal`, `:binary_op`, `:container`, etc.).
-- **`keyword_meta`** -- A keyword list carrying metadata: source location,
+- **`keyword_meta`**—A keyword list carrying metadata: source location,
   subtype, operator, semantic hints, M1 context, and so on.
-- **`children_or_value`** -- For leaf nodes (`:literal`, `:variable`), the
+- **`children_or_value`**—For leaf nodes (`:literal`, `:variable`), the
   actual value. For composite nodes, a list of child MetaAST nodes.
 
 There is exactly one exception: the bare atom `:_` represents a wildcard
@@ -152,13 +142,13 @@ pattern in pattern matching contexts.
 The keyword list in the second position may contain any of these keys
 (all optional unless stated otherwise for a specific node type):
 
-- **`:line`**, **`:col`**, **`:end_line`**, **`:end_col`** -- Source location.
-- **`:language`** -- Source language atom (`:python`, `:elixir`, `:ruby`,
+- **`:line`**, **`:col`**, **`:end_line`**, **`:end_col`**—Source location.
+- **`:language`**—Source language atom (`:python`, `:elixir`, `:ruby`,
   `:erlang`, `:haskell`). Attached by adapters to structural nodes.
-- **`:module`**, **`:function`**, **`:arity`**, **`:visibility`** -- M1
+- **`:module`**, **`:function`**, **`:arity`**, **`:visibility`**—M1
   context for Ragex integration. Attached to `:container` and
   `:function_def` nodes.
-- **`:op_kind`** -- Semantic operation metadata on `:function_call` nodes.
+- **`:op_kind`**—Semantic operation metadata on `:function_call` nodes.
   See [Semantic Enrichment](#semantic-enrichment-op_kind) below.
 
 ---
@@ -181,7 +171,7 @@ A constant value.
 {:literal, [subtype: subtype_atom], value}
 ```
 
-**Required metadata:** `:subtype` -- one of `:integer`, `:float`, `:string`,
+**Required metadata:** `:subtype`—one of `:integer`, `:float`, `:string`,
 `:boolean`, `:null`, `:symbol`, `:regex`.
 
 The third element is the value itself, whose Elixir type must match the
@@ -210,11 +200,11 @@ A named binding.
 The third element is always a binary (string). Variable scope is indicated
 by the optional `:scope` metadata key:
 
-- `:local` -- regular variables (`x`, `name`)
-- `:module_attribute` -- Elixir module attributes (`@timeout`)
-- `:instance` -- Ruby instance variables (`@x`)
-- `:class` -- Ruby class variables (`@@x`)
-- `:global` -- global variables (Ruby `$var`, Python `global x`)
+- `:local`—regular variables (`x`, `name`)
+- `:module_attribute`—Elixir module attributes (`@timeout`)
+- `:instance`—Ruby instance variables (`@x`)
+- `:class`—Ruby class variables (`@@x`)
+- `:global`—global variables (Ruby `$var`, Python `global x`)
 
 ```elixir
 {:variable, [line: 1], "x"}
@@ -696,12 +686,12 @@ A function parameter.
 
 The third element is the parameter name (binary). Optional metadata:
 
-- `:pattern` -- a MetaAST node for destructured parameters
-- `:default` -- a MetaAST node for the default value
-- `:rest` -- `true` for rest/splat parameters (`*args`)
-- `:keyword` -- `true` for keyword arguments
-- `:keyword_rest` -- `true` for keyword rest (`**kwargs`)
-- `:block` -- `true` for block parameters (`&block`)
+- `:pattern`—a MetaAST node for destructured parameters
+- `:default`—a MetaAST node for the default value
+- `:rest`—`true` for rest/splat parameters (`*args`)
+- `:keyword`—`true` for keyword arguments
+- `:keyword_rest`—`true` for keyword rest (`**kwargs`)
+- `:block`—`true` for block parameters (`&block`)
 
 ```elixir
 {:param, [], "x"}
@@ -780,7 +770,7 @@ A module/package dependency directive. Unifies `import`, `use`, `require`,
 {:import, [source: module_string, import_type: type_atom, ...], []}
 ```
 
-**Required metadata:** `:source` (binary -- the module/package name) and
+**Required metadata:** `:source` (binary—the module/package name) and
 `:import_type` (atom preserving the original directive).
 
 **Import types by language:**
@@ -791,7 +781,7 @@ A module/package dependency directive. Unifies `import`, `use`, `require`,
 - **Haskell:** `:import`
 - **Erlang:** `:import`
 
-Optional `:names` metadata -- a list of specific names imported (for
+Optional `:names` metadata—a list of specific names imported (for
 selective imports like Python's `from X import a, b`).
 
 ```elixir
@@ -808,7 +798,7 @@ A type declaration, spec, or hint.
 {:type_annotation, [annotation_type: type_atom], children_list}
 ```
 
-**Required metadata:** `:annotation_type` -- one of `:spec`, `:type`,
+**Required metadata:** `:annotation_type`—one of `:spec`, `:type`,
 `:hint`, `:callback`.
 
 ```elixir
@@ -824,7 +814,7 @@ A type declaration, spec, or hint.
 ### M2.3: Native Layer
 
 When a language construct has no reasonable cross-language abstraction, it is
-preserved as-is with a semantic hint. This is the escape hatch -- it
+preserved as-is with a semantic hint. This is the escape hatch—it
 sacrifices universality to avoid losing information.
 
 #### `:language_specific`
@@ -838,7 +828,7 @@ sacrifices universality to avoid losing information.
 **Recommended metadata:** `:hint` (a semantic hint atom like
 `:comprehension`, `:pipe`, `:with`, `:decorator`, `:macro`).
 
-The third element is the language's native AST -- its structure is
+The third element is the language's native AST—its structure is
 language-dependent and opaque to cross-language tools.
 
 ```elixir
@@ -864,7 +854,7 @@ Analysis tools that encounter `:language_specific` nodes can:
 
 ## Semantic Enrichment (op_kind)
 
-Function call nodes may carry an `:op_kind` metadata key -- a keyword list
+Function call nodes may carry an `:op_kind` metadata key—a keyword list
 that describes *what the function does* at a semantic level, independent of
 its name or the framework it belongs to.
 
@@ -883,15 +873,15 @@ rather than pattern-matching on function names ("does this look like
 
 **Fields:**
 
-- **`:domain`** (required) -- The semantic domain. One of:
+- **`:domain`** (required)—The semantic domain. One of:
   `:db`, `:http`, `:auth`, `:cache`, `:queue`, `:file`, `:external_api`.
-- **`:operation`** (required) -- The specific operation within the domain.
+- **`:operation`** (required)—The specific operation within the domain.
   Examples: `:retrieve`, `:retrieve_all`, `:create`, `:update`, `:delete`,
   `:query`, `:transaction`, `:preload`, `:aggregate`.
-- **`:target`** (optional) -- The entity being operated on. `"User"`,
+- **`:target`** (optional)—The entity being operated on. `"User"`,
   `"orders"`, `"session"`.
-- **`:async`** (optional) -- Whether the operation is asynchronous.
-- **`:framework`** (optional) -- The source framework. `:ecto`, `:django`,
+- **`:async`** (optional)—Whether the operation is asynchronous.
+- **`:framework`** (optional)—The source framework. `:ecto`, `:django`,
   `:sequelize`, `:sqlalchemy`.
 
 ### Usage Pattern
@@ -949,7 +939,7 @@ All produce the same M2:
   [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 ```
 
-A more involved example -- a function definition:
+A more involved example—a function definition:
 
 ```
 Python:
@@ -1058,4 +1048,4 @@ AST.node_visibility(node)  # => :public
 
 ### Special
 
-`:_` (wildcard pattern -- bare atom, not a 3-tuple)
+`:_` (wildcard pattern—bare atom, not a 3-tuple)

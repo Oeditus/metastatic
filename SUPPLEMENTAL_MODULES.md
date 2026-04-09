@@ -42,11 +42,14 @@ ast = {:actor_call, {:variable, "worker"}, "process", [data]}
 
 Supplementals operate **at the M2 meta-model level**, adding optional constructs beyond Core/Extended/Native:
 
-```
-M2 Core    - Universals (literals, variables, operators, conditionals)
-M2 Extended - Common patterns (loops, lambdas, collections)
-M2 Native  - Language escapes
-M2 Supplemental - Library-specific extensions (actors, async, etc.)
+```mermaid
+flowchart TD
+    A["M2 Core<br/>Universals: literals, variables, operators, conditionals"]
+    B["M2 Extended<br/>Common patterns: loops, lambdas, collections"]
+    C["M2 Native<br/>Language escapes"]
+    D["M2 Supplemental<br/>Library-specific extensions: actors, async, etc."]
+
+    A --- B --- C --- D
 ```
 
 Supplemental constructs are **not part of the base MetaAST grammar** - they're opt-in extensions that require explicit transformation.

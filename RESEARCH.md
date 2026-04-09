@@ -52,24 +52,16 @@ flowchart TD
 
 ### Concrete Example: The Meta-Hierarchy in Action
 
-```
-M3 Level (Meta-Meta-Model):
-  "A node type can have a name and attributes"
-  → This is what MetaAST's type system definition represents
+```mermaid
+flowchart TD
+    M3["M3: Meta-Meta-Model<br/>A node type can have a name and attributes<br/>(MetaAST type system definition)"]
+    M2["M2: Meta-Model -- MetaAST<br/>{:binary_op, category, operator, left, right}<br/>DEFINES what a binary operation IS across all languages"]
+    M1["M1: Model -- Language-Specific ASTs<br/>Python: BinOp(op=Add(), left=Name('x'), right=Num(5))<br/>JS: BinaryExpression(operator: '+', left: Identifier('x'), right: Literal(5))<br/>Elixir: {:+, [], [{:x, [], nil}, 5]}<br/>INSTANCES of the M2 binary_op concept"]
+    M0["M0: Instance -- Runtime<br/>x = 10; result = x + 5 evaluates to 15<br/>The actual execution"]
 
-M2 Level (Meta-Model) - MetaAST:
-  {:binary_op, category, operator, left, right}
-  → This DEFINES what a binary operation IS across all languages
-
-M1 Level (Model) - Language-Specific ASTs:
-  Python:  BinOp(op=Add(), left=Name('x'), right=Num(5))
-  JavaScript: BinaryExpression(operator: '+', left: Identifier('x'), right: Literal(5))
-  Elixir:  {:+, [], [{:x, [], nil}, 5]}
-  → These are INSTANCES of the M2 binary_op concept
-
-M0 Level (Instance) - Runtime:
-  x = 10; result = x + 5  → evaluates to 15
-  → This is the actual execution
+    M3 -->|instance-of| M2
+    M2 -->|instance-of| M1
+    M1 -->|instance-of| M0
 ```
 
 ### Why This Matters
