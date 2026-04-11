@@ -6,6 +6,22 @@ defmodule Mix.Tasks.Metastatic.DetectDuplicates do
   MetaAST, and then detects structural code clones (Type I-III) across the
   resulting documents. Cross-language detection works out of the box.
 
+  ## Workflow
+
+  ```mermaid
+  flowchart TD
+      Input["Input: files or --dir"] --> Discover["Discover files<br/>filter by extension"]
+      Discover --> Parse["Parse each file"]
+      Parse --> Detect{"Language<br/>detection"}
+      Detect --> Adapter["Select adapter<br/>Python/Elixir/Ruby/..."]
+      Adapter --> M2["Source -> M1 -> M2<br/>Builder.from_source"]
+      M2 --> Docs["List of Documents"]
+      Docs --> Dup["Duplication.detect_in_list<br/>Type I-III clone detection"]
+      Dup --> Groups["Duplicate groups"]
+      Groups --> Report["Reporter.format_groups<br/>text / json / detailed"]
+      Report --> Output["stdout or --output file"]
+  ```
+
   ## Usage
 
       mix metastatic.detect_duplicates FILE1 FILE2 [OPTIONS]

@@ -4,6 +4,19 @@ defmodule Mix.Tasks.Metastatic.Analyze do
   @moduledoc """
   Analyze MetaAST structure and provide detailed metrics.
 
+  ## Pipeline
+
+  ```mermaid
+  flowchart LR
+      File["Source file"] --> Lang{"Detect<br/>language"}
+      Lang --> Build["Builder.from_source<br/>Source -> M1 -> M2"]
+      Build --> Doc["Document"]
+      Doc --> Inspect["Inspector<br/>layer, depth,<br/>nodes, vars"]
+      Doc --> Validate["Validator<br/>mode: strict /<br/>standard / permissive"]
+      Inspect --> Report["Metrics Report"]
+      Validate --> Report
+  ```
+
   ## Usage
 
       mix metastatic.analyze FILE [OPTIONS]

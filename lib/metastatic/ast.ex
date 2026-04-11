@@ -23,12 +23,38 @@ defmodule Metastatic.AST do
   - `keyword_meta` - Keyword list containing metadata (line, column, subtype, etc.)
   - `children_or_value` - Either a value (for leaf nodes) or list of child nodes
 
+  ```mermaid
+  graph LR
+      subgraph "3-Tuple Structure"
+          A["type_atom"] --- B["keyword_meta"] --- C["children_or_value"]
+      end
+      A -->|identifies| D["Node kind"]
+      B -->|contains| E["Metadata"]
+      C -->|holds| F["Value or children"]
+  ```
+
   ## Third Element Semantics
 
   The third element varies by node type:
   - **Leaf nodes** (literal, variable): The actual value (`42`, `"x"`)
   - **Composite nodes** (binary_op, function_call): List of child AST nodes
   - **Container nodes** (container, function_def): List of body statements
+
+  ```mermaid
+  graph TD
+      subgraph "Leaf Nodes"
+          L1["{:literal, [subtype: :integer], 42}"]
+          L2["{:variable, [], 'x'}"]
+      end
+      subgraph "Composite Nodes"
+          C1["{:binary_op, [operator: :+], [left, right]}"]
+          C2["{:function_call, [name: 'foo'], [arg1, arg2]}"]
+      end
+      subgraph "Container Nodes"
+          S1["{:container, [name: 'MyModule'], [body...]}"]
+          S2["{:function_def, [name: 'greet'], [body...]}"]
+      end
+  ```
 
   ## Examples
 

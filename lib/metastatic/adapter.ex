@@ -1,6 +1,6 @@
 defmodule Metastatic.Adapter do
   @moduledoc """
-  Behaviour for language adapters (M1 ↔ M2 transformations).
+  Behaviour for language adapters (M1 <-> M2 transformations).
 
   Language adapters bridge between:
   - **M1:** Language-specific ASTs (Python, JavaScript, Elixir, etc.)
@@ -8,10 +8,18 @@ defmodule Metastatic.Adapter do
 
   ## Meta-Modeling Operations
 
-  - `parse/1`: Source → M1 (language-specific parsing)
-  - `to_meta/1`: M1 → M2 (abstraction to meta-level)
-  - `from_meta/2`: M2 → M1 (reification from meta-level)
-  - `unparse/1`: M1 → Source (language-specific unparsing)
+  - `parse/1`: Source -> M1 (language-specific parsing)
+  - `to_meta/1`: M1 -> M2 (abstraction to meta-level)
+  - `from_meta/2`: M2 -> M1 (reification from meta-level)
+  - `unparse/1`: M1 -> Source (language-specific unparsing)
+
+  ```mermaid
+  graph LR
+      Source["Source Code"] -->|"parse/1"| M1["M1: Native AST"]
+      M1 -->|"to_meta/1"| M2["M2: MetaAST"]
+      M2 -->|"from_meta/2"| M1b["M1: Native AST"]
+      M1b -->|"unparse/1"| Source2["Source Code"]
+  ```
 
   ## Conformance
 
@@ -69,6 +77,14 @@ defmodule Metastatic.Adapter do
   ## Semantic Equivalence
 
   Different M1 models may map to the same M2 instance:
+
+  ```mermaid
+  graph LR
+      PY["Python M1<br/>BinOp(op=Add)"] --> M2["{:binary_op, :arithmetic, :+, ...}"]
+      JS["JavaScript M1<br/>BinaryExpression('+')"] --> M2
+      EX["Elixir M1<br/>{:+, [], [...]}"] --> M2
+      RB["Ruby M1<br/>s(:send, ..., :+, ...)"] --> M2
+  ```
 
       # Python (M1)
       BinOp(op=Add(), left=Name('x'), right=Num(5))

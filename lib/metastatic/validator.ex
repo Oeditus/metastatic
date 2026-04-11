@@ -2,7 +2,7 @@ defmodule Metastatic.Validator do
   @moduledoc """
   Conformance validation for MetaAST.
 
-  This module provides formal M1 → M2 conformance checking and validation
+  This module provides formal M1 -> M2 conformance checking and validation
   of MetaAST structures according to the theoretical foundations.
 
   ## New 3-Tuple Format
@@ -13,13 +13,33 @@ defmodule Metastatic.Validator do
 
   ## Conformance Rules (Definition 8 from THEORETICAL_FOUNDATIONS.md)
 
-  A term `t ∈ M1` conforms to M2 if it can be represented by M2 meta-types
+  A term `t` in M1 conforms to M2 if it can be represented by M2 meta-types
   without loss of essential semantic information. Validation checks:
 
   1. **Structural conformance** - AST structure matches M2 type definitions
   2. **Type safety** - All type tags are valid M2 types
   3. **Semantic preservation** - Required semantic information is present
   4. **Native escape hatches** - M2.3 used only when necessary
+
+  ## Validation Decision Tree
+
+  ```mermaid
+  flowchart TD
+      Input["Input: Document / AST"] --> Structure{"Structure valid?<br/>AST.conforms?"}
+      Structure -->|No| Err1["error: invalid_structure"]
+      Structure -->|Yes| Analyze["Single-pass analysis<br/>collect metrics"]
+      Analyze --> Level{"Classify level"}
+      Level -->|"has :language_specific"| Native[":native"]
+      Level -->|"has extended types"| Extended[":extended"]
+      Level -->|"core types only"| Core[":core"]
+      Native --> Mode{"Check mode"}
+      Extended --> Mode
+      Core --> Mode
+      Mode -->|":strict + native > 0"| Err2["error: native_constructs_not_allowed"]
+      Mode -->|"depth > max"| Err3["error: max_depth_exceeded"]
+      Mode -->|"vars > max"| Err4["error: too_many_variables"]
+      Mode -->|"all ok"| OK["{:ok, metadata}"]
+  ```
 
   ## Validation Levels
 

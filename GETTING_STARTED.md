@@ -206,6 +206,120 @@ end
 
 MetaAST uses a uniform 3-tuple format: `{type_atom, keyword_meta, children_or_value}`
 
+#### Reading a MetaAST Node
+
+Every MetaAST node follows the same 3-element tuple structure.
+Here is how to read one:
+
+```mermaid
+graph LR
+    subgraph "3-Tuple Structure"
+        A["type_atom"] --- B["keyword_meta"] --- C["children_or_value"]
+    end
+    A -->|identifies| D["Node kind<br/>:literal, :binary_op, :function_call, ..."]
+    B -->|contains| E["Metadata<br/>line, subtype, operator, name, ..."]
+    C -->|holds| F["Leaf: value<br/>Composite: list of child nodes"]
+```
+
+Leaf vs. composite nodes differ only in the third element:
+
+```mermaid
+graph TD
+    subgraph "Leaf Nodes"
+        L1["{:literal, [subtype: :integer], 42}"]
+        L2["{:variable, [scope: :local], &quot;x&quot;}"]
+    end
+    subgraph "Composite Nodes"
+        C1["{:binary_op, [operator: :+], [left, right]}"]
+        C2["{:function_call, [name: &quot;foo&quot;], [arg1, arg2]}"]
+    end
+    L1 -.->|"third elem is a value"| V1[42]
+    C1 -.->|"third elem is a list of children"| V2["[left, right]"]
+```
+
+#### Common Node Type Examples
+
+A simple expression `x + 5` maps to MetaAST as follows:
+
+```mermaid
+graph TD
+    Root["{:binary_op, [category: :arithmetic, operator: :+], [left, right]}"]
+    Root --> Left["{:variable, [], &quot;x&quot;}"]
+    Root --> Right["{:literal, [subtype: :integer], 5}"]
+    style Root fill:#4a9eff,color:#fff
+    style Left fill:#50c878,color:#fff
+    style Right fill:#50c878,color:#fff
+```
+
+A conditional `if x > 0 then 1 else -1`:
+
+```mermaid
+graph TD
+    Cond["{:conditional, [], [condition, then, else]}"]
+    Cond --> Condition["{:binary_op, [category: :comparison, operator: :>], [x, 0]}"]
+    Cond --> Then["{:literal, [subtype: :integer], 1}"]
+    Cond --> Else["{:literal, [subtype: :integer], -1}"]
+    Condition --> X["{:variable, [], &quot;x&quot;}"]
+    Condition --> Zero["{:literal, [subtype: :integer], 0}"]
+    style Cond fill:#e67e22,color:#fff
+    style Condition fill:#4a9eff,color:#fff
+    style Then fill:#50c878,color:#fff
+    style Else fill:#50c878,color:#fff
+    style X fill:#50c878,color:#fff
+    style Zero fill:#50c878,color:#fff
+```
+
+A function definition `def greet(name)` with structural nodes:
+
+```mermaid
+graph TD
+    FnDef["{:function_def, [name: &quot;greet&quot;, params: [...], visibility: :public, arity: 1], [body]}"]
+    FnDef --> Param["{:param, [], &quot;name&quot;}"]
+    FnDef --> Body["{:function_call, [name: &quot;IO.puts&quot;], [arg]}"]
+    Body --> Arg["{:variable, [], &quot;name&quot;}"]
+    style FnDef fill:#9b59b6,color:#fff
+    style Param fill:#1abc9c,color:#fff
+    style Body fill:#4a9eff,color:#fff
+    style Arg fill:#50c878,color:#fff
+```
+
+#### MetaAST Layer Mapping
+
+Every node type belongs to exactly one layer in the meta-model:
+
+```mermaid
+graph TD
+    subgraph "M2.1 Core Layer -- Universal"
+        C1[":literal"]
+        C2[":variable"]
+        C3[":binary_op"]
+        C4[":unary_op"]
+        C5[":function_call"]
+        C6[":conditional"]
+        C7[":block"]
+        C8[":assignment"]
+        C9[":list / :map / :pair"]
+    end
+    subgraph "M2.2 Extended Layer -- Common Patterns"
+        E1[":loop"]
+        E2[":lambda"]
+        E3[":collection_op"]
+        E4[":pattern_match / :match_arm"]
+        E5[":exception_handling"]
+        E6[":comprehension"]
+    end
+    subgraph "M2.2s Structural Layer -- Organization"
+        S1[":container"]
+        S2[":function_def / :param"]
+        S3[":attribute_access"]
+        S4[":import"]
+        S5[":property"]
+    end
+    subgraph "M2.3 Native Layer -- Escape Hatch"
+        N1[":language_specific"]
+    end
+```
+
 ```elixir
 alias Metastatic.{AST, Document, Validator}
 
@@ -278,6 +392,26 @@ source = "X + 5."
 ```
 
 ### Cross-Language Equivalence
+
+Different M1 language ASTs converge to the same M2 MetaAST representation:
+
+```mermaid
+graph LR
+    subgraph "M1: Language-Specific ASTs"
+        PY["Python<br/>BinOp(op=Add)"]
+        EX["Elixir<br/>{:+, [], [x, 5]}"]
+        ER["Erlang<br/>{op, Line, '+', L, R}"]
+        RB["Ruby<br/>s(:send, lhs, :+, rhs)"]
+    end
+    subgraph "M2: Unified MetaAST"
+        M["{:binary_op,<br/>[category: :arithmetic,<br/>operator: :+],<br/>[left, right]}"]
+    end
+    PY --> M
+    EX --> M
+    ER --> M
+    RB --> M
+    style M fill:#4a9eff,color:#fff
+```
 
 ```elixir
 # Parse Elixir
@@ -446,6 +580,28 @@ result.severity     # => :medium or :high
 ```
 
 ### Business Logic Analyzers (32 analyzers)
+
+The analysis pipeline runs all analyzers in a single AST traversal, propagating
+context from structural nodes to their children:
+
+```mermaid
+graph TD
+    Doc["Document"] --> Runner["Runner.run/2"]
+    Runner --> Traverse["Single-pass AST traversal"]
+    Traverse --> Container["{:container, ...}"]
+    Container -->|"sets context.module_name"| FnDef["{:function_def, ...}"]
+    FnDef -->|"sets context.function_name, arity"| Body["Body nodes"]
+    Body --> A1["Analyzer 1"]
+    Body --> A2["Analyzer 2"]
+    Body --> AN["Analyzer N"]
+    A1 --> Issues["Collected Issues"]
+    A2 --> Issues
+    AN --> Issues
+    Issues --> Report["Report with summary"]
+    style Runner fill:#4a9eff,color:#fff
+    style Issues fill:#e74c3c,color:#fff
+    style Report fill:#2ecc71,color:#fff
+```
 
 Metastatic includes 32 language-agnostic business logic analyzers that detect anti-patterns across all supported languages. These include:
 

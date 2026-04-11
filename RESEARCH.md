@@ -100,9 +100,47 @@ end
 # Because they all instantiate the SAME M2 concept!
 ```
 
-#### 3. Language Adapters Are M1 ↔ M2 Mappings
+#### 3. Language Adapters Are M1 <-> M2 Mappings
 
 Language adapters perform **model-to-meta-model transformations**:
+
+```mermaid
+graph LR
+    subgraph "Adapter Responsibilities"
+        direction TB
+        Parse["parse/1<br/>Source -> M1"]
+        ToMeta["to_meta/1<br/>M1 -> M2"]
+        FromMeta["from_meta/2<br/>M2 -> M1"]
+        Unparse["unparse/1<br/>M1 -> Source"]
+    end
+    Source["Source Code<br/>'x + 5'"] -->|parse| M1["M1: Native AST<br/>BinOp(op=Add)"]
+    M1 -->|to_meta<br/>abstraction| M2["M2: MetaAST<br/>{:binary_op, ...}"]
+    M2 -->|from_meta<br/>reification| M1b["M1: Native AST<br/>BinOp(op=Add)"]
+    M1b -->|unparse| Source2["Source Code<br/>'x + 5'"]
+    style M2 fill:#4a9eff,color:#fff
+    style M1 fill:#f39c12,color:#fff
+    style M1b fill:#f39c12,color:#fff
+```
+
+The adapter pair `(to_meta, from_meta)` forms a **Galois connection** between M1 and M2:
+
+```mermaid
+graph TD
+    subgraph "Galois Connection"
+        M2["M2 (MetaAST)"]
+        M1_py["M1 Python"]
+        M1_ex["M1 Elixir"]
+        M1_rb["M1 Ruby"]
+        M1_erl["M1 Erlang"]
+        M1_hs["M1 Haskell"]
+    end
+    M2 <-->|"alpha_py / rho_py"| M1_py
+    M2 <-->|"alpha_ex / rho_ex"| M1_ex
+    M2 <-->|"alpha_rb / rho_rb"| M1_rb
+    M2 <-->|"alpha_erl / rho_erl"| M1_erl
+    M2 <-->|"alpha_hs / rho_hs"| M1_hs
+    style M2 fill:#4a9eff,color:#fff
+```
 
 ```elixir
 # M1 → M2 (Abstraction)
@@ -580,6 +618,60 @@ async def process_data(items: List[int]) -> List[int]:
 - **Async handling stays in metadata** (Layer 2/3) - preserved but optional
 - **Type info preserved** (Layer 3) - available for validation
 - **Round-tripping possible** - reconstruct original semantics
+
+---
+
+## Round-Trip Pipeline
+
+The full round-trip demonstrates how source code flows through all levels
+of the meta-modeling hierarchy and back:
+
+```mermaid
+sequenceDiagram
+    participant S as Source Code
+    participant A as Adapter
+    participant M1 as M1 (Native AST)
+    participant M2 as M2 (MetaAST)
+    participant T as Transformer
+
+    S->>A: parse("x + 5")
+    A->>M1: BinOp(op=Add, left=Name('x'), right=Num(5))
+    M1->>A: to_meta(native_ast)
+    A->>M2: {:binary_op, [category: :arithmetic, operator: :+], [left, right]}
+    Note over M2: Analysis / Mutation at M2 level
+    M2->>T: e.g. arithmetic_inverse
+    T->>M2: {:binary_op, [category: :arithmetic, operator: :-], [left, right]}
+    M2->>A: from_meta(mutated_ast, metadata)
+    A->>M1: BinOp(op=Sub, left=Name('x'), right=Num(5))
+    M1->>A: unparse(native_ast)
+    A->>S: "x - 5"
+```
+
+## OpKind Semantic Enrichment Workflow
+
+During M1 -> M2 transformation, the semantic enricher annotates function call
+nodes with operation-kind metadata from a registry of known patterns:
+
+```mermaid
+flowchart TD
+    FC["{:function_call, [name: 'Repo.get'], [User, id]}"]
+    FC --> Enricher["Semantic Enricher"]
+    Enricher --> Registry{"Pattern Registry<br/>Ecto? Django? Rails?"}
+    Registry -->|match: Repo.get| OpKind["op_kind: [domain: :db,<br/>operation: :retrieve,<br/>target: 'User',<br/>framework: :ecto]"]
+    Registry -->|no match| NoOp["No op_kind added"]
+    OpKind --> Enriched["{:function_call,<br/>[name: 'Repo.get',<br/>op_kind: [domain: :db, ...]],<br/>[User, id]}"]
+
+    Enriched --> Analyzers{"Analyzers"}
+    Analyzers --> A1["NPlusOneQuery<br/>OpKind.db?() -> true"]
+    Analyzers --> A2["BlockingInPlug<br/>OpKind.db?() -> true"]
+    Analyzers --> A3["MissingTelemetry<br/>OpKind.http?() -> false"]
+    style Enriched fill:#4a9eff,color:#fff
+    style OpKind fill:#2ecc71,color:#fff
+```
+
+Analyzers use a **semantic-first, heuristic-fallback** strategy: they check
+`op_kind` metadata first for accurate detection, then fall back to name-based
+heuristics only when `op_kind` is absent.
 
 ---
 
