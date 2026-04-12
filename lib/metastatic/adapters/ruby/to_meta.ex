@@ -1549,35 +1549,6 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   defp extract_regex_flags(_), do: []
 
-  defp transform_string_parts(parts) when is_list(parts) do
-    parts
-    |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
-      case part do
-        # String literal part
-        %{"type" => "str", "children" => [str]} ->
-          {:cont, {:ok, [{:literal, str} | acc]}}
-
-        # Interpolated expression
-        %{"type" => "begin", "children" => [expr]} ->
-          case transform(expr) do
-            {:ok, expr_meta, _} -> {:cont, {:ok, [{:interpolation, expr_meta} | acc]}}
-            {:error, _} = err -> {:halt, err}
-          end
-
-        # Direct expression
-        expr ->
-          case transform(expr) do
-            {:ok, expr_meta, _} -> {:cont, {:ok, [{:interpolation, expr_meta} | acc]}}
-            {:error, _} = err -> {:halt, err}
-          end
-      end
-    end)
-    |> case do
-      {:ok, parts_list} -> {:ok, Enum.reverse(parts_list)}
-      error -> error
-    end
-  end
-
   # Location extraction helpers
   # For 3-tuple format: {type, keyword_meta, value_or_children}
   # Location info is merged into the keyword_meta (2nd element)

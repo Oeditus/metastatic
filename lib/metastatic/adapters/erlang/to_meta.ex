@@ -556,6 +556,8 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     {:ok, result}
   end
 
+  defp transform_catch_clauses([]), do: {:ok, []}
+
   defp transform_catch_clauses(clauses) when is_list(clauses) do
     clauses
     |> Enum.reduce_while({:ok, []}, fn {:clause, line, [pattern], _guards, body}, {:ok, acc} ->
@@ -572,8 +574,6 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
       error -> error
     end
   end
-
-  defp transform_catch_clauses([]), do: {:ok, []}
 
   defp transform_after([]), do: {:ok, nil}
   defp transform_after(body) when is_list(body), do: transform_body(body)
