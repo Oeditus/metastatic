@@ -135,6 +135,21 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {ast, %{ctx | module: module_name}}
   end
 
+  # Track entering a protocol definition
+  defp pre_transform({:defprotocol, _meta, [{:__aliases__, _, parts} | _]} = ast, ctx) do
+    protocol_name = Enum.map_join(parts, ".", &Atom.to_string/1)
+    {ast, %{ctx | module: protocol_name}}
+  end
+
+  # Track entering a protocol implementation
+  defp pre_transform(
+         {:defimpl, _meta, [{:__aliases__, _, parts} | _]} = ast,
+         ctx
+       ) do
+    protocol_name = Enum.map_join(parts, ".", &Atom.to_string/1)
+    {ast, %{ctx | module: protocol_name}}
+  end
+
   # Track entering a guarded function
   defp pre_transform({func_type, _meta, [{:when, _, [{name, _, args} | _]} | _]} = ast, ctx)
        when func_type in [:def, :defp, :defmacro, :defmacrop] and is_atom(name) do
@@ -875,6 +890,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
                 :defmodule,
                 :defmacro,
                 :defmacrop,
+                :defprotocol,
+                :defimpl,
+                :defstruct,
+                :defexception,
                 :if,
                 :unless,
                 :cond,
@@ -960,6 +979,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp post_transform({:defmodule, meta, [name, body_container]}, ctx) do
     module_name = extract_module_name_from_meta_ast(name)
     body = extract_body_from_transformed(body_container)
+    body_statements = flatten_body_ast(body)
+
+    # Group consecutive function clauses with the same name/arity into a
+    # single :function_def node with clauses: metadata. This preserves the
+    # multi-clause dispatch semantics at the MetaAST level.
+    grouped_body = group_function_clauses(body_statements)
 
     node_meta =
       [
@@ -969,7 +994,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         language: :elixir
       ] ++ build_meta(meta)
 
-    {{:container, node_meta, flatten_body_ast(body)}, ctx}
+    {{:container, node_meta, grouped_body}, ctx}
   end
 
   # ----- Function Definition -----
@@ -981,6 +1006,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
        when func_type in [:def, :defp, :defmacro, :defmacrop] do
     {func_name, params, guards} = extract_signature_from_meta_ast(signature)
     visibility = if func_type in [:defp, :defmacrop], do: :private, else: :public
+    is_macro = func_type in [:defmacro, :defmacrop]
     arity = length(params)
 
     # Extract body from the transformed container
@@ -996,10 +1022,72 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         language: :elixir
       ] ++ build_meta(meta)
 
+    # Add is_macro flag for macro definitions
+    node_meta = if is_macro, do: [is_macro: true] ++ node_meta, else: node_meta
+
     # Add guards if present
     node_meta = if guards, do: [guards: guards] ++ node_meta, else: node_meta
 
     {{:function_def, node_meta, flatten_body_ast(body)}, ctx}
+  end
+
+  # ----- Protocol / Implementation / Behaviour Definitions -----
+
+  # defprotocol MyProtocol do ... end
+  # After traversal: name is {:variable, _, "MyProtocol"}, body_container is transformed
+  defp post_transform({:defprotocol, meta, [name, body_container]}, ctx) do
+    protocol_name = extract_module_name_from_meta_ast(name)
+    body = extract_body_from_transformed(body_container)
+
+    node_meta =
+      [
+        container_type: :protocol,
+        name: protocol_name,
+        module: protocol_name,
+        language: :elixir
+      ] ++ build_meta(meta)
+
+    {{:container, node_meta, flatten_body_ast(body)}, ctx}
+  end
+
+  # defimpl MyProtocol, for: SomeType do ... end
+  # After traversal: second arg is keyword list with for: clause
+  defp post_transform({:defimpl, meta, [protocol_name_node, opts_and_body]}, ctx) do
+    protocol_name = extract_module_name_from_meta_ast(protocol_name_node)
+    body = extract_body_from_transformed(opts_and_body)
+
+    # Extract :for module from the options
+    for_type = extract_impl_for(opts_and_body)
+
+    impl_name = "#{protocol_name}.#{for_type}"
+
+    node_meta =
+      [
+        container_type: :impl,
+        name: impl_name,
+        module: impl_name,
+        protocol: protocol_name,
+        for: for_type,
+        language: :elixir
+      ] ++ build_meta(meta)
+
+    {{:container, node_meta, flatten_body_ast(body)}, ctx}
+  end
+
+  # defstruct [:field1, :field2] or defstruct field1: default, ...
+  # Represent as a language_specific node since struct fields don't map cleanly
+  # to any M2 structural type without deeper semantics.
+  defp post_transform({:defstruct, meta, [fields]}, ctx) do
+    field_names = extract_struct_field_names(fields)
+    node_meta = [language: :elixir, hint: :defstruct, fields: field_names] ++ build_meta(meta)
+    {{:language_specific, node_meta, fields}, ctx}
+  end
+
+  # defexception [:message] or defexception message: "default"
+  defp post_transform({:defexception, meta, [fields]}, ctx) do
+    field_names = extract_struct_field_names(fields)
+    node_meta = [language: :elixir, hint: :defexception, fields: field_names] ++ build_meta(meta)
+    {{:language_specific, node_meta, fields}, ctx}
   end
 
   # ----- Module Attributes -----
@@ -1178,6 +1266,135 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       :{}
     ]
   end
+
+  # Extract the :for type from a defimpl body container.
+  # The :for option is a keyword pair in the options list.
+  defp extract_impl_for({:list, _, items}) do
+    Enum.find_value(items, "Any", fn
+      {:tuple, _, [{:literal, [subtype: :symbol], :for}, type_node]} ->
+        extract_module_name_from_meta_ast(type_node)
+
+      {:pair, _, [{:literal, [subtype: :symbol], :for}, type_node]} ->
+        extract_module_name_from_meta_ast(type_node)
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp extract_impl_for(list) when is_list(list) do
+    Keyword.get(list, :for, "Any") |> to_string()
+  end
+
+  defp extract_impl_for(_), do: "Any"
+
+  # Extract field names from defstruct/defexception argument.
+  # Accepts both list-of-atoms and keyword-list forms.
+  defp extract_struct_field_names({:list, _, elements}) do
+    Enum.flat_map(elements, fn
+      {:literal, [subtype: :symbol], name} -> [Atom.to_string(name)]
+      {:pair, _, [{:literal, [subtype: :symbol], name}, _]} -> [Atom.to_string(name)]
+      {:tuple, _, [{:literal, [subtype: :symbol], name}, _]} -> [Atom.to_string(name)]
+      _ -> []
+    end)
+  end
+
+  defp extract_struct_field_names(list) when is_list(list) do
+    Enum.flat_map(list, fn
+      {:literal, [subtype: :symbol], name} -> [Atom.to_string(name)]
+      {key, _} when is_atom(key) -> [Atom.to_string(key)]
+      _ -> []
+    end)
+  end
+
+  defp extract_struct_field_names(_), do: []
+
+  # Group consecutive :function_def nodes with the same (name, arity) into one
+  # node with a `clauses:` metadata key. Each clause entry is a map:
+  #   %{params: [...], guard: ast_or_nil, body: [...]}
+  #
+  # Non-consecutive definitions (interleaved with other node types) are NOT
+  # grouped — they remain as separate :function_def nodes. Only direct
+  # neighbours in the same container body are merged.
+  defp group_function_clauses(body) when is_list(body) do
+    body
+    |> Enum.chunk_while(
+      [],
+      fn
+        {:function_def, meta, _body_stmts} = node, acc ->
+          name = Keyword.get(meta, :name)
+          arity = Keyword.get(meta, :arity, 0)
+
+          case acc do
+            [] ->
+              {:cont, [node]}
+
+            [{:function_def, prev_meta, _} | _] ->
+              prev_name = Keyword.get(prev_meta, :name)
+              prev_arity = Keyword.get(prev_meta, :arity, 0)
+
+              if name == prev_name and arity == prev_arity do
+                {:cont, [node | acc]}
+              else
+                # Different function — flush accumulated group, start new
+                {:cont, collapse_clause_group(acc), [node]}
+              end
+
+            _ ->
+              # Previous group was not function_defs — flush and start fresh
+              {:cont, acc, [node]}
+          end
+
+        other_node, [] ->
+          {:cont, [other_node]}
+
+        other_node, acc ->
+          # Non-function_def node encountered while accumulating clauses
+          {:cont, collapse_clause_group(acc), [other_node]}
+      end,
+      fn
+        [] -> {:cont, []}
+        acc -> {:cont, collapse_clause_group(acc), []}
+      end
+    )
+    |> List.flatten()
+  end
+
+  defp group_function_clauses(other), do: other
+
+  # Collapse a reversed list of :function_def nodes sharing (name, arity)
+  # into a single :function_def with `clauses:` metadata.
+  defp collapse_clause_group([single]), do: [single]
+
+  defp collapse_clause_group(reversed_nodes) when is_list(reversed_nodes) do
+    nodes = Enum.reverse(reversed_nodes)
+
+    # Extract clause descriptors from each node
+    clauses =
+      Enum.map(nodes, fn {:function_def, meta, body_stmts} ->
+        %{
+          params: Keyword.get(meta, :params, []),
+          guard: Keyword.get(meta, :guards),
+          body: body_stmts
+        }
+      end)
+
+    # Use the first clause's metadata as the representative definition
+    {:function_def, first_meta, _first_body} = hd(nodes)
+
+    # Build merged metadata: drop per-clause :guards, add :clauses list
+    merged_meta =
+      first_meta
+      |> Keyword.delete(:guards)
+      |> Keyword.put(:clauses, clauses)
+      |> Keyword.put(:multi_clause, true)
+
+    # Body becomes the first clause body (for backward compat) —
+    # callers that understand :clauses can use that instead.
+    [{:function_def, merged_meta, hd(nodes) |> elem(2)}]
+  end
+
+  defp collapse_clause_group(other), do: [other]
 
   # Extract module name from AST
   defp extract_module_name({:__aliases__, _, parts}) do

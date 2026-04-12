@@ -168,16 +168,18 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
           funcs when is_list(funcs) -> funcs
         end
 
-      assert [sum1, sum2] = functions
+      # Multiple clauses of the same function are now grouped into one function_def
+      # with multi_clause: true and a clauses: list in metadata.
+      assert [sum_func] = functions
+      assert {:function_def, meta, _} = sum_func
 
-      # Both clauses have same arity
-      assert {:function_def, meta1, _} = sum1
-      assert {:function_def, meta2, _} = sum2
+      assert Keyword.get(meta, :arity) == 1
+      assert Keyword.get(meta, :multi_clause) == true
 
-      assert Keyword.get(meta1, :arity) == 1
-      assert Keyword.get(meta2, :arity) == 1
-      assert length(Keyword.get(meta1, :params, [])) == 1
-      assert length(Keyword.get(meta2, :params, [])) == 1
+      clauses = Keyword.get(meta, :clauses)
+      assert [clause1, clause2] = clauses
+      assert length(clause1.params) == 1
+      assert length(clause2.params) == 1
     end
   end
 

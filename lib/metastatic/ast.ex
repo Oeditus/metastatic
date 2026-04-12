@@ -177,6 +177,7 @@ defmodule Metastatic.AST do
           | :comprehension
           | :generator
           | :filter
+          | :pipe
 
   @typedoc """
   Node type atoms for M2.2s Structural Layer - organizational constructs.
@@ -191,6 +192,23 @@ defmodule Metastatic.AST do
           | :import
           | :type_annotation
           | :decorator
+
+  @typedoc """
+  Clause entry for grouped multi-clause function definitions.
+
+  Used in the `clauses:` metadata of `:function_def` nodes when multiple
+  function clauses (same name/arity) are grouped together.
+
+  Fields:
+  - `:params` - Parameter list for this clause
+  - `:guard` - Guard expression (optional)
+  - `:body` - List of body statements
+  """
+  @type function_clause :: %{
+          params: [meta_ast()],
+          guard: meta_ast() | nil,
+          body: [meta_ast()]
+        }
 
   @typedoc """
   Node type atoms for M2.3 Native Layer - language-specific escape hatch.
@@ -231,6 +249,19 @@ defmodule Metastatic.AST do
   Visibility modifier.
   """
   @type visibility :: :public | :private | :protected
+
+  @typedoc """
+  Parameter kind for `:param` nodes.
+
+  Classifies the parameter's calling convention:
+  - `:positional` - Regular positional argument (`x` in `def f(x)`)
+  - `:keyword` - Keyword-only argument (Python: after `*`; JS/TS named params)
+  - `:variadic` - Variadic positional argument (`*args` in Python, `...rest` in JS)
+  - `:keyword_variadic` - Variadic keyword argument (`**kwargs` in Python)
+
+  If not set, `:positional` is assumed.
+  """
+  @type param_kind :: :positional | :keyword | :variadic | :keyword_variadic
 
   @typedoc """
   Import type classification for `:import` nodes.
@@ -334,7 +365,8 @@ defmodule Metastatic.AST do
     :yield,
     :comprehension,
     :generator,
-    :filter
+    :filter,
+    :pipe
   ]
 
   @structural_types [
@@ -862,16 +894,29 @@ defmodule Metastatic.AST do
       is_list(body) and Enum.all?(body, &conforms?/1)
   end
 
-  # Param node: {:param, [pattern: pattern, default: default], name}
+  # Param node: {:param, [kind: :positional, pattern: pattern, default: default], name}
+  @param_kinds [:positional, :keyword, :variadic, :keyword_variadic]
+
   defp valid_node?(:param, meta, name) when is_binary(name) do
     pattern = Keyword.get(meta, :pattern)
     default = Keyword.get(meta, :default)
+    kind = Keyword.get(meta, :kind, :positional)
 
-    (is_nil(pattern) or conforms?(pattern)) and
+    kind in @param_kinds and
+      (is_nil(pattern) or conforms?(pattern)) and
       (is_nil(default) or conforms?(default))
   end
 
   defp valid_node?(:param, _meta, _), do: false
+
+  # Pipe node: {:pipe, [operator: :|>], [left, right]}
+  # Preserves pipe operator structure instead of desugaring to function calls.
+  defp valid_node?(:pipe, meta, [left, right]) do
+    operator = Keyword.get(meta, :operator, :|>)
+    is_atom(operator) and conforms?(left) and conforms?(right)
+  end
+
+  defp valid_node?(:pipe, _meta, _), do: false
 
   defp valid_node?(:attribute_access, meta, [receiver]) do
     attribute = Keyword.get(meta, :attribute)
@@ -1504,6 +1549,31 @@ defmodule Metastatic.AST do
   @spec filter(meta_ast(), keyword()) :: meta_ast()
   def filter(condition, meta \\ []) do
     {:filter, meta, [condition]}
+  end
+
+  @doc """
+  Create a pipe node.
+
+  Preserves the pipe operator (`|>`, `->`, etc.) as a first-class node
+  rather than desugaring it into a function call. Useful for languages
+  where the pipe has distinct syntactic or semantic meaning.
+
+  ## Parameters
+
+  - `left` - Left-hand side of the pipe
+  - `right` - Right-hand side (function to pipe into)
+  - `meta` - Optional metadata (default: `[operator: :|>]`)
+
+  ## Examples
+
+      iex> left = {:variable, [], "x"}
+      iex> right = {:function_call, [name: "inspect"], []}
+      iex> Metastatic.AST.pipe(left, right)
+      {:pipe, [operator: :|>], [{:variable, [], "x"}, {:function_call, [name: "inspect"], []}]}
+  """
+  @spec pipe(meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def pipe(left, right, meta \\ [operator: :|>]) do
+    {:pipe, meta, [left, right]}
   end
 
   @doc """

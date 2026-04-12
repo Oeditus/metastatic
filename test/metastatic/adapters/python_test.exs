@@ -786,7 +786,8 @@ defmodule Metastatic.Adapters.PythonTest do
       }
 
       assert {:ok, {:lambda, meta, [body]}, %{}} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :params) == [{:param, [], "x"}]
+      # Params now include kind: :positional
+      assert [{:param, [kind: :positional], "x"}] = Keyword.get(meta, :params)
       assert {:binary_op, [category: :arithmetic, operator: :*], _} = body
     end
 
@@ -803,7 +804,10 @@ defmodule Metastatic.Adapters.PythonTest do
       }
 
       assert {:ok, {:lambda, meta, [body]}, %{}} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :params) == [{:param, [], "x"}, {:param, [], "y"}]
+      # Params now include kind: :positional
+      assert [{:param, [kind: :positional], "x"}, {:param, [kind: :positional], "y"}] =
+               Keyword.get(meta, :params)
+
       assert {:binary_op, [category: :arithmetic, operator: :+], _} = body
     end
   end
@@ -1072,7 +1076,9 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
       # 3-tuple format
       assert {:lambda, meta, [_body]} = meta_ast
-      assert Keyword.get(meta, :params) == [{:param, [], "x"}]
+      # Lambda params now include kind: :positional
+      assert [{:param, param_meta, "x"}] = Keyword.get(meta, :params)
+      assert Keyword.get(param_meta, :kind) == :positional
 
       assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
       assert {:ok, result} = Python.unparse(ast2)
@@ -1203,7 +1209,9 @@ defmodule Metastatic.Adapters.PythonTest do
       assert [method] = body
       assert {:function_def, method_meta, _} = method
       assert Keyword.get(method_meta, :name) == "method"
-      assert [{:param, [], "self"}] = Keyword.get(method_meta, :params)
+      # Params now include kind: :positional
+      assert [{:param, param_meta, "self"}] = Keyword.get(method_meta, :params)
+      assert Keyword.get(param_meta, :kind) == :positional
     end
 
     test "transforms class with inheritance to container with bases" do
@@ -1252,7 +1260,9 @@ defmodule Metastatic.Adapters.PythonTest do
       assert Keyword.get(meta, :visibility) == :public
       assert Keyword.get(meta, :arity) == 1
       assert Keyword.get(meta, :language) == :python
-      assert [{:param, [], "name"}] = Keyword.get(meta, :params)
+      # Params now include kind: :positional
+      assert [{:param, param_meta, "name"}] = Keyword.get(meta, :params)
+      assert Keyword.get(param_meta, :kind) == :positional
       assert [_return_stmt] = body
     end
 
@@ -1265,7 +1275,9 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:function_def, meta, _body} = meta_ast
       assert Keyword.get(meta, :name) == "add"
       assert Keyword.get(meta, :arity) == 2
-      assert [{:param, [], "x"}, {:param, [], "y"}] = Keyword.get(meta, :params)
+      # Params now include kind: :positional
+      assert [{:param, [kind: :positional], "x"}, {:param, [kind: :positional], "y"}] =
+               Keyword.get(meta, :params)
     end
 
     test "transforms function with *args and **kwargs" do
@@ -1279,10 +1291,11 @@ defmodule Metastatic.Adapters.PythonTest do
 
       params = Keyword.get(meta, :params)
 
+      # Params now use kind: metadata instead of splat:
       assert [
-               {:param, [], "a"},
-               {:param, [splat: :args], "*args"},
-               {:param, [splat: :kwargs], "**kwargs"}
+               {:param, [kind: :positional], "a"},
+               {:param, [kind: :variadic], "*args"},
+               {:param, [kind: :keyword_variadic], "**kwargs"}
              ] = params
     end
 

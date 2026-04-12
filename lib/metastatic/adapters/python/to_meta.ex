@@ -845,35 +845,54 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  # Extract function parameters from Python args structure
+  # Extract function parameters from Python args structure.
+  # Produces :param nodes with kind: metadata:
+  #   :positional        — regular positional args (def f(x, y))
+  #   :keyword           — keyword-only args (after bare * in signature)
+  #   :variadic          — *args (variadic positional)
+  #   :keyword_variadic  — **kwargs (variadic keyword)
   defp extract_function_params(%{"args" => args} = args_node) do
     positional =
       Enum.map(args, fn
         %{"arg" => arg_name, "annotation" => annotation} ->
-          default_meta = if annotation, do: [has_type: true], else: []
-          {:param, default_meta, arg_name}
+          meta = [kind: :positional] ++ if(annotation, do: [has_type: true], else: [])
+          {:param, meta, arg_name}
 
         %{"arg" => arg_name} ->
-          {:param, [], arg_name}
+          {:param, [kind: :positional], arg_name}
 
         _ ->
-          {:param, [], "_"}
+          {:param, [kind: :positional], "_"}
       end)
 
-    # Handle *args and **kwargs
+    # Keyword-only params (defined after a bare * in the signature)
+    kwonlyargs =
+      case Map.get(args_node, "kwonlyargs") do
+        nil ->
+          []
+
+        kw_args ->
+          Enum.map(kw_args, fn
+            %{"arg" => arg_name} -> {:param, [kind: :keyword], arg_name}
+            _ -> {:param, [kind: :keyword], "_"}
+          end)
+      end
+
+    # *args (variadic positional)
     vararg =
       case Map.get(args_node, "vararg") do
-        %{"arg" => arg_name} -> [{:param, [splat: :args], "*#{arg_name}"}]
+        %{"arg" => arg_name} -> [{:param, [kind: :variadic], "*#{arg_name}"}]
         _ -> []
       end
 
+    # **kwargs (variadic keyword)
     kwarg =
       case Map.get(args_node, "kwarg") do
-        %{"arg" => arg_name} -> [{:param, [splat: :kwargs], "**#{arg_name}"}]
+        %{"arg" => arg_name} -> [{:param, [kind: :keyword_variadic], "**#{arg_name}"}]
         _ -> []
       end
 
-    {:ok, positional ++ vararg ++ kwarg}
+    {:ok, positional ++ kwonlyargs ++ vararg ++ kwarg}
   end
 
   defp extract_function_params(_), do: {:ok, []}
@@ -945,9 +964,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp extract_lambda_params(%{"args" => args}) when is_list(args) do
     params =
       Enum.map(args, fn
-        %{"arg" => name} -> {:param, [], name}
-        %{"id" => name} -> {:param, [], name}
-        _ -> {:param, [], "_"}
+        %{"arg" => name} -> {:param, [kind: :positional], name}
+        %{"id" => name} -> {:param, [kind: :positional], name}
+        _ -> {:param, [kind: :positional], "_"}
       end)
 
     {:ok, params}

@@ -438,9 +438,17 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     |> Enum.reduce_while({:ok, []}, fn {:clause, line, [pattern], guards, body}, {:ok, acc} ->
       with {:ok, pattern_meta, _} <- transform_pattern(pattern),
            {:ok, body_meta} <- transform_body(body) do
-        # Ignore guards for now
-        _ = guards
-        arm = {:match_arm, [pattern: pattern_meta] ++ line_meta(line), [body_meta]}
+        arm_meta = [pattern: pattern_meta] ++ line_meta(line)
+
+        # Include guards as MetaAST nodes when present
+        arm_meta =
+          case transform_erlang_guards(guards) do
+            {:ok, nil} -> arm_meta
+            {:ok, guard_ast} -> [guards: guard_ast] ++ arm_meta
+            _ -> arm_meta
+          end
+
+        arm = {:match_arm, arm_meta, [body_meta]}
         {:cont, {:ok, [arm | acc]}}
       else
         error -> {:halt, error}
@@ -451,6 +459,43 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
       error -> error
     end
   end
+
+  # Transform Erlang guard sequences to MetaAST.
+  # Erlang guards are lists of lists: outer list is OR, inner list is AND.
+  # [[guard1, guard2], [guard3]] means "(guard1 AND guard2) OR guard3".
+  # For simplicity, transform the first guard clause only.
+  defp transform_erlang_guards([]), do: {:ok, nil}
+
+  defp transform_erlang_guards([[single] | _rest]) do
+    case transform(single) do
+      {:ok, guard_ast, _} -> {:ok, guard_ast}
+      _error -> {:ok, nil}
+    end
+  end
+
+  defp transform_erlang_guards([[first | rest_inner] | _rest_outer]) do
+    # Multiple guards in conjunction: fold with AND
+    with {:ok, first_meta, _} <- transform(first) do
+      result =
+        Enum.reduce_while(rest_inner, {:ok, first_meta}, fn guard, {:ok, acc} ->
+          case transform(guard) do
+            {:ok, guard_ast, _} ->
+              combined = {:binary_op, [category: :boolean, operator: :and], [acc, guard_ast]}
+              {:cont, {:ok, combined}}
+
+            _ ->
+              {:halt, {:ok, acc}}
+          end
+        end)
+
+      case result do
+        {:ok, guard_ast} -> {:ok, guard_ast}
+        _ -> {:ok, nil}
+      end
+    end
+  end
+
+  defp transform_erlang_guards(_), do: {:ok, nil}
 
   defp transform_pattern({:var, _, :_}) do
     # Wildcard pattern
