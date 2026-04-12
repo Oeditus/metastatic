@@ -289,24 +289,19 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Augmented assignment: x += 1, x *= 2, etc.
-  # Desugar to: x = x + 1
+  # Now uses proper :augmented_assignment M2 type
   def transform(
         %{"_type" => "AugAssign", "target" => target, "op" => op, "value" => value} = node
       ) do
-    with {:ok, target_meta, target_metadata} <- transform(target),
+    with {:ok, target_meta, _} <- transform(target),
          {:ok, {category, operator}} <- transform_binop(op),
          {:ok, value_meta, _} <- transform(value) do
-      # Desugar: x += 1 becomes x = x + 1
-      desugared_value =
-        {:binary_op, [category: category, operator: operator], [target_meta, value_meta]}
-
-      metadata = %{
-        target_metadata: target_metadata,
-        value_metadata: %{},
-        augmented_op: operator
-      }
-
-      {:ok, add_location({:assignment, [], [target_meta, desugared_value]}, node), metadata}
+      {:ok,
+       add_location(
+         {:augmented_assignment, [category: category, operator: operator],
+          [target_meta, value_meta]},
+         node
+       ), %{}}
     end
   end
 
@@ -408,9 +403,16 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  # Complex list comprehension with filters → language_specific
-  def transform(%{"_type" => "ListComp"} = comp) do
-    {:ok, {:language_specific, [language: :python, hint: :list_comprehension], comp}, %{}}
+  # List comprehension with filters → comprehension
+  def transform(%{"_type" => "ListComp", "elt" => elt, "generators" => generators} = node) do
+    with {:ok, elt_meta, _} <- transform(elt),
+         {:ok, gens_and_filters} <- transform_comprehension_generators(generators) do
+      {:ok,
+       add_location(
+         {:comprehension, [comp_type: :list], [elt_meta | gens_and_filters]},
+         node
+       ), %{}}
+    end
   end
 
   # Exception Handling - M2.2 Extended Layer
@@ -435,9 +437,23 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Native Layer - M2.3: Python-Specific Constructs
 
-  # Function definitions with decorators - keep as language_specific
-  def transform(%{"_type" => "FunctionDef", "decorator_list" => [_ | _] = _decorators} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :function_with_decorators], node}, %{}}
+  # Function definitions with decorators - transform function body, keep decorators in meta
+  def transform(%{"_type" => "FunctionDef", "decorator_list" => [_ | _] = decorators} = node) do
+    if contains_yield?(Map.get(node, "body", [])) do
+      {:ok, {:language_specific, [language: :python, hint: :function_with_generator], node}, %{}}
+    else
+      with {:ok, decorator_names} <- extract_decorator_names(decorators) do
+        node_without_decorators = Map.put(node, "decorator_list", [])
+
+        case transform_function_def(node_without_decorators) do
+          {:ok, {:function_def, meta, body}, metadata} ->
+            {:ok, {:function_def, [decorators: decorator_names] ++ meta, body}, metadata}
+
+          other ->
+            other
+        end
+      end
+    end
   end
 
   # Generator functions (FunctionDef containing Yield/YieldFrom) - keep as language_specific
@@ -454,9 +470,19 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:ok, {:language_specific, [language: :python, hint: :async_function], node}, %{}}
   end
 
-  # Class definitions with decorators - keep as language_specific
-  def transform(%{"_type" => "ClassDef", "decorator_list" => [_ | _]} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :class_with_decorators], node}, %{}}
+  # Class definitions with decorators - transform class body, keep decorators in meta
+  def transform(%{"_type" => "ClassDef", "decorator_list" => [_ | _] = decorators} = node) do
+    with {:ok, decorator_names} <- extract_decorator_names(decorators) do
+      node_without_decorators = Map.put(node, "decorator_list", [])
+
+      case transform(node_without_decorators) do
+        {:ok, {:container, meta, body}, metadata} ->
+          {:ok, {:container, [decorators: decorator_names] ++ meta, body}, metadata}
+
+        other ->
+          other
+      end
+    end
   end
 
   # Class definitions - transform to M2.2s :container
@@ -559,29 +585,62 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:ok, {:import, meta, []}, %{}}
   end
 
-  # Dict comprehensions
-  def transform(%{"_type" => "DictComp"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :dict_comprehension], node}, %{}}
+  # Dict comprehensions → comprehension with comp_type: :dict
+  def transform(
+        %{"_type" => "DictComp", "key" => key, "value" => value, "generators" => generators} =
+          node
+      ) do
+    with {:ok, key_meta, _} <- transform(key),
+         {:ok, value_meta, _} <- transform(value),
+         {:ok, gens_and_filters} <- transform_comprehension_generators(generators) do
+      body = {:pair, [], [key_meta, value_meta]}
+
+      {:ok,
+       add_location(
+         {:comprehension, [comp_type: :dict], [body | gens_and_filters]},
+         node
+       ), %{}}
+    end
   end
 
-  # Set comprehensions
-  def transform(%{"_type" => "SetComp"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :set_comprehension], node}, %{}}
+  # Set comprehensions → comprehension with comp_type: :set
+  def transform(%{"_type" => "SetComp", "elt" => elt, "generators" => generators} = node) do
+    with {:ok, elt_meta, _} <- transform(elt),
+         {:ok, gens_and_filters} <- transform_comprehension_generators(generators) do
+      {:ok,
+       add_location(
+         {:comprehension, [comp_type: :set], [elt_meta | gens_and_filters]},
+         node
+       ), %{}}
+    end
   end
 
-  # Generator expressions
-  def transform(%{"_type" => "GeneratorExp"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :generator_expression], node}, %{}}
+  # Generator expressions → comprehension with comp_type: :generator
+  def transform(%{"_type" => "GeneratorExp", "elt" => elt, "generators" => generators} = node) do
+    with {:ok, elt_meta, _} <- transform(elt),
+         {:ok, gens_and_filters} <- transform_comprehension_generators(generators) do
+      {:ok,
+       add_location(
+         {:comprehension, [comp_type: :generator], [elt_meta | gens_and_filters]},
+         node
+       ), %{}}
+    end
   end
 
-  # Match statements (Python 3.10+)
-  def transform(%{"_type" => "Match"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :pattern_match], node}, %{}}
+  # Match statements (Python 3.10+) → pattern_match
+  def transform(%{"_type" => "Match", "subject" => subject, "cases" => cases} = node) do
+    with {:ok, subject_meta, _} <- transform(subject),
+         {:ok, arms} <- transform_match_cases(cases) do
+      {:ok, add_location({:pattern_match, [], [subject_meta | arms]}, node), %{}}
+    end
   end
 
-  # Walrus operator (Python 3.8+)
-  def transform(%{"_type" => "NamedExpr"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :named_expr], node}, %{}}
+  # Walrus operator (Python 3.8+) → inline_match
+  def transform(%{"_type" => "NamedExpr", "target" => target, "value" => value} = node) do
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, value_meta, _} <- transform(value) do
+      {:ok, add_location({:inline_match, [], [target_meta, value_meta]}, node), %{}}
+    end
   end
 
   # Global/nonlocal declarations
@@ -892,6 +951,93 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Extract variable name from MetaAST node
   defp extract_variable_name({:variable, _, name}), do: name
   defp extract_variable_name(_), do: "_x"
+
+  # Transform comprehension generators (shared by ListComp, DictComp, SetComp, GeneratorExp)
+  defp transform_comprehension_generators(generators) when is_list(generators) do
+    generators
+    |> Enum.reduce_while({:ok, []}, fn gen, {:ok, acc} ->
+      case transform_comprehension_generator(gen) do
+        {:ok, items} -> {:cont, {:ok, acc ++ items}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp transform_comprehension_generator(%{"target" => target, "iter" => iter, "ifs" => ifs}) do
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, iter_meta, _} <- transform(iter) do
+      generator = {:generator, [], [target_meta, iter_meta]}
+
+      filters =
+        Enum.map(ifs, fn if_expr ->
+          case transform(if_expr) do
+            {:ok, filter_meta, _} -> {:filter, [], [filter_meta]}
+            _ -> nil
+          end
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      {:ok, [generator | filters]}
+    end
+  end
+
+  defp transform_comprehension_generator(_), do: {:ok, []}
+
+  # Transform match statement cases (Python 3.10+)
+  defp transform_match_cases(cases) when is_list(cases) do
+    cases
+    |> Enum.reduce_while({:ok, []}, fn match_case, {:ok, acc} ->
+      case transform_match_case(match_case) do
+        {:ok, arm} -> {:cont, {:ok, [arm | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, arms} -> {:ok, Enum.reverse(arms)}
+      error -> error
+    end
+  end
+
+  defp transform_match_case(%{"pattern" => pattern, "body" => body} = case_node) do
+    guard = Map.get(case_node, "guard")
+
+    with {:ok, body_stmts} <- transform_list(body) do
+      body_ast =
+        case body_stmts do
+          [single] -> single
+          multiple -> {:block, [], multiple}
+        end
+
+      # Pattern is kept as language_specific since Python match patterns are complex
+      pattern_ast = {:language_specific, [language: :python, hint: :match_pattern], pattern}
+
+      arm_meta =
+        [pattern: pattern_ast] ++
+          if(guard, do: [guard: {:language_specific, [language: :python], guard}], else: [])
+
+      {:ok, {:match_arm, arm_meta, [body_ast]}}
+    end
+  end
+
+  # Extract decorator names from decorator list
+  defp extract_decorator_names(decorators) when is_list(decorators) do
+    names =
+      Enum.map(decorators, fn
+        %{"_type" => "Name", "id" => name} -> name
+        %{"_type" => "Attribute"} = attr -> format_attribute_name(attr)
+        %{"_type" => "Call", "func" => func} -> extract_decorator_call_name(func)
+        _ -> "unknown"
+      end)
+
+    {:ok, names}
+  end
+
+  defp extract_decorator_call_name(%{"_type" => "Name", "id" => name}), do: name
+
+  defp extract_decorator_call_name(%{"_type" => "Attribute"} = attr),
+    do: format_attribute_name(attr)
+
+  defp extract_decorator_call_name(_), do: "unknown"
 
   # Add location information from Python AST node to MetaAST
   defp add_location(ast, %{"lineno" => line} = node) do

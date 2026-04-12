@@ -175,7 +175,7 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
-  # M2.2 Extended Layer - List Comprehensions
+  # M2.2 Extended Layer - List Comprehensions -> comprehension
 
   def transform(
         %{
@@ -186,11 +186,9 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
       ) do
     with {:ok, expr_meta, _} <- transform(expr),
          {:ok, quals_meta} <- transform_qualifiers(quals) do
-      # Represent as language_specific with custom metadata
       {:ok,
        add_location(
-         {:language_specific, [language: :haskell, hint: :list_comp],
-          %{"expr" => expr_meta, "quals" => quals_meta}},
+         {:comprehension, [comp_type: :list], [expr_meta | quals_meta]},
          node
        ), %{}}
     end
@@ -205,26 +203,30 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
-  # M2.3 Native Layer - Module
+  # M2.2s Structural Layer - Module -> container
 
   def transform(%{"type" => "module", "declarations" => decls} = node) do
+    module_name = Map.get(node, "name", "Main")
+
     with {:ok, decls_meta} <- transform_declarations(decls) do
       {:ok,
        add_location(
-         {:language_specific, [language: :haskell, hint: :module],
-          %{"declarations" => decls_meta}},
+         {:container, [container_type: :module, name: module_name, language: :haskell],
+          decls_meta},
          node
        ), %{}}
     end
   end
 
-  # M2.3 Native Layer - Type Signature
+  # M2.2s Structural Layer - Type Signature -> type_annotation
 
   def transform(%{"type" => "type_sig", "names" => names, "signature" => sig} = node) do
+    name = List.first(names) || "unknown"
+    type_expr = {:language_specific, [language: :haskell, hint: :type_expr], sig}
+
     {:ok,
      add_location(
-       {:language_specific, [language: :haskell, hint: :type_signature],
-        %{"names" => names, "signature" => sig}},
+       {:type_annotation, [annotation_type: :spec, name: name, names: names], [type_expr]},
        node
      ), %{}}
   end
@@ -280,14 +282,20 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
      ), %{}}
   end
 
-  # M2.3 Native Layer - Function Binding
+  # M2.2s Structural Layer - Function Binding -> function_def
 
   def transform(%{"type" => "fun_bind", "matches" => matches} = node) do
-    # Try to extract function name and transform to a more useful representation
     case extract_function_from_matches(matches) do
-      {:ok, name, body} ->
-        {:ok, add_location({:assignment, [], [{:variable, [scope: :local], name}, body]}, node),
-         %{construct: :function_binding}}
+      {:ok, name, params, body} ->
+        meta = [
+          name: name,
+          params: params,
+          visibility: :public,
+          arity: length(params),
+          language: :haskell
+        ]
+
+        {:ok, add_location({:function_def, meta, [body]}, node), %{construct: :function_binding}}
 
       :error ->
         {:ok,
@@ -513,17 +521,11 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   end
 
   defp extract_function_from_matches([match | _]) do
-    # Extract function name and body from first match
-    # Simplified: only handles simple cases
     case match do
       %{"name" => name, "patterns" => patterns, "rhs" => rhs} ->
         with {:ok, params} <- extract_match_params(patterns),
              {:ok, body_meta, _} <- transform(rhs) do
-          # If it has parameters, represent as lambda
-          case params do
-            [] -> {:ok, name, body_meta}
-            [_ | _] -> {:ok, name, {:lambda, [params: params, captures: []], [body_meta]}}
-          end
+          {:ok, name, params, body_meta}
         else
           _ -> :error
         end

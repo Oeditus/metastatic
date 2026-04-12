@@ -816,20 +816,40 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     {:ok, {:language_specific, [language: :ruby, hint: :alias], ast}, metadata}
   end
 
-  # String interpolation (dstr)
+  # String interpolation (dstr) - M2.1 Core Layer
   def transform(%{"type" => "dstr", "children" => parts} = ast) do
-    with {:ok, parts_meta} <- transform_string_parts(parts) do
-      metadata = %{parts: parts_meta}
-      {:ok, {:language_specific, [language: :ruby, hint: :string_interpolation], ast}, metadata}
+    transformed_parts =
+      Enum.map(parts, fn
+        %{"type" => "str", "children" => [str]} ->
+          {:ok, {:literal, [subtype: :string], str}, %{}}
+
+        %{"type" => "begin", "children" => [expr]} ->
+          transform(expr)
+
+        other ->
+          transform(other)
+      end)
+
+    if Enum.all?(transformed_parts, &match?({:ok, _, _}, &1)) do
+      meta_parts = Enum.map(transformed_parts, fn {:ok, m, _} -> m end)
+      {:ok, add_location({:string_interpolation, [], meta_parts}, ast), %{}}
+    else
+      first_error = Enum.find(transformed_parts, &match?({:error, _}, &1))
+      first_error || {:error, "Failed to transform string interpolation parts"}
     end
   end
 
-  # Regular expression
+  # Regular expression - M2.1 Core Layer (literal :regex)
   def transform(%{"type" => "regexp", "children" => [pattern | options]} = ast) do
-    with {:ok, pattern_meta, _} <- transform(pattern) do
-      metadata = %{pattern: pattern_meta, options: options}
-      {:ok, {:language_specific, [language: :ruby, hint: :regexp], ast}, metadata}
-    end
+    pattern_str =
+      case pattern do
+        %{"type" => "str", "children" => [str]} -> str
+        %{"type" => "dstr", "children" => _} -> inspect(pattern)
+        _ -> inspect(pattern)
+      end
+
+    flags = extract_regex_flags(options)
+    {:ok, add_location({:literal, [subtype: :regex, flags: flags], pattern_str}, ast), %{}}
   end
 
   # Singleton class (class << self)
@@ -868,19 +888,19 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
-  # Break statement - control flow
+  # Break statement - M2.1 Core Layer (early_return)
   def transform(%{"type" => "break", "children" => children} = ast) do
     with {:ok, values_meta} <- transform_list(children) do
       value = if values_meta == [], do: nil, else: List.first(values_meta)
-      {:ok, {:language_specific, [language: :ruby, hint: :break], ast}, %{value: value}}
+      {:ok, add_location({:early_return, [kind: :break], [value]}, ast), %{}}
     end
   end
 
-  # Next statement - control flow (like continue)
+  # Next statement - M2.1 Core Layer (early_return, like continue)
   def transform(%{"type" => "next", "children" => children} = ast) do
     with {:ok, values_meta} <- transform_list(children) do
       value = if values_meta == [], do: nil, else: List.first(values_meta)
-      {:ok, {:language_specific, [language: :ruby, hint: :next], ast}, %{value: value}}
+      {:ok, add_location({:early_return, [kind: :continue], [value]}, ast), %{}}
     end
   end
 
@@ -894,25 +914,25 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     {:ok, {:language_specific, [language: :ruby, hint: :retry], ast}, %{}}
   end
 
-  # Range literals - inclusive (1..10)
+  # Range literals - inclusive (1..10) - M2.1 Core Layer
   def transform(%{"type" => "irange", "children" => [start_val, end_val]} = ast) do
     with {:ok, start_meta, _} <- transform(start_val),
          {:ok, end_meta, _} <- transform(end_val) do
       {:ok,
        add_location(
-         {:literal, [subtype: :range, inclusive: true], {start_meta, end_meta}},
+         {:range, [inclusive: true], [start_meta, end_meta]},
          ast
        ), %{range_type: :inclusive}}
     end
   end
 
-  # Range literals - exclusive (1...10)
+  # Range literals - exclusive (1...10) - M2.1 Core Layer
   def transform(%{"type" => "erange", "children" => [start_val, end_val]} = ast) do
     with {:ok, start_meta, _} <- transform(start_val),
          {:ok, end_meta, _} <- transform(end_val) do
       {:ok,
        add_location(
-         {:literal, [subtype: :range, inclusive: false], {start_meta, end_meta}},
+         {:range, [inclusive: false], [start_meta, end_meta]},
          ast
        ), %{range_type: :exclusive}}
     end
@@ -1240,7 +1260,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
          {:ok, params} <- extract_lambda_params(args_node),
          {:ok, body_meta, _} <- transform(body) do
       lambda = {:lambda, [params: params, captures: []], [body_meta]}
-      range = {:literal, [subtype: :range, inclusive: true], {start_meta, end_meta}}
+      range = {:range, [inclusive: true], [start_meta, end_meta]}
 
       {:ok, add_location({:collection_op, [op_type: :each], [lambda, range]}, block_ast),
        %{original: :upto}}
@@ -1505,6 +1525,16 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   defp extract_symbol_name(%{"type" => "dsym", "children" => parts}), do: {:dynamic, parts}
   defp extract_symbol_name(_), do: "unknown"
+
+  # Extract regex flags from regopt node
+  defp extract_regex_flags([%{"type" => "regopt", "children" => flags}]) when is_list(flags) do
+    Enum.map(flags, fn
+      flag when is_atom(flag) -> Atom.to_string(flag)
+      flag when is_binary(flag) -> flag
+    end)
+  end
+
+  defp extract_regex_flags(_), do: []
 
   defp transform_string_parts(parts) when is_list(parts) do
     parts

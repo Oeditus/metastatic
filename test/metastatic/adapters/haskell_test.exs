@@ -381,12 +381,11 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:language_specific, [language: :haskell, hint: :list_comp], data}, %{}} =
-               ToMeta.transform(ast)
-
-      assert is_map(data)
-      assert Map.has_key?(data, "expr")
-      assert Map.has_key?(data, "quals")
+      # Now uses proper :comprehension M2 type
+      assert {:ok, {:comprehension, meta, [body | gens]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :comp_type) == :list
+      assert {:variable, _, "x"} = body
+      assert [_] = gens
     end
   end
 
@@ -543,11 +542,12 @@ defmodule Metastatic.Adapters.HaskellTest do
         }
       }
 
-      assert {:ok, {:language_specific, [language: :haskell, hint: :type_signature], data}, %{}} =
-               ToMeta.transform(ast)
-
-      assert data["names"] == ["factorial"]
-      assert data["signature"]["type"] == "type_fun"
+      # Now uses proper :type_annotation M2 type
+      assert {:ok, {:type_annotation, meta, [type_expr]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :annotation_type) == :spec
+      assert Keyword.get(meta, :name) == "factorial"
+      assert Keyword.get(meta, :names) == ["factorial"]
+      assert {:language_specific, [language: :haskell, hint: :type_expr], _} = type_expr
     end
 
     test "transforms data type declaration" do
@@ -645,13 +645,15 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok,
-              {:assignment, [],
-               [
-                 {:variable, [scope: :local], "factorial"},
-                 {:lambda, [params: [{:param, [], "n"}], captures: []],
-                  [{:variable, [scope: :local], "n"}]}
-               ]}, %{construct: :function_binding}} = ToMeta.transform(ast)
+      # Now uses proper :function_def M2 type
+      assert {:ok, {:function_def, meta, [body]}, %{construct: :function_binding}} =
+               ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :name) == "factorial"
+      assert Keyword.get(meta, :params) == [{:param, [], "n"}]
+      assert Keyword.get(meta, :visibility) == :public
+      assert Keyword.get(meta, :arity) == 1
+      assert {:variable, [scope: :local], "n"} = body
     end
   end
 
@@ -734,10 +736,12 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:language_specific, [language: :haskell, hint: :module], data}, %{}} =
-               ToMeta.transform(ast)
-
-      assert [_, _] = data["declarations"]
+      # Now uses proper :container M2 type
+      assert {:ok, {:container, meta, decls}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :container_type) == :module
+      assert Keyword.get(meta, :name) == "Main"
+      assert Keyword.get(meta, :language) == :haskell
+      assert [_, _] = decls
     end
   end
 end

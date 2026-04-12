@@ -1183,11 +1183,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      # 3-tuple format: {:language_specific, [language: :ruby, hint: :string_interpolation], original_ast}
-      assert {:ok, {:language_specific, [language: :ruby, hint: :string_interpolation], ^ast},
-              metadata} = ToMeta.transform(ast)
-
-      assert [_, _] = metadata.parts
+      # Now uses proper :string_interpolation M2 type
+      assert {:ok, {:string_interpolation, _, parts}, %{}} = ToMeta.transform(ast)
+      assert [_, _] = parts
+      assert {:literal, [subtype: :string], "Hello, "} = List.first(parts)
+      assert {:variable, _, "name"} = List.last(parts)
     end
 
     test "transforms regular expression" do
@@ -1199,11 +1199,10 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      # 3-tuple format: {:language_specific, [language: :ruby, hint: :regexp], original_ast}
-      assert {:ok, {:language_specific, [language: :ruby, hint: :regexp], ^ast}, metadata} =
-               ToMeta.transform(ast)
-
-      assert metadata.pattern != nil
+      # Now uses proper :literal with subtype: :regex
+      assert {:ok, {:literal, meta, "[a-z]+"}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :subtype) == :regex
+      assert Keyword.get(meta, :flags) == ["i"]
     end
 
     test "transforms singleton class" do
@@ -1443,8 +1442,8 @@ defmodule Metastatic.Adapters.RubyTest do
     test "transforms break without value" do
       ast = %{"type" => "break", "children" => []}
 
-      assert {:ok, {:language_specific, [language: :ruby, hint: :break], ^ast}, %{value: nil}} =
-               ToMeta.transform(ast)
+      assert {:ok, {:early_return, meta, [nil]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :kind) == :break
     end
 
     test "transforms break with value" do
@@ -1453,17 +1452,16 @@ defmodule Metastatic.Adapters.RubyTest do
         "children" => [%{"type" => "int", "children" => [42]}]
       }
 
-      assert {:ok, {:language_specific, [language: :ruby, hint: :break], ^ast}, metadata} =
-               ToMeta.transform(ast)
-
-      assert {:literal, [subtype: :integer], 42} = metadata.value
+      assert {:ok, {:early_return, meta, [value]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :kind) == :break
+      assert {:literal, [subtype: :integer], 42} = value
     end
 
     test "transforms next without value" do
       ast = %{"type" => "next", "children" => []}
 
-      assert {:ok, {:language_specific, [language: :ruby, hint: :next], ^ast}, %{value: nil}} =
-               ToMeta.transform(ast)
+      assert {:ok, {:early_return, meta, [nil]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :kind) == :continue
     end
 
     test "transforms next with value" do
@@ -1472,10 +1470,9 @@ defmodule Metastatic.Adapters.RubyTest do
         "children" => [%{"type" => "str", "children" => ["skip"]}]
       }
 
-      assert {:ok, {:language_specific, [language: :ruby, hint: :next], ^ast}, metadata} =
-               ToMeta.transform(ast)
-
-      assert {:literal, [subtype: :string], "skip"} = metadata.value
+      assert {:ok, {:early_return, meta, [value]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :kind) == :continue
+      assert {:literal, [subtype: :string], "skip"} = value
     end
 
     test "transforms redo" do
@@ -1503,10 +1500,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:literal, meta, {start_val, end_val}}, %{range_type: :inclusive}} =
+      assert {:ok, {:range, meta, [start_val, end_val]}, %{range_type: :inclusive}} =
                ToMeta.transform(ast)
 
-      assert Keyword.get(meta, :subtype) == :range
       assert Keyword.get(meta, :inclusive) == true
       assert {:literal, [subtype: :integer], 1} = start_val
       assert {:literal, [subtype: :integer], 10} = end_val
@@ -1521,10 +1517,9 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:literal, meta, {start_val, end_val}}, %{range_type: :exclusive}} =
+      assert {:ok, {:range, meta, [start_val, end_val]}, %{range_type: :exclusive}} =
                ToMeta.transform(ast)
 
-      assert Keyword.get(meta, :subtype) == :range
       assert Keyword.get(meta, :inclusive) == false
       assert {:literal, [subtype: :integer], 1} = start_val
       assert {:literal, [subtype: :integer], 10} = end_val
@@ -1539,8 +1534,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:literal, meta, {start_val, end_val}}, _} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :subtype) == :range
+      assert {:ok, {:range, meta, [start_val, end_val]}, _} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :inclusive) == true
       assert {:variable, _, "start"} = start_val
       assert {:variable, _, "finish"} = end_val
     end
@@ -1710,15 +1705,13 @@ defmodule Metastatic.Adapters.RubyTest do
 
     test "parses and transforms range literal" do
       {:ok, ast} = Ruby.parse("1..10")
-      assert {:ok, {:literal, meta, _}, _} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :subtype) == :range
+      assert {:ok, {:range, meta, [_, _]}, _} = ToMeta.transform(ast)
       assert Keyword.get(meta, :inclusive) == true
     end
 
     test "parses and transforms exclusive range" do
       {:ok, ast} = Ruby.parse("1...10")
-      assert {:ok, {:literal, meta, _}, _} = ToMeta.transform(ast)
-      assert Keyword.get(meta, :subtype) == :range
+      assert {:ok, {:range, meta, [_, _]}, _} = ToMeta.transform(ast)
       assert Keyword.get(meta, :inclusive) == false
     end
 

@@ -19,22 +19,36 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   """
   @spec transform(term(), map()) :: {:ok, term()} | {:error, String.t()}
 
-  # Literal ranges (must be before general literal handler due to tuple value)
-
-  def transform({:literal, meta, {start_val, end_val}}, _metadata) when is_list(meta) do
-    subtype = Keyword.get(meta, :subtype)
+  # Range node (M2.1 Core Layer)
+  def transform({:range, meta, [start_val, end_val]}, _metadata) when is_list(meta) do
     inclusive = Keyword.get(meta, :inclusive, true)
 
-    case subtype do
-      :range ->
-        with {:ok, start_ast} <- transform(start_val, %{}),
-             {:ok, end_ast} <- transform(end_val, %{}) do
-          type = if inclusive, do: "irange", else: "erange"
-          {:ok, %{"type" => type, "children" => [start_ast, end_ast]}}
-        end
+    with {:ok, start_ast} <- transform(start_val, %{}),
+         {:ok, end_ast} <- transform(end_val, %{}) do
+      type = if inclusive, do: "irange", else: "erange"
+      {:ok, %{"type" => type, "children" => [start_ast, end_ast]}}
+    end
+  end
 
-      _ ->
-        {:error, "Unknown tuple literal subtype: #{subtype}"}
+  # String interpolation (M2.1 Core Layer)
+  def transform({:string_interpolation, _meta, parts}, _metadata) do
+    children =
+      Enum.map(parts, fn
+        {:literal, [subtype: :string], str} ->
+          {:ok, %{"type" => "str", "children" => [str]}}
+
+        expr ->
+          case transform(expr, %{}) do
+            {:ok, ast} -> {:ok, %{"type" => "begin", "children" => [ast]}}
+            error -> error
+          end
+      end)
+
+    if Enum.all?(children, &match?({:ok, _}, &1)) do
+      parts_ast = Enum.map(children, fn {:ok, ast} -> ast end)
+      {:ok, %{"type" => "dstr", "children" => parts_ast}}
+    else
+      {:error, "Failed to transform string interpolation parts"}
     end
   end
 
@@ -290,11 +304,20 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   # M2.1 Core Layer - Early return (New 3-tuple format)
 
   def transform({:early_return, meta, [value]}, _metadata) when is_list(meta) do
+    kind = Keyword.get(meta, :kind, :return)
+
     with {:ok, value_ast} <- transform_or_nil(value) do
+      type =
+        case kind do
+          :break -> "break"
+          :continue -> "next"
+          _ -> "return"
+        end
+
       if is_nil(value_ast) do
-        {:ok, %{"type" => "return", "children" => []}}
+        {:ok, %{"type" => type, "children" => []}}
       else
-        {:ok, %{"type" => "return", "children" => [value_ast]}}
+        {:ok, %{"type" => type, "children" => [value_ast]}}
       end
     end
   end
