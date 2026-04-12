@@ -7,25 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.13.0] - 2026-04-12
+## [0.15.1] - 2026-04-12
+
+Major adapter overhaul: all five language adapters now emit proper M2 types instead of falling back
+to `:language_specific`, alongside new M2 node types, Erlang adapter expansion, and comprehensive
+documentation with mermaid diagrams. 1919 tests passing (263 doctests + 1656 tests), zero regressions.
 
 ### Added
-- **New M2 node types:** `:throw` (M2.1 Core), `:yield` (M2.2 Extended), `:decorator` (M2.2s Structural)
+- **New M2 node types:**
+  - `:throw` (M2.1 Core) -- raise/throw across languages
+  - `:yield` (M2.2 Extended) -- generators (`yield`/`yield_from`)
+  - `:decorator` (M2.2s Structural) -- decorators/annotations
 - **`:bitwise` operator category** for `band`, `bor`, `bxor`, `bsl`, `bsr`, `<<`, `>>`
 - **Expanded `container_type`:** `:interface`, `:trait`, `:protocol`, `:enum`, `:struct`
 - **New literal subtypes:** `:char`, `:bytes`
 - **New loop types:** `:do_while`, `:infinite`
 - **Expanded `import_type`:** `:from`, `:module`, `:export`
 - Builder helpers: `throw_node/3`, `yield_node/3`, `decorator/3`
-- Erlang adapter: module forms, function definitions, fun expressions, try/catch, receive, maps
-- Python `with` statement now transforms to `:block` with `[original_form: :with]` and inline_match bindings
+- Erlang adapter: `-module(Name)` -> `:container`; function defs -> `:function_def` with params;
+  `fun` expressions -> `:lambda`; `fun Name/Arity` -> `:lambda` with `capture_form`;
+  `try`/`catch`/`after` -> `:exception_handling`; `#{...}` -> `:map` with `:pair` children;
+  `-export([...])` -> `:import` with export type; `receive` remains `:language_specific`
+- Python `with` statement -> `:block` with `[original_form: :with]` and inline_match bindings
+- Mermaid diagrams throughout: `GETTING_STARTED.md`, `RESEARCH.md`, `METAST_SPEC.md`,
+  `SUPPLEMENTAL_MODULES.md`, module docstrings (`ast.ex`, `adapter.ex`, `validator.ex`),
+  and mix task docs
 
 ### Changed
-- **Ruby adapter:** `dstr` -> `:string_interpolation`, `irange`/`erange` -> `:range`, `break`/`next` -> `:early_return`, `regexp` -> `:literal` with `subtype: :regex`
-- **Python adapter:** All comprehensions (ListComp/DictComp/SetComp/GeneratorExp) -> `:comprehension`, Match -> `:pattern_match`, AugAssign -> `:augmented_assignment`, NamedExpr -> `:inline_match`, Raise -> `:throw`, Yield/YieldFrom -> `:yield`, AsyncFunctionDef -> `:function_def` with `[async: true]`, decorated functions/classes -> proper M2 nodes with `[decorators: [...]]`
-- **Haskell adapter:** modules -> `:container`, function bindings -> `:function_def`, type signatures -> `:type_annotation`, list comprehensions -> `:comprehension`, class declarations -> `:container` with `container_type: :interface`
-- **Erlang adapter:** bitwise operators now use `category: :bitwise` instead of `:arithmetic`, char literals use `subtype: :char`
-- **Ruby adapter:** `<<`/`>>` operators now use `category: :bitwise` instead of `:arithmetic`
+- **Ruby adapter:** `dstr` -> `:string_interpolation`; `irange`/`erange` -> `:range` with
+  `[inclusive: true/false]`; `break`/`next` -> `:early_return` with `[kind: :break/:continue]`;
+  `regexp` -> `:literal` with `[subtype: :regex, flags: [...]]`; `<<`/`>>` -> `category: :bitwise`;
+  round-trip (`from_meta`) support added for all new types
+- **Python adapter:** All comprehensions (`ListComp`/`DictComp`/`SetComp`/`GeneratorExp`) ->
+  `:comprehension` with proper `:generator`/`:filter` children; `match` (3.10+) ->
+  `:pattern_match` with `:match_arm` children; `AugAssign` -> `:augmented_assignment`;
+  `NamedExpr` (walrus `:=`) -> `:inline_match`; `Raise` -> `:throw`; `Yield`/`YieldFrom` ->
+  `:yield`; `AsyncFunctionDef` -> `:function_def` with `[async: true]`; decorated
+  functions/classes -> proper M2 nodes with `[decorators: [...]]`
+- **Haskell adapter:** modules -> `:container` with `container_type: :module`; function bindings ->
+  `:function_def`; type signatures -> `:type_annotation` with `[annotation_type: :spec]`; list
+  comprehensions -> `:comprehension` with `[comp_type: :list]`; `class_decl` -> `:container` with
+  `container_type: :interface`
+- **Erlang adapter:** bitwise ops -> `category: :bitwise`; char literals -> `subtype: :char`
 - 1919 tests passing (263 doctests + 1656 tests), zero regressions
 
 ## [0.12.1] - 2026-03-24
