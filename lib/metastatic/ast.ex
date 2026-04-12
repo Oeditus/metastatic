@@ -155,6 +155,7 @@ defmodule Metastatic.AST do
           | :function_call
           | :conditional
           | :early_return
+          | :throw
           | :block
           | :assignment
           | :inline_match
@@ -172,6 +173,7 @@ defmodule Metastatic.AST do
           | :match_arm
           | :exception_handling
           | :async_operation
+          | :yield
           | :comprehension
           | :generator
           | :filter
@@ -188,6 +190,7 @@ defmodule Metastatic.AST do
           | :property
           | :import
           | :type_annotation
+          | :decorator
 
   @typedoc """
   Node type atoms for M2.3 Native Layer - language-specific escape hatch.
@@ -210,16 +213,19 @@ defmodule Metastatic.AST do
           | :null
           | :symbol
           | :regex
+          | :char
+          | :bytes
 
   @typedoc """
   Category for binary/unary operators.
   """
-  @type operator_category :: :arithmetic | :comparison | :boolean | :range | :string
+  @type operator_category :: :arithmetic | :comparison | :boolean | :bitwise | :range | :string
 
   @typedoc """
   Container type classification.
   """
-  @type container_type :: :module | :class | :namespace
+  @type container_type ::
+          :module | :class | :namespace | :interface | :trait | :protocol | :enum | :struct
 
   @typedoc """
   Visibility modifier.
@@ -233,7 +239,7 @@ defmodule Metastatic.AST do
   the correct syntax. Each language maps its dependency-loading constructs
   to one of these atoms.
   """
-  @type import_type :: :import | :use | :require | :alias | :include
+  @type import_type :: :import | :use | :require | :alias | :include | :from | :module | :export
 
   @typedoc """
   Scope classification for variable nodes.
@@ -309,6 +315,7 @@ defmodule Metastatic.AST do
     :function_call,
     :conditional,
     :early_return,
+    :throw,
     :block,
     :assignment,
     :inline_match,
@@ -324,6 +331,7 @@ defmodule Metastatic.AST do
     :match_arm,
     :exception_handling,
     :async_operation,
+    :yield,
     :comprehension,
     :generator,
     :filter
@@ -337,18 +345,19 @@ defmodule Metastatic.AST do
     :augmented_assignment,
     :property,
     :import,
-    :type_annotation
+    :type_annotation,
+    :decorator
   ]
 
   @native_types [:language_specific]
 
   @all_types @core_types ++ @extended_types ++ @structural_types ++ @native_types
 
-  @literal_subtypes [:integer, :float, :string, :boolean, :null, :symbol, :regex]
+  @literal_subtypes [:integer, :float, :string, :boolean, :null, :symbol, :regex, :char, :bytes]
 
-  @operator_categories [:arithmetic, :comparison, :boolean, :range, :string]
+  @operator_categories [:arithmetic, :comparison, :boolean, :bitwise, :range, :string]
 
-  @container_types [:module, :class, :namespace]
+  @container_types [:module, :class, :namespace, :interface, :trait, :protocol, :enum, :struct]
 
   # ----- Accessors -----
 
@@ -697,6 +706,14 @@ defmodule Metastatic.AST do
   defp valid_node?(:early_return, _meta, []), do: true
   defp valid_node?(:early_return, _meta, _), do: false
 
+  # Throw/raise: {:throw, [kind: :raise], [exception_expr]}
+  defp valid_node?(:throw, _meta, [value]) do
+    is_nil(value) or conforms?(value)
+  end
+
+  defp valid_node?(:throw, _meta, []), do: true
+  defp valid_node?(:throw, _meta, _), do: false
+
   defp valid_node?(:block, _meta, statements) do
     is_list(statements) and Enum.all?(statements, &conforms?/1)
   end
@@ -738,6 +755,12 @@ defmodule Metastatic.AST do
 
       {t, [iterator, collection, body]} when t in [:for, :for_each] ->
         conforms?(iterator) and conforms?(collection) and conforms?(body)
+
+      {:do_while, [condition, body]} ->
+        conforms?(condition) and conforms?(body)
+
+      {:infinite, [body]} ->
+        conforms?(body)
 
       _ ->
         false
@@ -787,10 +810,18 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:async_operation, meta, [operation]) do
     op_type = Keyword.get(meta, :op_type)
-    op_type in [:await, :async] and conforms?(operation)
+    op_type in [:await, :async, :async_def] and conforms?(operation)
   end
 
   defp valid_node?(:async_operation, _meta, _), do: false
+
+  # Yield: {:yield, [kind: :yield], [value]} or {:yield, [kind: :yield_from], [iterable]}
+  defp valid_node?(:yield, _meta, [value]) do
+    is_nil(value) or conforms?(value)
+  end
+
+  defp valid_node?(:yield, _meta, []), do: true
+  defp valid_node?(:yield, _meta, _), do: false
 
   # Comprehension: body + generators/filters
   defp valid_node?(:comprehension, _meta, [body | generators_and_filters])
@@ -884,6 +915,12 @@ defmodule Metastatic.AST do
       is_list(children) and Enum.all?(children, &conforms?/1)
   end
 
+  # Decorator: {:decorator, [name: "staticmethod"], [args]}
+  defp valid_node?(:decorator, meta, args) do
+    name = Keyword.get(meta, :name)
+    is_binary(name) and is_list(args) and Enum.all?(args, &conforms?/1)
+  end
+
   # M2.3 Native type
   defp valid_node?(:language_specific, meta, _native_ast) do
     language = Keyword.get(meta, :language)
@@ -927,6 +964,8 @@ defmodule Metastatic.AST do
   defp valid_literal_value?(:null, value), do: is_nil(value)
   defp valid_literal_value?(:symbol, value), do: is_atom(value)
   defp valid_literal_value?(:regex, _value), do: true
+  defp valid_literal_value?(:char, value), do: is_binary(value) or is_integer(value)
+  defp valid_literal_value?(:bytes, value), do: is_binary(value)
 
   # ----- Variable Extraction -----
 
@@ -1465,6 +1504,55 @@ defmodule Metastatic.AST do
   @spec filter(meta_ast(), keyword()) :: meta_ast()
   def filter(condition, meta \\ []) do
     {:filter, meta, [condition]}
+  end
+
+  @doc """
+  Create a throw/raise node.
+
+  ## Examples
+
+      iex> exception = {:function_call, [name: "ValueError"], [{:literal, [subtype: :string], "bad value"}]}
+      iex> Metastatic.AST.throw_node(:raise, exception)
+      {:throw, [kind: :raise], [{:function_call, [name: "ValueError"], [{:literal, [subtype: :string], "bad value"}]}]}
+  """
+  @spec throw_node(atom(), meta_ast() | nil, keyword()) :: meta_ast()
+  def throw_node(kind \\ :raise, value \\ nil, extra_meta \\ []) do
+    meta = Keyword.merge([kind: kind], extra_meta)
+    children = if is_nil(value), do: [], else: [value]
+    {:throw, meta, children}
+  end
+
+  @doc """
+  Create a yield node.
+
+  ## Examples
+
+      iex> value = {:literal, [subtype: :integer], 42}
+      iex> Metastatic.AST.yield_node(:yield, value)
+      {:yield, [kind: :yield], [{:literal, [subtype: :integer], 42}]}
+  """
+  @spec yield_node(atom(), meta_ast() | nil, keyword()) :: meta_ast()
+  def yield_node(kind \\ :yield, value \\ nil, extra_meta \\ []) do
+    meta = Keyword.merge([kind: kind], extra_meta)
+    children = if is_nil(value), do: [], else: [value]
+    {:yield, meta, children}
+  end
+
+  @doc """
+  Create a decorator node.
+
+  ## Examples
+
+      iex> Metastatic.AST.decorator("staticmethod")
+      {:decorator, [name: "staticmethod"], []}
+
+      iex> Metastatic.AST.decorator("app.route", [{:literal, [subtype: :string], "/api"}])
+      {:decorator, [name: "app.route"], [{:literal, [subtype: :string], "/api"}]}
+  """
+  @spec decorator(String.t(), [meta_ast()], keyword()) :: meta_ast()
+  def decorator(name, args \\ [], extra_meta \\ []) when is_binary(name) and is_list(args) do
+    meta = Keyword.merge([name: name], extra_meta)
+    {:decorator, meta, args}
   end
 
   @doc """

@@ -465,9 +465,39 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  # Async function definitions - keep as language_specific
+  # Async function definitions - transform body, mark with async: true
   def transform(%{"_type" => "AsyncFunctionDef"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :async_function], node}, %{}}
+    # Transform like regular FunctionDef but add async: true
+    func_node = Map.put(node, "_type", "FunctionDef")
+    decorators = Map.get(node, "decorator_list", [])
+
+    case {decorators, contains_yield?(Map.get(node, "body", []))} do
+      {_, true} ->
+        {:ok, {:language_specific, [language: :python, hint: :async_generator], node}, %{}}
+
+      {[_ | _] = decs, false} ->
+        with {:ok, decorator_names} <- extract_decorator_names(decs) do
+          clean = Map.put(func_node, "decorator_list", [])
+
+          case transform_function_def(clean) do
+            {:ok, {:function_def, meta, body}, metadata} ->
+              {:ok, {:function_def, [async: true, decorators: decorator_names] ++ meta, body},
+               metadata}
+
+            other ->
+              other
+          end
+        end
+
+      {[], false} ->
+        case transform_function_def(func_node) do
+          {:ok, {:function_def, meta, body}, metadata} ->
+            {:ok, {:function_def, [async: true] ++ meta, body}, metadata}
+
+          other ->
+            other
+        end
+    end
   end
 
   # Class definitions with decorators - transform class body, keep decorators in meta
@@ -506,9 +536,19 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  # Context managers (with statement)
-  def transform(%{"_type" => "With"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :context_manager], node}, %{}}
+  # Context managers (with statement) - transform to block with bindings
+  def transform(%{"_type" => "With", "items" => items, "body" => body} = node) do
+    with {:ok, bindings} <- transform_with_items(items),
+         {:ok, body_stmts} <- transform_list(body) do
+      body_ast =
+        case body_stmts do
+          [single] -> single
+          multiple -> {:block, [], multiple}
+        end
+
+      statements = bindings ++ [body_ast]
+      {:ok, add_location({:block, [original_form: :with], statements}, node), %{}}
+    end
   end
 
   # Async context managers (async with)
@@ -516,14 +556,23 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:ok, {:language_specific, [language: :python, hint: :async_context_manager], node}, %{}}
   end
 
-  # Generators (yield)
-  def transform(%{"_type" => "Yield"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :yield], node}, %{}}
+  # Generators (yield) - M2.2 Extended Layer
+  def transform(%{"_type" => "Yield", "value" => value} = node) do
+    with {:ok, value_meta, _} <- transform_or_nil(value) do
+      children = if is_nil(value_meta), do: [], else: [value_meta]
+      {:ok, add_location({:yield, [kind: :yield], children}, node), %{}}
+    end
   end
 
-  # Yield from (Python 3.3+)
-  def transform(%{"_type" => "YieldFrom"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :yield_from], node}, %{}}
+  def transform(%{"_type" => "Yield"} = node) do
+    {:ok, add_location({:yield, [kind: :yield], []}, node), %{}}
+  end
+
+  # Yield from (Python 3.3+) - M2.2 Extended Layer
+  def transform(%{"_type" => "YieldFrom", "value" => value} = node) do
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, add_location({:yield, [kind: :yield_from], [value_meta]}, node), %{}}
+    end
   end
 
   # Await expressions
@@ -657,9 +706,23 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:ok, {:language_specific, [language: :python, hint: :assert], node}, %{}}
   end
 
-  # Raise statements
+  # Raise statements - M2.1 Core Layer (:throw)
+  def transform(%{"_type" => "Raise", "exc" => exc} = node) when not is_nil(exc) do
+    with {:ok, exc_meta, _} <- transform(exc) do
+      cause = Map.get(node, "cause")
+
+      meta =
+        [kind: :raise] ++
+          if(cause, do: [has_cause: true], else: []) ++
+          location_meta(node)
+
+      {:ok, {:throw, meta, [exc_meta]}, %{}}
+    end
+  end
+
+  # Bare raise (re-raise current exception)
   def transform(%{"_type" => "Raise"} = node) do
-    {:ok, {:language_specific, [language: :python, hint: :raise], node}, %{}}
+    {:ok, add_location({:throw, [kind: :reraise], []}, node), %{}}
   end
 
   # Delete statements
@@ -1038,6 +1101,37 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     do: format_attribute_name(attr)
 
   defp extract_decorator_call_name(_), do: "unknown"
+
+  # Transform with statement items to bindings
+  defp transform_with_items(items) when is_list(items) do
+    items
+    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
+      case transform_with_item(item) do
+        {:ok, binding} -> {:cont, {:ok, [binding | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, bindings} -> {:ok, Enum.reverse(bindings)}
+      error -> error
+    end
+  end
+
+  defp transform_with_item(%{"context_expr" => expr, "optional_vars" => vars}) do
+    with {:ok, expr_meta, _} <- transform(expr) do
+      case vars do
+        nil ->
+          {:ok, expr_meta}
+
+        var ->
+          with {:ok, var_meta, _} <- transform(var) do
+            {:ok, {:inline_match, [original_form: :with_item], [var_meta, expr_meta]}}
+          end
+      end
+    end
+  end
+
+  defp transform_with_item(_), do: {:ok, {:literal, [subtype: :null], nil}}
 
   # Add location information from Python AST node to MetaAST
   defp add_location(ast, %{"lineno" => line} = node) do

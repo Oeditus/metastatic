@@ -6,13 +6,21 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
-**Current Status:** v0.12.1 - Production Ready
-- 255 doctests + 1646 tests passing (excluding haskell tag), 100% coverage
+**Current Status:** v0.13.0 - Production Ready
+- 263 doctests + 1656 tests passing (excluding haskell tag), 100% coverage
 - Uniform 3-Tuple MetaAST Format: All MetaAST nodes use `{type_atom, keyword_meta, children_or_value}`
-- M2.2s Structural/Organizational Layer: container, function_def, attribute_access, augmented_assignment, property
+- M2.1 Core Layer: literal, variable, list, map, pair, tuple, binary_op, unary_op, function_call, conditional, early_return, throw, block, assignment, inline_match, range, string_interpolation
+- M2.2 Extended Layer: loop (while/for/for_each/do_while/infinite), lambda, collection_op, pattern_match, match_arm, exception_handling, async_operation, yield, comprehension, generator, filter
+- M2.2s Structural Layer: container, function_def, param, attribute_access, augmented_assignment, property, import, type_annotation, decorator
+- Operator categories: arithmetic, comparison, boolean, bitwise, range, string
+- Container types: module, class, namespace, interface, trait, protocol, enum, struct
+- Literal subtypes: integer, float, string, boolean, null, symbol, regex, char, bytes
 - M1 Metadata Preservation: Full context threading (module, function, arity, visibility) for Ragex integration
 - Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented with 3-tuple output
-- Comprehensive Ruby/Rails Support: safe navigation (&.), memoization (||=/&&=), all parameter types, tested against 53-file Rails app
+- Python: decorators, async functions, comprehensions, match, yield, throw, walrus, context managers all produce proper M2 nodes
+- Ruby: string interpolation, ranges, break/next, regex all produce proper M2 nodes
+- Haskell: modules, functions, type signatures, list comprehensions, typeclasses all produce proper M2 nodes
+- Erlang: modules, functions, lambdas, try/catch, maps, bitwise ops produce proper M2 nodes
 - All 9 analysis tools support structural types and 3-tuple format
 - Business Logic Analyzers: 20 language-agnostic analyzers updated for 3-tuple format
 - OpKind Semantic Metadata System: 7 domains (db, http, auth, cache, queue, file, external_api)

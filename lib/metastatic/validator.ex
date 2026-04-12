@@ -191,12 +191,14 @@ defmodule Metastatic.Validator do
     :match_arm,
     :exception_handling,
     :async_operation,
+    :yield,
     # M2.2s: Structural/Organizational layer
     :container,
     :function_def,
     :attribute_access,
     :augmented_assignment,
-    :property
+    :property,
+    :decorator
   ]
 
   # Native layer types (M2.3)

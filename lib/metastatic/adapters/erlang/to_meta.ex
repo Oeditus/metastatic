@@ -44,8 +44,8 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   end
 
   def transform({:char, line, char}) do
-    # Erlang char literal - treat as small integer
-    {:ok, {:literal, [subtype: :integer] ++ line_meta(line), char}, %{erlang_form: :char}}
+    # Erlang char literal
+    {:ok, {:literal, [subtype: :char] ++ line_meta(line), char}, %{erlang_form: :char}}
   end
 
   # Atoms - special handling for booleans and null
@@ -79,11 +79,22 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
 
   # Arithmetic operators
   def transform({:op, line, op, left, right})
-      when op in [:+, :-, :*, :/, :div, :rem, :band, :bor, :bxor, :bsl, :bsr] do
+      when op in [:+, :-, :*, :/, :div, :rem] do
     with {:ok, left_meta, _} <- transform(left),
          {:ok, right_meta, _} <- transform(right) do
       {:ok,
        {:binary_op, [category: :arithmetic, operator: op] ++ line_meta(line),
+        [left_meta, right_meta]}, %{}}
+    end
+  end
+
+  # Bitwise operators
+  def transform({:op, line, op, left, right})
+      when op in [:band, :bor, :bxor, :bsl, :bsr] do
+    with {:ok, left_meta, _} <- transform(left),
+         {:ok, right_meta, _} <- transform(right) do
+      {:ok,
+       {:binary_op, [category: :bitwise, operator: op] ++ line_meta(line),
         [left_meta, right_meta]}, %{}}
     end
   end
@@ -151,8 +162,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
 
   def transform({:op, line, :bnot, operand}) do
     with {:ok, operand_meta, _} <- transform(operand) do
-      {:ok,
-       {:unary_op, [category: :arithmetic, operator: :bnot] ++ line_meta(line), [operand_meta]},
+      {:ok, {:unary_op, [category: :bitwise, operator: :bnot] ++ line_meta(line), [operand_meta]},
        %{}}
     end
   end
@@ -249,6 +259,131 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
         {:ok,
          {:language_specific, [language: :erlang, hint: :improper_list] ++ line_meta(line),
           %{elements: elements, tail: tail}}, %{}}
+    end
+  end
+
+  # Module attribute: -module(Name).
+  def transform({:attribute, line, :module, name}) do
+    mod_name = if is_atom(name), do: Atom.to_string(name), else: inspect(name)
+
+    {:ok,
+     {:container, [container_type: :module, name: mod_name, language: :erlang] ++ line_meta(line),
+      []}, %{}}
+  end
+
+  # Export attribute: -export([...]).
+  def transform({:attribute, line, :export, funs}) when is_list(funs) do
+    names = Enum.map(funs, fn {name, arity} -> "#{name}/#{arity}" end)
+
+    {:ok,
+     {:import,
+      [source: "self", names: names, import_type: :export, language: :erlang] ++ line_meta(line),
+      []}, %{erlang_form: :export}}
+  end
+
+  # Other attributes (behaviour, spec, type, etc.)
+  def transform({:attribute, line, attr_name, value}) do
+    {:ok,
+     {:language_specific, [language: :erlang, hint: :attribute] ++ line_meta(line),
+      %{name: attr_name, value: value}}, %{}}
+  end
+
+  # Function definition: {function, Line, Name, Arity, Clauses}
+  def transform({:function, line, name, arity, clauses}) when is_list(clauses) do
+    func_name = Atom.to_string(name)
+
+    with {:ok, clause_bodies} <- transform_function_clauses(clauses) do
+      # For single clause, extract params from it; for multi-clause use first
+      params = extract_erlang_params(clauses)
+
+      body =
+        case clause_bodies do
+          [single] -> [single]
+          multiple -> [{:pattern_match, [original_form: :multi_clause], multiple}]
+        end
+
+      meta =
+        [
+          name: func_name,
+          params: params,
+          visibility: :public,
+          arity: arity,
+          function: func_name,
+          language: :erlang
+        ] ++ line_meta(line)
+
+      {:ok, {:function_def, meta, body}, %{}}
+    end
+  end
+
+  # Fun expression: fun(X) -> X end
+  def transform({:fun, line, {:clauses, clauses}}) when is_list(clauses) do
+    case clauses do
+      [{:clause, _cl, params, _guards, body}] ->
+        with {:ok, param_names} <- transform_fun_params(params),
+             {:ok, body_meta} <- transform_body(body) do
+          {:ok, {:lambda, [params: param_names, captures: []] ++ line_meta(line), [body_meta]},
+           %{}}
+        end
+
+      _ ->
+        # Multi-clause fun
+        {:ok,
+         {:language_specific, [language: :erlang, hint: :multi_clause_fun] ++ line_meta(line),
+          clauses}, %{}}
+    end
+  end
+
+  # Fun reference: fun Name/Arity or fun Mod:Fun/Arity
+  def transform({:fun, line, {:function, name, arity}}) do
+    func_name = Atom.to_string(name)
+    params = for i <- 1..arity//1, do: {:param, [], "arg_#{i}"}
+    args = for i <- 1..arity//1, do: {:variable, [], "arg_#{i}"}
+    body_ast = {:function_call, [name: func_name], args}
+
+    {:ok,
+     {:lambda, [params: params, capture_form: :named_function] ++ line_meta(line), [body_ast]},
+     %{}}
+  end
+
+  def transform({:fun, line, {:function, module, name, arity}}) do
+    func_name = "#{module}.#{name}"
+    params = for i <- 1..arity//1, do: {:param, [], "arg_#{i}"}
+    args = for i <- 1..arity//1, do: {:variable, [], "arg_#{i}"}
+    body_ast = {:function_call, [name: func_name], args}
+
+    {:ok,
+     {:lambda, [params: params, capture_form: :named_function] ++ line_meta(line), [body_ast]},
+     %{}}
+  end
+
+  # Try/catch/after
+  def transform({:try, line, body, case_clauses, catch_clauses, after_body}) do
+    with {:ok, body_meta} <- transform_body(body),
+         {:ok, handlers} <- transform_catch_clauses(catch_clauses),
+         {:ok, finally_meta} <- transform_after(after_body) do
+      _ = case_clauses
+      {:ok, {:exception_handling, line_meta(line), [body_meta, handlers, finally_meta]}, %{}}
+    end
+  end
+
+  # Receive expression
+  def transform({:receive, line, clauses}) when is_list(clauses) do
+    {:ok, {:language_specific, [language: :erlang, hint: :receive] ++ line_meta(line), clauses},
+     %{}}
+  end
+
+  # Receive with timeout
+  def transform({:receive, line, clauses, timeout, after_body}) do
+    {:ok,
+     {:language_specific, [language: :erlang, hint: :receive] ++ line_meta(line),
+      %{clauses: clauses, timeout: timeout, after: after_body}}, %{}}
+  end
+
+  # Map literal #{}
+  def transform({:map, line, pairs}) when is_list(pairs) do
+    with {:ok, pair_metas} <- transform_map_pairs(pairs) do
+      {:ok, {:map, line_meta(line), pair_metas}, %{}}
     end
   end
 
@@ -384,6 +519,90 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   defp transform_body(multiple) when length(multiple) > 1 do
     with {:ok, exprs_meta} <- transform_list(multiple) do
       {:ok, {:block, [], exprs_meta}}
+    end
+  end
+
+  # Function clause transformation
+  defp transform_function_clauses(clauses) do
+    clauses
+    |> Enum.reduce_while({:ok, []}, fn {:clause, _line, _params, _guards, body}, {:ok, acc} ->
+      case transform_body(body) do
+        {:ok, body_meta} -> {:cont, {:ok, [body_meta | acc]}}
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, bodies} -> {:ok, Enum.reverse(bodies)}
+      error -> error
+    end
+  end
+
+  defp extract_erlang_params([{:clause, _, params, _, _} | _]) do
+    Enum.map(params, fn
+      {:var, _, name} -> {:param, [], Atom.to_string(name)}
+      _ -> {:param, [], "_"}
+    end)
+  end
+
+  defp extract_erlang_params(_), do: []
+
+  defp transform_fun_params(params) when is_list(params) do
+    result =
+      Enum.map(params, fn
+        {:var, _, name} -> {:param, [], Atom.to_string(name)}
+        _ -> {:param, [], "_"}
+      end)
+
+    {:ok, result}
+  end
+
+  defp transform_catch_clauses(clauses) when is_list(clauses) do
+    clauses
+    |> Enum.reduce_while({:ok, []}, fn {:clause, line, [pattern], _guards, body}, {:ok, acc} ->
+      with {:ok, pattern_meta, _} <- transform_pattern(pattern),
+           {:ok, body_meta} <- transform_body(body) do
+        arm = {:match_arm, [pattern: pattern_meta] ++ line_meta(line), [body_meta]}
+        {:cont, {:ok, [arm | acc]}}
+      else
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, arms} -> {:ok, Enum.reverse(arms)}
+      error -> error
+    end
+  end
+
+  defp transform_catch_clauses([]), do: {:ok, []}
+
+  defp transform_after([]), do: {:ok, nil}
+  defp transform_after(body) when is_list(body), do: transform_body(body)
+
+  defp transform_map_pairs(pairs) when is_list(pairs) do
+    pairs
+    |> Enum.reduce_while({:ok, []}, fn pair, {:ok, acc} ->
+      case transform_map_pair(pair) do
+        {:ok, p} -> {:cont, {:ok, [p | acc]}}
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, ps} -> {:ok, Enum.reverse(ps)}
+      error -> error
+    end
+  end
+
+  defp transform_map_pair({:map_field_assoc, _line, key, value}) do
+    with {:ok, key_meta, _} <- transform(key),
+         {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:pair, [], [key_meta, value_meta]}}
+    end
+  end
+
+  defp transform_map_pair({:map_field_exact, _line, key, value}) do
+    with {:ok, key_meta, _} <- transform(key),
+         {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:pair, [], [key_meta, value_meta]}}
     end
   end
 

@@ -600,7 +600,7 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert data["definition"]["type"] == "type_list"
     end
 
-    test "transforms type class declaration" do
+    test "transforms type class declaration to container interface" do
       ast = %{
         "type" => "class_decl",
         "name" => "Eq",
@@ -613,11 +613,12 @@ defmodule Metastatic.Adapters.HaskellTest do
         ]
       }
 
-      assert {:ok, {:language_specific, [language: :haskell, hint: :class_decl], data}, %{}} =
-               ToMeta.transform(ast)
-
-      assert data["name"] == "Eq"
-      assert [_] = data["methods"]
+      # Now uses :container with container_type: :interface
+      assert {:ok, {:container, meta, methods}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :container_type) == :interface
+      assert Keyword.get(meta, :name) == "Eq"
+      assert Keyword.get(meta, :language) == :haskell
+      assert [_] = methods
     end
 
     test "transforms instance declaration" do

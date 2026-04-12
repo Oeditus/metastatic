@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-04-12
+
+### Added
+- **New M2 node types:** `:throw` (M2.1 Core), `:yield` (M2.2 Extended), `:decorator` (M2.2s Structural)
+- **`:bitwise` operator category** for `band`, `bor`, `bxor`, `bsl`, `bsr`, `<<`, `>>`
+- **Expanded `container_type`:** `:interface`, `:trait`, `:protocol`, `:enum`, `:struct`
+- **New literal subtypes:** `:char`, `:bytes`
+- **New loop types:** `:do_while`, `:infinite`
+- **Expanded `import_type`:** `:from`, `:module`, `:export`
+- Builder helpers: `throw_node/3`, `yield_node/3`, `decorator/3`
+- Erlang adapter: module forms, function definitions, fun expressions, try/catch, receive, maps
+- Python `with` statement now transforms to `:block` with `[original_form: :with]` and inline_match bindings
+
+### Changed
+- **Ruby adapter:** `dstr` -> `:string_interpolation`, `irange`/`erange` -> `:range`, `break`/`next` -> `:early_return`, `regexp` -> `:literal` with `subtype: :regex`
+- **Python adapter:** All comprehensions (ListComp/DictComp/SetComp/GeneratorExp) -> `:comprehension`, Match -> `:pattern_match`, AugAssign -> `:augmented_assignment`, NamedExpr -> `:inline_match`, Raise -> `:throw`, Yield/YieldFrom -> `:yield`, AsyncFunctionDef -> `:function_def` with `[async: true]`, decorated functions/classes -> proper M2 nodes with `[decorators: [...]]`
+- **Haskell adapter:** modules -> `:container`, function bindings -> `:function_def`, type signatures -> `:type_annotation`, list comprehensions -> `:comprehension`, class declarations -> `:container` with `container_type: :interface`
+- **Erlang adapter:** bitwise operators now use `category: :bitwise` instead of `:arithmetic`, char literals use `subtype: :char`
+- **Ruby adapter:** `<<`/`>>` operators now use `category: :bitwise` instead of `:arithmetic`
+- 1919 tests passing (263 doctests + 1656 tests), zero regressions
+
 ## [0.12.1] - 2026-03-24
 
 ### Added

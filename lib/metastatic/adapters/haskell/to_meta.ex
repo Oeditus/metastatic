@@ -260,15 +260,16 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
      ), %{}}
   end
 
-  # M2.3 Native Layer - Type Class Declaration
+  # M2.2s Structural Layer - Type Class Declaration -> container interface
 
   def transform(%{"type" => "class_decl", "name" => name, "methods" => methods} = node) do
-    {:ok,
-     add_location(
-       {:language_specific, [language: :haskell, hint: :class_decl],
-        %{"name" => name, "methods" => methods}},
-       node
-     ), %{}}
+    with {:ok, methods_meta} <- transform_declarations(methods) do
+      {:ok,
+       add_location(
+         {:container, [container_type: :interface, name: name, language: :haskell], methods_meta},
+         node
+       ), %{}}
+    end
   end
 
   # M2.3 Native Layer - Instance Declaration

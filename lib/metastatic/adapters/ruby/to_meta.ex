@@ -189,6 +189,18 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   def transform(%{"type" => "send", "children" => [left, op, right]} = ast)
       when not is_nil(left) and not is_nil(right) do
     cond do
+      is_bitwise_op?(op) ->
+        op_atom = normalize_op(op)
+
+        with {:ok, left_meta, _} <- transform(left),
+             {:ok, right_meta, _} <- transform(right) do
+          {:ok,
+           add_location(
+             {:binary_op, [category: :bitwise, operator: op_atom], [left_meta, right_meta]},
+             ast
+           ), %{}}
+        end
+
       is_arithmetic_op?(op) ->
         op_atom = normalize_op(op)
 
@@ -1068,13 +1080,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp normalize_op(op) when is_atom(op), do: op
   defp normalize_op(op) when is_binary(op), do: String.to_atom(op)
 
-  defp is_arithmetic_op?(op) when is_atom(op) do
-    op in [:+, :-, :*, :/, :%, :**] or op == :"<<" or op == :">>"
-  end
+  @ruby_arithmetic_ops [:+, :-, :*, :/, :%, :**]
+  @ruby_bitwise_ops [:"<<", :">>"]
 
-  defp is_arithmetic_op?(op) when is_binary(op) do
-    op in ["+", "-", "*", "/", "%", "**", "<<", ">>"]
-  end
+  defp is_arithmetic_op?(op) when is_atom(op), do: op in @ruby_arithmetic_ops
+  defp is_arithmetic_op?(op) when is_binary(op), do: op in ["+", "-", "*", "/", "%", "**"]
+
+  defp is_bitwise_op?(op) when is_atom(op), do: op in @ruby_bitwise_ops
+  defp is_bitwise_op?(op) when is_binary(op), do: op in ["<<", ">>"]
 
   defp is_comparison_op?(op) when is_atom(op) do
     op in [:==, :!=, :<, :>, :<=, :>=, :===, :eql?, :"<=>"]

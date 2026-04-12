@@ -1137,16 +1137,17 @@ defmodule Metastatic.Adapters.PythonTest do
   end
 
   describe "ToMeta - Native Layer: Context Managers" do
-    test "preserves with statement as language_specific" do
+    test "transforms with statement to block with bindings" do
       source = "with open('file.txt') as f:\n    content = f.read()"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:language_specific, meta, node} = meta_ast
-      assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :context_manager
-      assert node["_type"] == "With"
+      # Now transforms to block with original_form: :with
+      assert {:block, meta, statements} = meta_ast
+      assert Keyword.get(meta, :original_form) == :with
+      # Should have binding + body
+      assert [_ | _] = statements
     end
 
     test "preserves async with statement as language_specific" do
@@ -1359,17 +1360,17 @@ defmodule Metastatic.Adapters.PythonTest do
   end
 
   describe "ToMeta - Native Layer: Async/Await" do
-    test "preserves async function as language_specific" do
+    test "transforms async function to function_def with async: true" do
       source = "async def fetch():\n    return data"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:language_specific, meta, node} = meta_ast
+      # Now transforms to function_def with async: true
+      assert {:function_def, meta, _body} = meta_ast
+      assert Keyword.get(meta, :name) == "fetch"
+      assert Keyword.get(meta, :async) == true
       assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :async_function
-      assert node["_type"] == "AsyncFunctionDef"
-      assert node["name"] == "fetch"
     end
 
     test "preserves await expression as language_specific" do
@@ -1614,16 +1615,16 @@ defmodule Metastatic.Adapters.PythonTest do
       assert node["_type"] == "Assert"
     end
 
-    test "preserves raise statement as language_specific" do
+    test "transforms raise statement to :throw" do
       source = "raise ValueError('error')"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:language_specific, meta, node} = meta_ast
-      assert Keyword.get(meta, :language) == :python
-      assert Keyword.get(meta, :hint) == :raise
-      assert node["_type"] == "Raise"
+      # Now uses proper :throw M2 type
+      assert {:throw, meta, [exception]} = meta_ast
+      assert Keyword.get(meta, :kind) == :raise
+      assert {:function_call, _, _} = exception
     end
 
     test "preserves delete statement as language_specific" do
@@ -2057,7 +2058,7 @@ defmodule Metastatic.Adapters.PythonTest do
              end)
     end
 
-    test "parses context managers fixture as language_specific" do
+    test "parses context managers fixture as blocks with :with form" do
       fixture_path = Path.join([__DIR__, "../../fixtures/python/native/context_managers.py"])
       {:ok, source} = File.read(fixture_path)
 
@@ -2066,7 +2067,12 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:block, [], statements} = meta_ast
 
+      # With statements are now blocks with original_form: :with, or may still
+      # have language_specific nodes for async with
       assert Enum.any?(statements, fn
+               {:block, meta, _} when is_list(meta) ->
+                 Keyword.get(meta, :original_form) == :with
+
                {:language_specific, meta, _} when is_list(meta) ->
                  Keyword.get(meta, :language) == :python
 
@@ -2112,7 +2118,7 @@ defmodule Metastatic.Adapters.PythonTest do
              end)
     end
 
-    test "parses async/await fixture as language_specific" do
+    test "parses async/await fixture with async function_def and language_specific nodes" do
       fixture_path = Path.join([__DIR__, "../../fixtures/python/native/async_await.py"])
       {:ok, source} = File.read(fixture_path)
 
@@ -2121,7 +2127,12 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:block, [], statements} = meta_ast
 
+      # Async functions are now function_def with async: true;
+      # await/async_for remain as language_specific
       assert Enum.any?(statements, fn
+               {:function_def, meta, _} when is_list(meta) ->
+                 Keyword.get(meta, :async) == true
+
                {:language_specific, meta, _} when is_list(meta) ->
                  Keyword.get(meta, :language) == :python
 
