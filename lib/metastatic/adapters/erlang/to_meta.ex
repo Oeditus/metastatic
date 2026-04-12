@@ -460,7 +460,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   defp transform_pattern({:tuple, line, elements}) when is_list(elements) do
     # Tuple pattern: {X, Y, Z}
     with {:ok, elements_meta} <- transform_pattern_list(elements) do
-      {:ok, {:tuple, [], elements_meta}, %{line: line}}
+      {:ok, {:tuple, line_meta(line), elements_meta}, %{}}
     end
   end
 
@@ -468,13 +468,13 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     # List cons pattern: [H | T]
     with {:ok, head_meta, _} <- transform_pattern(head),
          {:ok, tail_meta, _} <- transform_pattern(tail) do
-      {:ok, {:cons_pattern, [], [head_meta, tail_meta]}, %{line: line}}
+      {:ok, {:cons_pattern, line_meta(line), [head_meta, tail_meta]}, %{}}
     end
   end
 
   defp transform_pattern({nil, line}) do
     # Empty list pattern: []
-    {:ok, {:list, [], []}, %{collection_type: :list, line: line}}
+    {:ok, {:list, line_meta(line), []}, %{collection_type: :list}}
   end
 
   defp transform_pattern(pattern) do
@@ -525,10 +525,20 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   # Function clause transformation
   defp transform_function_clauses(clauses) do
     clauses
-    |> Enum.reduce_while({:ok, []}, fn {:clause, _line, _params, _guards, body}, {:ok, acc} ->
+    |> Enum.reduce_while({:ok, []}, fn {:clause, line, _params, _guards, body}, {:ok, acc} ->
       case transform_body(body) do
-        {:ok, body_meta} -> {:cont, {:ok, [body_meta | acc]}}
-        error -> {:halt, error}
+        {:ok, body_meta} ->
+          # Tag multi-statement bodies with the clause's line
+          tagged =
+            case body_meta do
+              {:block, block_meta, stmts} -> {:block, line_meta(line) ++ block_meta, stmts}
+              other -> other
+            end
+
+          {:cont, {:ok, [tagged | acc]}}
+
+        error ->
+          {:halt, error}
       end
     end)
     |> case do
@@ -539,7 +549,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
 
   defp extract_erlang_params([{:clause, _, params, _, _} | _]) do
     Enum.map(params, fn
-      {:var, _, name} -> {:param, [], Atom.to_string(name)}
+      {:var, line, name} -> {:param, line_meta(line), Atom.to_string(name)}
       _ -> {:param, [], "_"}
     end)
   end
@@ -549,7 +559,7 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
   defp transform_fun_params(params) when is_list(params) do
     result =
       Enum.map(params, fn
-        {:var, _, name} -> {:param, [], Atom.to_string(name)}
+        {:var, line, name} -> {:param, line_meta(line), Atom.to_string(name)}
         _ -> {:param, [], "_"}
       end)
 
@@ -592,17 +602,17 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     end
   end
 
-  defp transform_map_pair({:map_field_assoc, _line, key, value}) do
+  defp transform_map_pair({:map_field_assoc, line, key, value}) do
     with {:ok, key_meta, _} <- transform(key),
          {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:pair, [], [key_meta, value_meta]}}
+      {:ok, {:pair, line_meta(line), [key_meta, value_meta]}}
     end
   end
 
-  defp transform_map_pair({:map_field_exact, _line, key, value}) do
+  defp transform_map_pair({:map_field_exact, line, key, value}) do
     with {:ok, key_meta, _} <- transform(key),
          {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:pair, [], [key_meta, value_meta]}}
+      {:ok, {:pair, line_meta(line), [key_meta, value_meta]}}
     end
   end
 

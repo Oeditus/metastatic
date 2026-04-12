@@ -372,10 +372,14 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
-  defp transform_binding(%{"type" => "pat_bind", "pattern" => pat, "rhs" => rhs}) do
+  defp transform_binding(%{"type" => "pat_bind", "pattern" => pat, "rhs" => rhs} = binding) do
     with {:ok, var_name} <- extract_pattern_var(pat),
          {:ok, value_meta, _} <- transform(rhs) do
-      {:ok, {:assignment, [], [{:variable, [scope: :local], var_name}, value_meta]}}
+      {:ok,
+       add_location(
+         {:assignment, [], [{:variable, [scope: :local], var_name}, value_meta]},
+         binding
+       )}
     end
   end
 
@@ -398,10 +402,10 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
-  defp transform_case_alt(%{"pattern" => pat, "rhs" => rhs}) do
+  defp transform_case_alt(%{"pattern" => pat, "rhs" => rhs} = alt) do
     with {:ok, pat_meta} <- transform_pattern(pat),
          {:ok, rhs_meta, _} <- transform(rhs) do
-      {:ok, {:match_arm, [pattern: pat_meta], [rhs_meta]}}
+      {:ok, add_location({:match_arm, [pattern: pat_meta], [rhs_meta]}, alt)}
     end
   end
 
@@ -436,16 +440,18 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
-  defp transform_qualifier(%{"type" => "generator", "pattern" => pat, "expression" => expr}) do
+  defp transform_qualifier(
+         %{"type" => "generator", "pattern" => pat, "expression" => expr} = qual
+       ) do
     with {:ok, pat_meta} <- transform_pattern(pat),
          {:ok, expr_meta, _} <- transform(expr) do
-      {:ok, {:generator, [], [pat_meta, expr_meta]}}
+      {:ok, add_location({:generator, [], [pat_meta, expr_meta]}, qual)}
     end
   end
 
-  defp transform_qualifier(%{"type" => "qualifier", "expression" => expr}) do
+  defp transform_qualifier(%{"type" => "qualifier", "expression" => expr} = qual) do
     with {:ok, expr_meta, _} <- transform(expr) do
-      {:ok, {:qualifier, [], [expr_meta]}}
+      {:ok, add_location({:qualifier, [], [expr_meta]}, qual)}
     end
   end
 
@@ -465,10 +471,12 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
-  defp transform_statement(%{"type" => "generator", "pattern" => pat, "expression" => expr}) do
+  defp transform_statement(
+         %{"type" => "generator", "pattern" => pat, "expression" => expr} = stmt
+       ) do
     with {:ok, pat_meta} <- transform_pattern(pat),
          {:ok, expr_meta, _} <- transform(expr) do
-      {:ok, {:generator, [], [pat_meta, expr_meta]}}
+      {:ok, add_location({:generator, [], [pat_meta, expr_meta]}, stmt)}
     end
   end
 

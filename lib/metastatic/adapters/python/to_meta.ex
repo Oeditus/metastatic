@@ -1026,15 +1026,17 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end)
   end
 
-  defp transform_comprehension_generator(%{"target" => target, "iter" => iter, "ifs" => ifs}) do
+  defp transform_comprehension_generator(
+         %{"target" => target, "iter" => iter, "ifs" => ifs} = gen_node
+       ) do
     with {:ok, target_meta, _} <- transform(target),
          {:ok, iter_meta, _} <- transform(iter) do
-      generator = {:generator, [], [target_meta, iter_meta]}
+      generator = add_location({:generator, [], [target_meta, iter_meta]}, gen_node)
 
       filters =
         Enum.map(ifs, fn if_expr ->
           case transform(if_expr) do
-            {:ok, filter_meta, _} -> {:filter, [], [filter_meta]}
+            {:ok, filter_meta, _} -> add_location({:filter, [], [filter_meta]}, if_expr)
             _ -> nil
           end
         end)
@@ -1076,7 +1078,8 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
       arm_meta =
         [pattern: pattern_ast] ++
-          if(guard, do: [guard: {:language_specific, [language: :python], guard}], else: [])
+          if(guard, do: [guard: {:language_specific, [language: :python], guard}], else: []) ++
+          location_meta(case_node)
 
       {:ok, {:match_arm, arm_meta, [body_ast]}}
     end
@@ -1117,7 +1120,7 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  defp transform_with_item(%{"context_expr" => expr, "optional_vars" => vars}) do
+  defp transform_with_item(%{"context_expr" => expr, "optional_vars" => vars} = item) do
     with {:ok, expr_meta, _} <- transform(expr) do
       case vars do
         nil ->
@@ -1125,7 +1128,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
         var ->
           with {:ok, var_meta, _} <- transform(var) do
-            {:ok, {:inline_match, [original_form: :with_item], [var_meta, expr_meta]}}
+            {:ok,
+             add_location(
+               {:inline_match, [original_form: :with_item], [var_meta, expr_meta]},
+               item
+             )}
           end
       end
     end

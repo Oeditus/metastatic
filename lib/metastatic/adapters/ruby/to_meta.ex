@@ -227,7 +227,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
       true ->
         # Regular method call with receiver
-        transform_method_call_with_receiver(left, op, right)
+        transform_method_call_with_receiver(left, op, right, ast)
     end
   end
 
@@ -1051,10 +1051,10 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
-  defp transform_hash_pair(%{"type" => "pair", "children" => [key, value]}) do
+  defp transform_hash_pair(%{"type" => "pair", "children" => [key, value]} = ast) do
     with {:ok, key_meta, _} <- transform(key),
          {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:pair, [], [key_meta, value_meta]}}
+      {:ok, add_location({:pair, [], [key_meta, value_meta]}, ast)}
     end
   end
 
@@ -1097,14 +1097,15 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     op in ["==", "!=", "<", ">", "<=", ">=", "===", "eql?", "<=>"]
   end
 
-  defp transform_method_call_with_receiver(receiver, method_name, arg) do
+  defp transform_method_call_with_receiver(receiver, method_name, arg, ast) do
     method_str = if is_atom(method_name), do: Atom.to_string(method_name), else: method_name
 
     with {:ok, receiver_meta, _} <- transform(receiver),
          {:ok, arg_meta, _} <- transform(arg) do
       qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
 
-      {:ok, {:function_call, [name: qualified_name], [arg_meta]}, %{call_type: :instance}}
+      {:ok, add_location({:function_call, [name: qualified_name], [arg_meta]}, ast),
+       %{call_type: :instance}}
     end
   end
 

@@ -284,7 +284,8 @@ defmodule Metastatic.Adapters.ErlangTest do
       assert {:ok, {:inline_match, _, [pattern_meta, value_meta]}, _metadata} =
                ToMeta.transform(ast)
 
-      assert {:cons_pattern, [], [head, tail]} = pattern_meta
+      assert {:cons_pattern, meta, [head, tail]} = pattern_meta
+      assert Keyword.get(meta, :line) == 1
       assert {:variable, _, "H"} = head
       assert {:variable, _, "T"} = tail
       assert {:variable, _, "List"} = value_meta
