@@ -345,6 +345,177 @@ meta.depth  # => 2
 meta.variables  # => MapSet.new(["x"])
 ```
 
+### AST Traversal & Manipulation
+
+MetaAST trees need to be walked, searched, and transformed. Whether you are
+building a linter, a refactoring tool, or a complexity analyser, the traversal
+API is the main workhorse. Metastatic mirrors every useful function from Elixir's
+`Macro` module so that working with MetaAST feels familiar.
+
+All functions live in `Metastatic.AST` and are re-exported as convenience wrappers
+on the top-level `Metastatic` module.
+
+#### Depth-first walks
+
+The simplest traversals transform every node without carrying state:
+
+```elixir
+alias Metastatic.AST
+
+# postwalk/2 -- visit children first, then the parent (bottom-up)
+new_ast = AST.postwalk(ast, fn
+  {:literal, meta, n} when is_integer(n) -> {:literal, meta, n * 2}
+  other -> other
+end)
+
+# prewalk/2 -- visit the parent first, then children (top-down)
+new_ast = AST.prewalk(ast, fn
+  {:variable, meta, name} -> {:variable, meta, String.downcase(name)}
+  other -> other
+end)
+```
+
+When you need to accumulate results (collect names, count nodes, etc.),
+use the 3-arity variants:
+
+```elixir
+# Collect all variable names encountered during traversal
+{_ast, vars} = AST.prewalk(ast, [], fn
+  {:variable, _, name} = node, acc -> {node, [name | acc]}
+  node, acc -> {node, acc}
+end)
+```
+
+For full control, `traverse/4` lets you supply both a *pre* and a *post* function
+(mirrors `Macro.traverse/4`):
+
+```elixir
+{new_ast, acc} = AST.traverse(ast, initial_acc,
+  fn node, acc -> {node, acc} end,   # pre  -- called before children
+  fn node, acc -> {node, acc} end    # post -- called after children
+)
+```
+
+#### Lazy enumerable walkers
+
+When you only need to *read* the tree (no transformation), the walker streams
+avoid building a transformed copy:
+
+```elixir
+# prewalker/1 -- lazy Stream, depth-first pre-order
+all_types = ast |> AST.prewalker() |> Enum.map(&AST.type/1)
+# => [:binary_op, :variable, :literal]
+
+# postwalker/1 -- lazy enumerable, depth-first post-order
+ast |> AST.postwalker() |> Enum.count(&AST.leaf?/1)
+```
+
+#### Finding a node and its ancestors
+
+`path/2` returns the route from a matching node up to the root, which is
+invaluable for contextual analysis ("is this literal inside a function call
+that is inside a loop?"):
+
+```elixir
+path = AST.path(ast, fn {:literal, _, 42} -> true; _ -> false end)
+# => [{:literal, [subtype: :integer], 42}, {:binary_op, ...}, ...root]
+#    first element is the match, last is the AST root
+```
+
+Returns `nil` when no node matches.
+
+#### Pipe chain utilities
+
+Elixir pipe expressions are represented as nested `:pipe` nodes.
+`unpipe/1` flattens them:
+
+```elixir
+steps = AST.unpipe(pipe_ast)
+# => [{initial_value, 0}, {function_call_1, 0}, {function_call_2, 0}]
+```
+
+`pipe_into/3` is the inverse -- it injects an expression into a function call's
+argument list at the given position:
+
+```elixir
+call = {:function_call, [name: "String.trim"], []}
+AST.pipe_into({:variable, [], "input"}, call, 0)
+# => {:function_call, [name: "String.trim"], [{:variable, [], "input"}]}
+```
+
+#### Call decomposition
+
+Extract the name and arguments from a function call node:
+
+```elixir
+AST.decompose_call({:function_call, [name: "Repo.get"], [arg1, arg2]})
+# => {"Repo.get", [arg1, arg2]}
+
+AST.decompose_call({:literal, [subtype: :integer], 42})
+# => :error
+```
+
+#### Human-readable representation
+
+`to_string/1` prints a compact, pseudo-code representation useful for
+debugging and logging:
+
+```elixir
+AST.to_string(ast)
+# => "x + 5"   (for a binary_op node)
+# => "foo(x, 1)" (for a function_call)
+# => "[1, 2]"    (for a list of literals)
+```
+
+#### Predicates
+
+```elixir
+# Is the node (and all descendants) purely literal?
+AST.literal?({:list, [], [{:literal, [subtype: :integer], 1}]})  # => true
+AST.literal?({:list, [], [{:variable, [], "x"}]})                # => false
+
+# Is it an operator?
+AST.operator?({:binary_op, [operator: :+], [_, _]})  # => true
+AST.operator?({:literal, [subtype: :integer], 1})     # => false
+```
+
+#### Validation with diagnostics
+
+While `AST.conforms?/1` returns a boolean, `validate/1` tells you *what* is
+wrong:
+
+```elixir
+AST.validate({:literal, [subtype: :integer], 42})     # => :ok
+AST.validate({:literal, [subtype: :integer], "oops"})  # => {:error, {:invalid_node, ...}}
+AST.validate("not a tuple")                            # => {:error, {:not_an_ast_node, ...}}
+```
+
+#### Generating fresh variables
+
+Code transformations often need to introduce bindings that don't clash
+with existing names:
+
+```elixir
+AST.unique_var("tmp")   # => {:variable, [], "tmp_1"}
+AST.unique_var("tmp")   # => {:variable, [], "tmp_2"}  (monotonically increasing)
+```
+
+#### Quick reference
+
+All functions are also available as `Metastatic.<name>`:
+
+- `prewalk/2`, `prewalk/3` -- top-down transform
+- `postwalk/2`, `postwalk/3` -- bottom-up transform
+- `traverse/4` -- full pre+post walk
+- `prewalker/1`, `postwalker/1` -- lazy enumerables
+- `path/2` -- ancestors of a matching node
+- `unpipe/1`, `pipe_into/3` -- pipe chain tools
+- `decompose_call/1` -- extract name and args
+- `to_string/1` -- human-readable output
+- `literal?/1`, `operator?/1` -- predicates
+- `validate/1` -- structural validation
+- `unique_var/1` -- fresh variable generation
+
 ### Using Language Adapters
 
 #### Elixir Adapter

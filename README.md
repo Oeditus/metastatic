@@ -218,6 +218,102 @@ AST.variables(ast)  # => MapSet.new(["x"])
 AST.conforms?(ast)  # => true
 ```
 
+### AST Traversal & Manipulation
+
+MetaAST trees need to be walked, searched, and transformed -- for code analysis,
+refactoring, linting, or building new cross-language tools. Metastatic provides a
+full set of traversal and manipulation functions that mirror Elixir's `Macro` module,
+adapted for the MetaAST 3-tuple format. All are available both on `Metastatic.AST`
+(canonical) and as convenience wrappers on the `Metastatic` module itself.
+
+#### Why traversal matters
+
+Unlike Elixir's native AST, MetaAST nodes come from many languages. A single
+traversal API means you write a variable renamer, a dead-code finder, or a
+complexity counter *once* and it works on Python, Ruby, Erlang, Haskell, and
+Elixir code.
+
+#### Walking the tree
+
+```elixir
+alias Metastatic.AST
+
+{:ok, ast} = Metastatic.quote("x + y * 2", :python)
+
+# Transform-only walk (no accumulator) -- like Macro.postwalk/2
+new_ast = Metastatic.postwalk(ast, fn
+  {:variable, meta, name} -> {:variable, meta, String.upcase(name)}
+  node -> node
+end)
+
+# Walk with accumulator -- like Macro.prewalk/3
+{_ast, var_names} = Metastatic.prewalk(ast, [], fn
+  {:variable, _, name} = node, acc -> {node, [name | acc]}
+  node, acc -> {node, acc}
+end)
+# var_names => ["y", "x"]
+
+# Full pre+post traverse -- like Macro.traverse/4
+{_ast, count} = Metastatic.traverse(ast, 0,
+  fn node, acc -> {node, acc + 1} end,   # pre
+  fn node, acc -> {node, acc} end         # post
+)
+```
+
+#### Lazy enumeration
+
+```elixir
+# Stream all nodes depth-first -- like Macro.prewalker/1
+ast |> Metastatic.prewalker() |> Enum.filter(&AST.operator?/1)
+
+# Post-order stream -- like Macro.postwalker/1
+ast |> Metastatic.postwalker() |> Enum.count()
+```
+
+#### Finding nodes
+
+```elixir
+# Path from a matching node up to the root -- like Macro.path/2
+path = Metastatic.path(ast, fn
+  {:literal, _, 42} -> true
+  _ -> false
+end)
+# => [{:literal, ...42}, {:binary_op, ...}, ...root]
+```
+
+#### Pipe utilities
+
+```elixir
+# Decompose pipe chains -- like Macro.unpipe/1
+steps = Metastatic.unpipe(pipe_ast)
+# => [{initial_expr, 0}, {call1, 0}, {call2, 0}]
+
+# Inject an expression into a function call -- like Macro.pipe/3
+Metastatic.pipe_into(expr, call_node, 0)
+```
+
+#### Predicates and inspection
+
+```elixir
+# Is the whole subtree purely literal? -- like Macro.quoted_literal?/1
+Metastatic.literal?({:list, [], [{:literal, [subtype: :integer], 1}]})  # => true
+
+# Is it an operator node?
+Metastatic.operator?(ast)  # => true for :binary_op / :unary_op
+
+# Human-readable representation -- like Macro.to_string/1
+Metastatic.to_string(ast)  # => "x + y * 2"
+
+# Decompose a function call -- like Macro.decompose_call/1
+Metastatic.decompose_call(call_node)  # => {"add", [arg1, arg2]}
+
+# Validate structure with diagnostics -- like Macro.validate/1
+Metastatic.validate(ast)  # => :ok | {:error, {:invalid_node, ...}}
+
+# Generate a fresh variable for transformations -- like Macro.unique_var/2
+Metastatic.unique_var("tmp")  # => {:variable, [], "tmp_42"}
+```
+
 ### Supplemental Modules
 
 Supplemental modules extend MetaAST with library-specific integrations, enabling cross-language transformations:

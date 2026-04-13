@@ -621,6 +621,33 @@ defmodule Metastatic.AST do
   end
 
   @doc """
+  Performs a depth-first, pre-order traversal of the MetaAST.
+
+  Returns a new AST where each node is the result of invoking `fun`
+  on each corresponding node. This is the transform-only variant
+  (no accumulator), mirroring `Macro.prewalk/2`.
+
+  ## Examples
+
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+      iex> Metastatic.AST.prewalk(ast, fn
+      ...>   {:literal, meta, value} when is_integer(value) -> {:literal, meta, value * 10}
+      ...>   node -> node
+      ...> end)
+      {:binary_op, [category: :arithmetic, operator: :+],
+        [{:literal, [subtype: :integer], 10}, {:literal, [subtype: :integer], 20}]}
+  """
+  @spec prewalk(meta_ast() | term(), (meta_ast() | term() -> meta_ast() | term())) ::
+          meta_ast() | term()
+  def prewalk(ast, fun) when is_function(fun, 1) do
+    {new_ast, _} =
+      traverse(ast, nil, fn node, nil -> {fun.(node), nil} end, fn node, acc -> {node, acc} end)
+
+    new_ast
+  end
+
+  @doc """
   Traverse a MetaAST with only a post function (pre is identity).
 
   ## Examples
@@ -633,6 +660,33 @@ defmodule Metastatic.AST do
         when acc: term()
   def postwalk(ast, acc, fun) when is_function(fun, 2) do
     traverse(ast, acc, fn node, acc -> {node, acc} end, fun)
+  end
+
+  @doc """
+  Performs a depth-first, post-order traversal of the MetaAST.
+
+  Returns a new AST where each node is the result of invoking `fun`
+  on each corresponding node. This is the transform-only variant
+  (no accumulator), mirroring `Macro.postwalk/2`.
+
+  ## Examples
+
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+      iex> Metastatic.AST.postwalk(ast, fn
+      ...>   {:literal, meta, value} when is_integer(value) -> {:literal, meta, value * 10}
+      ...>   node -> node
+      ...> end)
+      {:binary_op, [category: :arithmetic, operator: :+],
+        [{:literal, [subtype: :integer], 10}, {:literal, [subtype: :integer], 20}]}
+  """
+  @spec postwalk(meta_ast() | term(), (meta_ast() | term() -> meta_ast() | term())) ::
+          meta_ast() | term()
+  def postwalk(ast, fun) when is_function(fun, 1) do
+    {new_ast, _} =
+      traverse(ast, nil, fn node, acc -> {node, acc} end, fn node, nil -> {fun.(node), nil} end)
+
+    new_ast
   end
 
   # ----- Conformance Validation -----
@@ -1640,5 +1694,513 @@ defmodule Metastatic.AST do
       when annotation_type in [:spec, :type, :hint, :callback] do
     meta = Keyword.merge([annotation_type: annotation_type], extra_meta)
     {:type_annotation, meta, [target, type_expr]}
+  end
+
+  # ----- Enumerable Walkers -----
+
+  @doc """
+  Returns an enumerable that traverses the MetaAST in depth-first, pre-order.
+
+  Mirrors `Macro.prewalker/1`. The returned enumerable lazily yields each node
+  before its children.
+
+  ## Examples
+
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+      iex> ast |> Metastatic.AST.prewalker() |> Enum.map(&Metastatic.AST.type/1)
+      [:binary_op, :literal, :literal]
+  """
+  @spec prewalker(meta_ast()) :: Enumerable.t()
+  def prewalker(ast) do
+    Stream.unfold([ast], fn
+      [] -> nil
+      [node | rest] -> {node, child_nodes(node) ++ rest}
+    end)
+  end
+
+  @doc """
+  Returns an enumerable that traverses the MetaAST in depth-first, post-order.
+
+  Mirrors `Macro.postwalker/1`. The returned enumerable lazily yields each node
+  after its children.
+
+  ## Examples
+
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+      iex> ast |> Metastatic.AST.postwalker() |> Enum.map(&Metastatic.AST.type/1)
+      [:literal, :literal, :binary_op]
+  """
+  @spec postwalker(meta_ast()) :: Enumerable.t()
+  def postwalker(ast) do
+    {_ast, nodes} = postwalk(ast, [], fn node, acc -> {node, [node | acc]} end)
+    Enum.reverse(nodes)
+  end
+
+  # Extracts child MetaAST nodes from a node (skips leaf values).
+  defp child_nodes({type, _meta, children})
+       when is_atom(type) and type in [:literal, :variable] do
+    # Leaf nodes have no traversable children
+    _ = children
+    []
+  end
+
+  defp child_nodes({type, _meta, children})
+       when is_atom(type) and is_list(children) do
+    Enum.filter(children, &meta_ast_node?/1)
+  end
+
+  defp child_nodes(_), do: []
+
+  defp meta_ast_node?({type, meta, _children}) when is_atom(type) and is_list(meta), do: true
+  defp meta_ast_node?(_), do: false
+
+  # ----- Path -----
+
+  @doc """
+  Returns the path to the node in `ast` for which `fun` returns a truthy value.
+
+  The path is a list, starting with the node for which `fun` returns a truthy
+  value, followed by all of its parents up to the root. Returns `nil` if no
+  node matches.
+
+  Mirrors `Macro.path/2`.
+
+  ## Examples
+
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:variable, [], "x"}, {:literal, [subtype: :integer], 42}]}
+      iex> path = Metastatic.AST.path(ast, fn
+      ...>   {:literal, _, 42} -> true
+      ...>   _ -> false
+      ...> end)
+      iex> Enum.map(path, &Metastatic.AST.type/1)
+      [:literal, :binary_op]
+
+      iex> ast = {:literal, [subtype: :integer], 1}
+      iex> Metastatic.AST.path(ast, fn {:variable, _, _} -> true; _ -> false end)
+      nil
+  """
+  @spec path(meta_ast(), (meta_ast() -> as_boolean(term()))) :: [meta_ast()] | nil
+  def path(ast, fun) when is_function(fun, 1) do
+    do_path(ast, fun)
+  end
+
+  defp do_path({type, meta, _children} = node, fun) when is_atom(type) and is_list(meta) do
+    if fun.(node) do
+      [node]
+    else
+      children = child_nodes(node)
+
+      Enum.find_value(children, fn child ->
+        case do_path(child, fun) do
+          nil -> nil
+          path -> path ++ [node]
+        end
+      end)
+    end
+  end
+
+  defp do_path(_other, _fun), do: nil
+
+  # ----- Pipe Utilities -----
+
+  @doc """
+  Breaks a pipe chain into a flat list of `{ast, position}` tuples.
+
+  Each tuple contains the piped expression and the argument position
+  (0-indexed) where it was injected. For the leftmost expression (the
+  initial value), position is `0`.
+
+  Mirrors `Macro.unpipe/1`.
+
+  ## Examples
+
+      iex> inner_pipe = {:pipe, [operator: :|>], [
+      ...>   {:variable, [], "x"},
+      ...>   {:function_call, [name: "foo"], []}
+      ...> ]}
+      iex> outer_pipe = {:pipe, [operator: :|>], [
+      ...>   inner_pipe,
+      ...>   {:function_call, [name: "bar"], []}
+      ...> ]}
+      iex> Metastatic.AST.unpipe(outer_pipe)
+      ...>   |> Enum.map(fn {node, pos} -> {Metastatic.AST.type(node), pos} end)
+      [variable: 0, function_call: 0, function_call: 0]
+  """
+  @spec unpipe(meta_ast()) :: [{meta_ast(), non_neg_integer()}]
+  def unpipe({:pipe, _meta, [left, right]}) do
+    unpipe(left) ++ [{right, 0}]
+  end
+
+  def unpipe(other) do
+    [{other, 0}]
+  end
+
+  @doc """
+  Pipes `expr` into the `call_args` at the given `position`.
+
+  Inserts `expr` as an argument into a function call node at the
+  specified 0-indexed position. If `call_args` is a `:function_call`
+  node, the expression is injected into its argument list.
+
+  Mirrors `Macro.pipe/3`.
+
+  ## Examples
+
+      iex> expr = {:variable, [], "x"}
+      iex> call = {:function_call, [name: "foo"], [{:literal, [subtype: :integer], 1}]}
+      iex> Metastatic.AST.pipe_into(expr, call, 0)
+      {:function_call, [name: "foo"], [{:variable, [], "x"}, {:literal, [subtype: :integer], 1}]}
+  """
+  @spec pipe_into(meta_ast(), meta_ast(), non_neg_integer()) :: meta_ast()
+  def pipe_into(expr, {:function_call, meta, args}, position) when is_list(args) do
+    {before, after_} = Enum.split(args, position)
+    {:function_call, meta, before ++ [expr | after_]}
+  end
+
+  # ----- Call Decomposition -----
+
+  @doc """
+  Decomposes a function call into its name and argument list.
+
+  Returns `{name, args}` for `:function_call` nodes, or `:error` for
+  any other node type.
+
+  For dotted calls like `"Repo.get"`, returns the full dotted name as
+  a string. Use `String.split(name, ".")` to separate receiver and method.
+
+  Mirrors `Macro.decompose_call/1`.
+
+  ## Examples
+
+      iex> call = {:function_call, [name: "add"], [{:variable, [], "x"}, {:variable, [], "y"}]}
+      iex> Metastatic.AST.decompose_call(call)
+      {"add", [{:variable, [], "x"}, {:variable, [], "y"}]}
+
+      iex> Metastatic.AST.decompose_call({:literal, [subtype: :integer], 42})
+      :error
+  """
+  @spec decompose_call(meta_ast()) :: {String.t(), [meta_ast()]} | :error
+  def decompose_call({:function_call, meta, args}) when is_list(meta) and is_list(args) do
+    {Keyword.get(meta, :name, ""), args}
+  end
+
+  def decompose_call(_), do: :error
+
+  # ----- String Representation -----
+
+  @doc """
+  Converts a MetaAST node to a human-readable string representation.
+
+  Produces a compact notation that conveys the structure without
+  reproducing full Elixir tuple syntax. Useful for debugging and
+  logging.
+
+  Mirrors `Macro.to_string/1`.
+
+  ## Examples
+
+      iex> Metastatic.AST.to_string({:literal, [subtype: :integer], 42})
+      "42"
+
+      iex> Metastatic.AST.to_string({:variable, [], "x"})
+      "x"
+
+      iex> ast = {:binary_op, [category: :arithmetic, operator: :+],
+      ...>   [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+      iex> Metastatic.AST.to_string(ast)
+      "x + 5"
+
+      iex> ast = {:function_call, [name: "foo"], [{:variable, [], "x"}, {:literal, [subtype: :integer], 1}]}
+      iex> Metastatic.AST.to_string(ast)
+      "foo(x, 1)"
+
+      iex> ast = {:list, [], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+      iex> Metastatic.AST.to_string(ast)
+      "[1, 2]"
+  """
+  @spec to_string(meta_ast()) :: String.t()
+  def to_string(ast) do
+    do_to_string(ast)
+  end
+
+  defp do_to_string({:literal, meta, value}) do
+    case Keyword.get(meta, :subtype) do
+      :string -> "\"#{value}\""
+      :symbol -> ":#{value}"
+      :null -> "nil"
+      :boolean -> Kernel.to_string(value)
+      :regex -> "~r/#{value}/"
+      _ -> Kernel.to_string(value)
+    end
+  end
+
+  defp do_to_string({:variable, _meta, name}), do: name
+
+  defp do_to_string({:binary_op, meta, [left, right]}) do
+    op = Keyword.get(meta, :operator, :op)
+    "#{do_to_string(left)} #{op} #{do_to_string(right)}"
+  end
+
+  defp do_to_string({:unary_op, meta, [operand]}) do
+    op = Keyword.get(meta, :operator, :op)
+    "#{op}#{do_to_string(operand)}"
+  end
+
+  defp do_to_string({:function_call, meta, args}) do
+    name = Keyword.get(meta, :name, "?")
+    args_str = Enum.map_join(args, ", ", &do_to_string/1)
+    "#{name}(#{args_str})"
+  end
+
+  defp do_to_string({:list, _meta, elements}) do
+    inner = Enum.map_join(elements, ", ", &do_to_string/1)
+    "[#{inner}]"
+  end
+
+  defp do_to_string({:tuple, _meta, elements}) do
+    inner = Enum.map_join(elements, ", ", &do_to_string/1)
+    "{#{inner}}"
+  end
+
+  defp do_to_string({:map, _meta, pairs}) do
+    inner = Enum.map_join(pairs, ", ", &do_to_string/1)
+    "%{#{inner}}"
+  end
+
+  defp do_to_string({:pair, _meta, [key, value]}) do
+    "#{do_to_string(key)} => #{do_to_string(value)}"
+  end
+
+  defp do_to_string({:assignment, _meta, [target, value]}) do
+    "#{do_to_string(target)} = #{do_to_string(value)}"
+  end
+
+  defp do_to_string({:block, _meta, statements}) do
+    Enum.map_join(statements, "\n", &do_to_string/1)
+  end
+
+  defp do_to_string({:conditional, _meta, [condition, then_branch, nil]}) do
+    "if #{do_to_string(condition)} do #{do_to_string(then_branch)} end"
+  end
+
+  defp do_to_string({:conditional, _meta, [condition, then_branch, else_branch]}) do
+    "if #{do_to_string(condition)} do #{do_to_string(then_branch)} else #{do_to_string(else_branch)} end"
+  end
+
+  defp do_to_string({:pipe, _meta, [left, right]}) do
+    "#{do_to_string(left)} |> #{do_to_string(right)}"
+  end
+
+  defp do_to_string({:container, meta, body}) do
+    name = Keyword.get(meta, :name, "?")
+    ct = Keyword.get(meta, :container_type, :module)
+    inner = Enum.map_join(body, "; ", &do_to_string/1)
+    "#{ct} #{name} do #{inner} end"
+  end
+
+  defp do_to_string({:function_def, meta, body}) do
+    name = Keyword.get(meta, :name, "?")
+    params = Keyword.get(meta, :params, [])
+    params_str = Enum.map_join(params, ", ", &do_to_string/1)
+    body_str = Enum.map_join(body, "; ", &do_to_string/1)
+    "def #{name}(#{params_str}) do #{body_str} end"
+  end
+
+  defp do_to_string({:param, _meta, name}), do: name
+
+  defp do_to_string({:lambda, meta, body}) do
+    params = Keyword.get(meta, :params, [])
+    params_str = Enum.map_join(params, ", ", &do_to_string/1)
+    body_str = Enum.map_join(body, "; ", &do_to_string/1)
+    "fn #{params_str} -> #{body_str} end"
+  end
+
+  defp do_to_string({:early_return, _meta, []}), do: "return"
+  defp do_to_string({:early_return, _meta, [value]}), do: "return #{do_to_string(value)}"
+
+  defp do_to_string({:attribute_access, meta, [receiver]}) do
+    attr = Keyword.get(meta, :attribute, "?")
+    "#{do_to_string(receiver)}.#{attr}"
+  end
+
+  defp do_to_string({:range, _meta, [start, stop]}) do
+    "#{do_to_string(start)}..#{do_to_string(stop)}"
+  end
+
+  defp do_to_string({:import, meta, []}) do
+    source = Keyword.get(meta, :source, "?")
+    "import #{source}"
+  end
+
+  defp do_to_string({:string_interpolation, _meta, parts}) do
+    inner =
+      Enum.map_join(parts, fn
+        {:literal, meta, value} ->
+          if Keyword.get(meta, :subtype) == :string,
+            do: value,
+            else: "\#{#{do_to_string({:literal, meta, value})}}"
+
+        other ->
+          "\#{#{do_to_string(other)}}"
+      end)
+
+    "\"#{inner}\""
+  end
+
+  # Fallback for any node type not specifically handled
+  defp do_to_string({type, _meta, children}) when is_atom(type) and is_list(children) do
+    inner = Enum.map_join(children, ", ", &do_to_string/1)
+    "#{type}(#{inner})"
+  end
+
+  defp do_to_string({type, _meta, value}) when is_atom(type) do
+    "#{type}(#{inspect(value)})"
+  end
+
+  defp do_to_string(other), do: inspect(other)
+
+  # ----- Predicates -----
+
+  @doc """
+  Returns `true` if the given MetaAST represents a literal value.
+
+  A node is considered literal if it is a `:literal` node, or a composite
+  node (`:list`, `:tuple`, `:map`, `:pair`) whose children are all literals.
+
+  Mirrors `Macro.quoted_literal?/1`.
+
+  ## Examples
+
+      iex> Metastatic.AST.literal?({:literal, [subtype: :integer], 42})
+      true
+
+      iex> Metastatic.AST.literal?({:list, [], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]})
+      true
+
+      iex> Metastatic.AST.literal?({:variable, [], "x"})
+      false
+
+      iex> Metastatic.AST.literal?({:list, [], [{:variable, [], "x"}]})
+      false
+  """
+  @spec literal?(meta_ast()) :: boolean()
+  def literal?({:literal, _meta, _value}), do: true
+
+  def literal?({type, _meta, children})
+      when type in [:list, :tuple, :map] and is_list(children) do
+    Enum.all?(children, &literal?/1)
+  end
+
+  def literal?({:pair, _meta, [key, value]}), do: literal?(key) and literal?(value)
+  def literal?(_), do: false
+
+  @doc """
+  Returns `true` if the node is a binary or unary operator.
+
+  ## Examples
+
+      iex> Metastatic.AST.operator?({:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "x"}, {:literal, [subtype: :integer], 1}]})
+      true
+
+      iex> Metastatic.AST.operator?({:unary_op, [category: :arithmetic, operator: :-], [{:variable, [], "x"}]})
+      true
+
+      iex> Metastatic.AST.operator?({:literal, [subtype: :integer], 42})
+      false
+  """
+  @spec operator?(meta_ast()) :: boolean()
+  def operator?({type, _meta, _children}) when type in [:binary_op, :unary_op], do: true
+  def operator?(_), do: false
+
+  # ----- Validation -----
+
+  @doc """
+  Validates that the given term is a valid MetaAST node.
+
+  Returns `:ok` if valid, or `{:error, reason}` with a description of
+  the first encountered problem. Unlike `conforms?/1` which returns a
+  boolean, this provides diagnostic information.
+
+  Mirrors `Macro.validate/1`.
+
+  ## Examples
+
+      iex> Metastatic.AST.validate({:literal, [subtype: :integer], 42})
+      :ok
+
+      iex> Metastatic.AST.validate({:literal, [subtype: :integer], "not_an_int"})
+      {:error, {:invalid_node, {:literal, [subtype: :integer], "not_an_int"}}}
+
+      iex> Metastatic.AST.validate("not an ast")
+      {:error, {:not_an_ast_node, "not an ast"}}
+  """
+  @spec validate(term()) :: :ok | {:error, term()}
+  def validate(ast) do
+    do_validate(ast)
+  end
+
+  defp do_validate({type, meta, _children} = node) when is_atom(type) and is_list(meta) do
+    if conforms?(node) do
+      :ok
+    else
+      # Try to find the specific child that fails
+      case find_invalid_child(node) do
+        nil -> {:error, {:invalid_node, node}}
+        child_error -> child_error
+      end
+    end
+  end
+
+  defp do_validate(other), do: {:error, {:not_an_ast_node, other}}
+
+  defp find_invalid_child({type, _meta, children})
+       when type in [:literal, :variable] do
+    _ = children
+    nil
+  end
+
+  defp find_invalid_child({_type, _meta, children}) when is_list(children) do
+    Enum.find_value(children, fn child ->
+      case child do
+        {t, m, _} when is_atom(t) and is_list(m) ->
+          if conforms?(child), do: nil, else: {:error, {:invalid_node, child}}
+
+        _ ->
+          nil
+      end
+    end)
+  end
+
+  defp find_invalid_child(_), do: nil
+
+  # ----- Unique Variables -----
+
+  @doc """
+  Generates a unique variable MetaAST node.
+
+  Each call produces a variable with a unique name based on the given
+  prefix and a monotonically increasing counter. Useful for code
+  transformations that need to introduce fresh bindings.
+
+  Mirrors `Macro.unique_var/2`.
+
+  ## Examples
+
+      iex> {:variable, _, name1} = Metastatic.AST.unique_var("tmp")
+      iex> {:variable, _, name2} = Metastatic.AST.unique_var("tmp")
+      iex> name1 != name2
+      true
+
+      iex> {:variable, _, name} = Metastatic.AST.unique_var("arg")
+      iex> String.starts_with?(name, "arg_")
+      true
+  """
+  @spec unique_var(String.t(), keyword()) :: meta_ast()
+  def unique_var(prefix, meta \\ []) when is_binary(prefix) do
+    counter = :erlang.unique_integer([:positive, :monotonic])
+    {:variable, meta, "#{prefix}_#{counter}"}
   end
 end

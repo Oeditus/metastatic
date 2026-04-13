@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Macro-like AST traversal and manipulation API** -- mirrors Elixir's `Macro` module for MetaAST:
+  - `prewalk/2`, `postwalk/2` -- transform-only tree walks (no accumulator)
+  - `prewalker/1`, `postwalker/1` -- lazy enumerable traversals (`Stream`-based)
+  - `path/2` -- find the path from a matching node up to the root
+  - `unpipe/1` -- flatten nested `:pipe` chains into a list of `{node, position}` tuples
+  - `pipe_into/3` -- inject an expression into a `:function_call` argument list at a given position
+  - `decompose_call/1` -- extract `{name, args}` from `:function_call` nodes (returns `:error` otherwise)
+  - `to_string/1` -- human-readable pseudo-code representation of MetaAST for debugging
+  - `literal?/1` -- recursively check whether a subtree is composed entirely of literal values
+  - `operator?/1` -- predicate for `:binary_op` and `:unary_op` nodes
+  - `validate/1` -- structural validation returning `:ok` or `{:error, {:invalid_node, node}}`
+  - `unique_var/1` -- generate unique variable nodes with monotonic counter
+- All new functions available on both `Metastatic.AST` (canonical) and `Metastatic` (convenience delegates)
+- Full `@doc`, `@spec`, and doctests for every new function
+- 1992 tests passing (336 doctests + 1656 tests), zero regressions
+
+### Documentation
+- Added "AST Traversal & Manipulation" section to README.md explaining why traversal matters and
+  showing walking, lazy enumeration, path-finding, pipe utilities, predicates, and inspection
+- Added "AST Traversal & Manipulation" section to GETTING_STARTED.md with comprehensive examples
+  for every new function and a quick-reference list
+
 ## [0.15.1] - 2026-04-12
 
 Major adapter overhaul: all five language adapters now emit proper M2 types instead of falling back

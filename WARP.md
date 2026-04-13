@@ -6,8 +6,8 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
 
-**Current Status:** v0.13.0 - Production Ready
-- 263 doctests + 1656 tests passing (excluding haskell tag), 100% coverage
+**Current Status:** v0.15.2-dev - Production Ready
+- 336 doctests + 1656 tests passing (excluding haskell tag), 100% coverage
 - Uniform 3-Tuple MetaAST Format: All MetaAST nodes use `{type_atom, keyword_meta, children_or_value}`
 - M2.1 Core Layer: literal, variable, list, map, pair, tuple, binary_op, unary_op, function_call, conditional, early_return, throw, block, assignment, inline_match, range, string_interpolation
 - M2.2 Extended Layer: loop (while/for/for_each/do_while/infinite), lambda, collection_op, pattern_match, match_arm, exception_handling, async_operation, yield, comprehension, generator, filter
@@ -30,7 +30,7 @@ Metastatic is a cross-language code analysis library using a unified MetaAST (Me
 
 ### Testing
 ```bash
-# Run all tests (255 doctests + 1646 tests passing, excluding haskell)
+# Run all tests (336 doctests + 1656 tests passing, excluding haskell)
 mix test --exclude haskell
 
 # Run including haskell tests (requires GHC)
@@ -113,11 +113,18 @@ flowchart TD
 
 ### Core Modules
 
-**lib/metastatic/ast.ex** (551 lines)
-- M2 meta-model type definitions
-- Structural conformance checking (`conforms?/1`)
+**lib/metastatic/ast.ex** (~2200 lines)
+- M2 meta-model type definitions and core type system
+- Structural conformance checking (`conforms?/1`), validation (`validate/1`)
 - Variable extraction (`variables/1`)
-- Core type system for all MetaAST nodes
+- Macro-like traversal: `traverse/4`, `prewalk/2,3`, `postwalk/2,3`
+- Lazy walkers: `prewalker/1`, `postwalker/1`
+- Path finding: `path/2`
+- Pipe utilities: `unpipe/1`, `pipe_into/3`
+- Predicates: `literal?/1`, `operator?/1`, `leaf?/1`
+- Inspection: `to_string/1`, `decompose_call/1`
+- Code generation: `unique_var/1`
+- Builder helpers for all MetaAST node types
 
 **lib/metastatic/document.ex** (197 lines)
 - Wraps MetaAST with metadata and language info
