@@ -45,6 +45,7 @@ defmodule Metastatic.Adapters.Cure do
 
   def reify(_), do: {:error, "Not a Cure document"}
 
+  @dialyzer {:nowarn_function, round_trip: 1}
   @doc "Round-trip: parse source to MetaAST, then back to source."
   @spec round_trip(String.t()) :: {:ok, String.t()} | {:error, term()}
   def round_trip(source) do
