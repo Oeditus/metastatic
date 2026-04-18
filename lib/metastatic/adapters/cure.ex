@@ -15,25 +15,21 @@ defmodule Metastatic.Adapters.Cure do
   # compiler modules live in a separate Mix project and are not available
   # at Metastatic compile time. The adapter is used at runtime only.
 
-  alias Cure.Compiler.{Lexer, Parser}
-  alias Metastatic.{Adapters.Cure.FromMeta, Document}
+  alias Metastatic.{Adapters.Cure.FromMeta, Adapters.Cure.ToMeta, Document}
 
   @doc "Parse Cure source code into a MetaAST Document."
-  @spec abstract(String.t(), atom()) :: {:ok, Document.t()} | {:error, term()}
-  case {Code.ensure_compiled(Lexer), Code.ensure_compiled(Parser)} do
-    {{:module, _}, {:module, _}} ->
-      def abstract(source, _language) when is_binary(source) do
-        with {:ok, tokens} <- Lexer.tokenize(source, emit_events: false),
-             {:ok, ast} <- Parser.parse(tokens, emit_events: false) do
-          doc = Document.new(ast, :cure)
-          {:ok, doc}
-        end
-      end
+  @spec abstract(String.t(), atom(), keyword()) :: {:ok, Document.t()} | {:error, term()}
+  @dialyzer {:nowarn_function, abstract: 3}
+  def abstract(source, language \\ :cure, opts \\ [])
 
-    _ ->
-      def abstract(source, _language) when is_binary(source) do
-        {:error, :cure_not_available}
-      end
+  def abstract(source, _language, opts) when is_binary(source) and is_list(opts) do
+    # The `{:ok, ...}` branch is only reachable when the Cure compiler
+    # is linked in at runtime; `with` sidesteps the Elixir type system
+    # complaining about the (compile-time only) fallback arm in
+    # `ToMeta.from_source/2`.
+    with {:ok, ast, metadata} <- ToMeta.from_source(source, opts) do
+      {:ok, Document.new(ast, :cure, metadata, source)}
+    end
   end
 
   @doc "Convert a Cure MetaAST Document back to Cure source."

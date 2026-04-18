@@ -7,7 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Added -- Cure v0.20.0 catch-up
+- **`:bin_segment` (M2.1 Core)** -- new node type for a single element of
+  a bitstring literal / pattern (`<<value::type-size(n)-unit(u)-sign-endian>>`).
+  Shape `{:bin_segment, meta, [value]}` with optional meta keys
+  `:type`, `:signedness`, `:endianness`, `:size` (AST node), `:unit`
+  (integer). Added to `@core_types`, given a `valid_node?/3` clause,
+  a `Metastatic.AST.bin_segment/2` builder helper, `AST.to_string/1`
+  rendering, and handlers in the Cure and Elixir `FromMeta` adapters.
+- **`:comment` (M2.1 Core)** -- new trivia node representing a source
+  comment. Shape `{:comment, meta, text}` with `:comment_kind` meta
+  (`:line` / `:doc` / `:block`). Analyzers and codegens skip comments;
+  formatters and documentation tooling round-trip them. Added to
+  `@core_types`, given a `valid_node?/3` clause, the
+  `Metastatic.AST.comment/3` builder, `AST.to_string/1` rendering,
+  leaf-safe traversal wiring, and handlers in both `FromMeta`
+  adapters (Elixir collapses them to `nil` because its tokenizer
+  strips comments from quoted ASTs).
+- **`:literal` subtype `:bytes` dual shape.** The validator now
+  accepts either the historical `binary()` payload or a list of
+  `:bin_segment` children. When the payload is a segment list,
+  `AST.traverse/4`, `AST.prewalker/1`, `AST.postwalker/1`,
+  `AST.path/2`, and `AST.variables/1` descend into each segment's
+  value so analyzers see the bound names inside
+  `<<x::utf8, rest::binary>>`-style patterns.
+- **`Metastatic.Adapters.Cure.ToMeta`** -- new abstraction adapter
+  that parses Cure source through the Cure compiler's lexer + parser
+  (when linked in at runtime) and normalises the resulting MetaAST
+  (default `:comment_kind` metadata, atom-coerced `:bin_segment`
+  specifiers, recursive `:param` normalisation). Exposes
+  `from_source/2`, `from_ast/1`, and `normalize/1`.
+- **`Metastatic.Adapters.Cure.abstract/3`** -- routes through the new
+  `ToMeta.from_source/2`, threads the `preserve_comments:` option, and
+  returns a `Document` with `metadata: %{language: :cure}` so the
+  result round-trips cleanly through `Adapter.round_trip/2`.
+- **`METAST_SPEC.md`** -- adds dedicated `:bin_segment` and
+  `:comment` subsections under M2.1 Core, documents the dual `:bytes`
+  payload, and updates the Node Type Reference table.
+
+### Added -- previously unreleased
 - **MetaAST nodes backported from Cure v0.18.0 -- v0.19.0:**
   - `:pin` (M2.2 Extended) -- pattern-position pin operator `^x`.
     Shape `{:pin, meta, [inner]}`. Promoted from a dead placeholder

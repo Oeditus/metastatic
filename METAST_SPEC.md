@@ -189,6 +189,30 @@ for `:regex`.
 {:literal, [subtype: :regex], ~r/foo/}
 ```
 
+**Dual shape for `:bytes` (Cure v0.20.0+).** A `:literal` with
+`subtype: :bytes` accepts two payload shapes:
+
+- a raw `binary()` value (the historical form; used whenever the source
+  bitstring has no specifier grammar or has been serialised by an
+  adapter for a downstream target);
+- a list of `:bin_segment` MetaAST nodes, mirroring Elixir's
+  `<<seg1, seg2, ...>>` surface syntax (see `:bin_segment` below).
+
+```elixir
+# Raw bytes payload
+{:literal, [subtype: :bytes], <<1, 2, 3>>}
+
+# Segment-list payload (Elixir/Cure): <<x::utf8, rest::binary>>
+{:literal, [subtype: :bytes],
+  [{:bin_segment, [type: :utf8], [{:variable, [], "x"}]},
+   {:bin_segment, [type: :binary], [{:variable, [], "rest"}]}]}
+```
+
+Walkers, the conformance validator, and pattern-aware analyzers treat
+the segment-list payload as composite: children are traversed, variable
+extraction sees `"x"` and `"rest"`, and `Metastatic.AST.path/2` can
+locate nodes inside individual segments.
+
 #### `:variable`
 
 A named binding.
@@ -431,6 +455,73 @@ Parts alternate between literal string fragments and expression nodes.
    {:variable, [], "name"},
    {:literal, [subtype: :string], "!"}]}
 ```
+
+#### `:bin_segment`
+
+A single element of a bitstring literal / pattern (Cure v0.20.0+).
+
+```elixir
+{:bin_segment, [type: type, signedness: sign, endianness: endian,
+                size: size_ast, unit: unit], [value]}
+```
+
+**Required children:** a single-element list `[value]`, where `value`
+is any conforming MetaAST node.
+
+**Metadata keys** (all optional, mirroring Elixir's bitstring specifier
+grammar):
+
+- `:type` -- one of `:integer`, `:float`, `:bits`, `:bitstring`,
+  `:bytes`, `:binary`, `:utf8`, `:utf16`, `:utf32`, `:any`.
+- `:signedness` -- `:signed` or `:unsigned`.
+- `:endianness` -- `:big`, `:little`, or `:native`.
+- `:size` -- a MetaAST node (typically a `:literal` integer or a
+  `:variable`) giving the segment size.
+- `:unit` -- an integer (the Elixir unit multiplier).
+
+Segments appear as children of `{:literal, [subtype: :bytes], [...]}`
+nodes. A standalone segment outside of a `:bytes` literal is a malformed
+construct and will not round-trip through any adapter.
+
+```elixir
+# <<x::utf8>>
+{:literal, [subtype: :bytes],
+  [{:bin_segment, [type: :utf8], [{:variable, [], "x"}]}]}
+
+# <<size::integer-size(8), rest::binary>>
+{:literal, [subtype: :bytes],
+  [{:bin_segment,
+     [type: :integer, size: {:literal, [subtype: :integer], 8}],
+     [{:variable, [], "size"}]},
+   {:bin_segment, [type: :binary], [{:variable, [], "rest"}]}]}
+```
+
+#### `:comment`
+
+A trivia source comment (Cure v0.20.0+).
+
+```elixir
+{:comment, [comment_kind: kind], text}
+```
+
+**Required value:** `text` must be a binary (string).
+
+**Metadata keys:**
+
+- `:comment_kind` -- `:line` (default; plain `#` or `//`), `:doc`
+  (Elixir `@doc` / Cure `##` / `###`), or `:block` (C-style
+  `/* ... */`).
+- `:line`, `:col`, `:end_line`, `:end_col` -- standard location keys.
+
+```elixir
+{:comment, [comment_kind: :line, line: 10], "TODO: revisit"}
+{:comment, [comment_kind: :doc, line: 5], "Public API entry point"}
+```
+
+Comments are *trivia*: type checkers, codegens, and the majority of
+analyzers skip them without visiting the children (there are none).
+Formatters, documentation extractors, and round-trip tooling preserve
+them to reproduce source faithfully.
 
 #### `:_` (wildcard)
 
@@ -1029,7 +1120,8 @@ AST.node_visibility(node)  # => :public
 
 `:literal`, `:variable`, `:binary_op`, `:unary_op`, `:function_call`,
 `:conditional`, `:early_return`, `:block`, `:list`, `:map`, `:pair`,
-`:tuple`, `:assignment`, `:inline_match`, `:range`, `:string_interpolation`
+`:tuple`, `:assignment`, `:inline_match`, `:range`,
+`:string_interpolation`, `:bin_segment`, `:comment`
 
 ### M2.2 Extended (most languages)
 

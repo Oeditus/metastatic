@@ -145,7 +145,10 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     # Helpers
     :pin,
     :assert_type,
-    :cons_pattern
+    :cons_pattern,
+    # v0.20.0 bitstring grammar and trivia
+    :bin_segment,
+    :comment
   ]
 
   defp meta_ast_type?(type), do: type in @meta_ast_types
@@ -154,21 +157,62 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   defp transform_node(:literal, meta, value, acc) do
     subtype = Keyword.get(meta, :subtype)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
-    elixir_value =
-      case subtype do
-        :integer -> value
-        :float -> value
-        :string -> value
-        :boolean -> value
-        :null -> nil
-        :symbol -> value
-        :regex -> value
-        _ -> value
-      end
+    case subtype do
+      :bytes when is_list(value) ->
+        # Segment-list payload (Cure v0.20.0+). The individual
+        # `:bin_segment` nodes have already been post-transformed to
+        # Elixir `{:"::", ...}` tuples (or bare values for unspecified
+        # segments). Wrap them in the Elixir `<<>>` form.
+        {{:<<>>, elixir_meta, value}, acc}
 
-    {elixir_value, acc}
+      :bytes when is_binary(value) ->
+        # Legacy raw-binary payload.
+        bytes = :binary.bin_to_list(value)
+        {{:<<>>, elixir_meta, bytes}, acc}
+
+      _ ->
+        elixir_value =
+          case subtype do
+            :integer -> value
+            :float -> value
+            :string -> value
+            :boolean -> value
+            :null -> nil
+            :symbol -> value
+            :regex -> value
+            _ -> value
+          end
+
+        {elixir_value, acc}
+    end
   end
+
+  # ----- Bitstring Segment (Cure v0.20.0+) -----
+
+  # After post-order traversal `value` is already a raw Elixir AST
+  # node. Build either a bare value (no specifiers) or an Elixir
+  # `{:"::", meta, [value, spec]}` wrapper whose `spec` is a
+  # specifier chain joined by `-`.
+  defp transform_node(:bin_segment, meta, [value], acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    spec = build_bin_segment_spec(meta, acc)
+
+    case spec do
+      nil -> {value, acc}
+      spec_ast -> {{:"::", elixir_meta, [value, spec_ast]}, acc}
+    end
+  end
+
+  # ----- Trivia Comment (Cure v0.20.0+) -----
+
+  # Elixir has no surface syntax for free-standing comments inside the
+  # AST; they are stripped by the tokenizer. Map `:comment` to the unit
+  # `nil` so callers can treat it as a no-op while still surviving
+  # `Macro.to_string/1`. Formatters that care about comments should
+  # consume the MetaAST directly rather than going through this adapter.
+  defp transform_node(:comment, _meta, _text, acc), do: {nil, acc}
 
   # ----- Variable Transformation -----
 
@@ -767,6 +811,55 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   defp transform_node(type, meta, children, _acc) do
     throw({:unsupported, "Unsupported MetaAST construct: #{inspect({type, meta, children})}"})
+  end
+
+  # ----- Bitstring Segment Helpers -----
+
+  # Build the Elixir specifier AST for a single bin_segment.
+  # Returns nil when no specifier was supplied (the bare value is used
+  # directly as a segment). Otherwise builds a `-` chain, e.g.
+  # `integer-big-size(8)-unit(1)`.
+  defp build_bin_segment_spec(meta, acc) do
+    type = Keyword.get(meta, :type)
+    sign = Keyword.get(meta, :signedness)
+    endian = Keyword.get(meta, :endianness)
+    size_ast = Keyword.get(meta, :size)
+    unit = Keyword.get(meta, :unit)
+
+    parts =
+      []
+      |> prepend_if(type, fn t -> {t, [], nil} end)
+      |> prepend_if(sign, fn s -> {s, [], nil} end)
+      |> prepend_if(endian, fn e -> {e, [], nil} end)
+      |> Enum.reverse()
+
+    parts =
+      case size_ast do
+        nil ->
+          parts
+
+        ast ->
+          {:ok, size_ex} = __MODULE__.transform(ast, acc)
+          parts ++ [{:size, [], [size_ex]}]
+      end
+
+    parts =
+      case unit do
+        nil -> parts
+        n when is_integer(n) -> parts ++ [{:unit, [], [n]}]
+      end
+
+    join_bin_specifiers(parts)
+  end
+
+  defp prepend_if(list, nil, _fun), do: list
+  defp prepend_if(list, value, fun), do: [fun.(value) | list]
+
+  defp join_bin_specifiers([]), do: nil
+  defp join_bin_specifiers([single]), do: single
+
+  defp join_bin_specifiers([first | rest]) do
+    Enum.reduce(rest, first, fn next, acc -> {:-, [], [acc, next]} end)
   end
 
   # ----- Lambda Helpers -----

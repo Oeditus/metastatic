@@ -167,6 +167,34 @@ defmodule Metastatic.AST do
     `:on_transition`, `:on_enter`, `:on_exit`, `:on_failure`,
     `:on_timer`. Body elements are typically transition `:function_call`
     nodes carrying `:from`, `:event`, `:to`, and `:event_kind` metadata.
+
+  ## Bitstring / Comment Extensions (Cure v0.20.0)
+
+  Two M2.1 Core additions were back-ported from Cure v0.20.0 -- "The
+  Shape of Things":
+
+  - **`:bin_segment`** -- a single element of a bitstring literal /
+    pattern such as `<<x::utf8, rest::binary>>`. Shape
+    `{:bin_segment, meta, [value]}`. Accepted meta keys mirror Elixir's
+    bitstring specifier grammar:
+      * `:type` -- one of `:integer`, `:float`, `:bits`, `:bitstring`,
+        `:bytes`, `:binary`, `:utf8`, `:utf16`, `:utf32`, `:any`;
+      * `:signedness` -- `:signed` or `:unsigned`;
+      * `:endianness` -- `:big`, `:little`, or `:native`;
+      * `:size` -- a MetaAST node (typically `:literal` integer or
+        `:variable`);
+      * `:unit` -- integer `1..256`.
+  - **`:literal` with `subtype: :bytes`** now accepts two payload
+    shapes: the historical `binary()` value, or a list of
+    `:bin_segment` children representing the segment grammar. Walkers
+    and path utilities treat the segment-list payload as composite so
+    that analyzers can traverse into each segment value.
+  - **`:comment`** -- a trivia node representing a source comment.
+    Shape `{:comment, meta, text}`. `:comment_kind` metadata is one of
+    `:line` (default, plain `#` or `//`), `:doc` (Elixir `@doc` / Cure
+    `##`), or `:block` (C-style). Analyzers and code generators skip
+    comments; formatters and documentation tooling use them to
+    round-trip source faithfully.
   """
 
   # ----- Type Definitions -----
@@ -201,6 +229,8 @@ defmodule Metastatic.AST do
           | :inline_match
           | :range
           | :string_interpolation
+          | :bin_segment
+          | :comment
 
   @typedoc """
   Node type atoms for M2.2 Extended Layer - common patterns.
@@ -414,7 +444,9 @@ defmodule Metastatic.AST do
     :assignment,
     :inline_match,
     :range,
-    :string_interpolation
+    :string_interpolation,
+    :bin_segment,
+    :comment
   ]
 
   @extended_types [
@@ -662,9 +694,23 @@ defmodule Metastatic.AST do
   end
 
   # Traverse children based on node type
+  # :literal nodes with a bin_segment list payload (Cure v0.20.0+) are
+  # treated as composite so analyzers and transformers can walk into the
+  # embedded expressions. Raw binary/atom/numeric payloads stay leaf.
+  defp traverse_children(:literal, value, acc, pre, post)
+       when is_list(value) do
+    if Enum.all?(value, &match?({:bin_segment, _, _}, &1)) do
+      Enum.map_reduce(value, acc, fn child, acc ->
+        do_traverse(child, acc, pre, post)
+      end)
+    else
+      {value, acc}
+    end
+  end
+
   # Leaf nodes - value is not traversable
   defp traverse_children(type, value, acc, _pre, _post)
-       when type in [:literal, :variable] do
+       when type in [:literal, :variable, :comment] do
     {value, acc}
   end
 
@@ -907,6 +953,54 @@ defmodule Metastatic.AST do
   defp valid_node?(:string_interpolation, _meta, parts) do
     is_list(parts) and Enum.all?(parts, &conforms?/1)
   end
+
+  # Bitstring segment (Cure v0.20.0+). The children list has exactly one
+  # entry -- the value expression. All specifier information lives in
+  # metadata (:type, :signedness, :endianness, :size, :unit).
+  @bin_segment_types [
+    :integer,
+    :float,
+    :bits,
+    :bitstring,
+    :bytes,
+    :binary,
+    :utf8,
+    :utf16,
+    :utf32,
+    :any
+  ]
+  @bin_segment_signedness [:signed, :unsigned]
+  @bin_segment_endianness [:big, :little, :native]
+
+  defp valid_node?(:bin_segment, meta, [value]) do
+    type = Keyword.get(meta, :type)
+    sign = Keyword.get(meta, :signedness)
+    endian = Keyword.get(meta, :endianness)
+    size = Keyword.get(meta, :size)
+    unit = Keyword.get(meta, :unit)
+
+    conforms?(value) and
+      (is_nil(type) or type in @bin_segment_types) and
+      (is_nil(sign) or sign in @bin_segment_signedness) and
+      (is_nil(endian) or endian in @bin_segment_endianness) and
+      (is_nil(size) or conforms?(size)) and
+      (is_nil(unit) or is_integer(unit))
+  end
+
+  defp valid_node?(:bin_segment, _meta, _), do: false
+
+  # Trivia comment node (Cure v0.20.0+). The value is the comment text;
+  # `:comment_kind` metadata distinguishes `:line` (plain `#`) from `:doc`
+  # (`##` / `###`). Comments are trivia: analyzers and code generators
+  # skip them, but formatters and documentation tools need them back.
+  @comment_kinds [:line, :doc, :block]
+
+  defp valid_node?(:comment, meta, text) when is_binary(text) do
+    kind = Keyword.get(meta, :comment_kind, :line)
+    kind in @comment_kinds
+  end
+
+  defp valid_node?(:comment, _meta, _), do: false
 
   # M2.2 Extended types
   defp valid_node?(:loop, meta, children) do
@@ -1172,7 +1266,23 @@ defmodule Metastatic.AST do
   defp valid_literal_value?(:symbol, value), do: is_atom(value)
   defp valid_literal_value?(:regex, _value), do: true
   defp valid_literal_value?(:char, value), do: is_binary(value) or is_integer(value)
-  defp valid_literal_value?(:bytes, value), do: is_binary(value)
+
+  # `:bytes` accepts two shapes (Cure v0.20.0+):
+  #   * a raw `binary()` -- the legacy payload for languages that do not
+  #     expose bitstring segment grammar (or that serialise the bytes for
+  #     a downstream target);
+  #   * a list of `:bin_segment` MetaAST nodes -- the Elixir-style
+  #     `<<seg1, seg2, ...>>` grammar. Every child must itself conform.
+  defp valid_literal_value?(:bytes, value) when is_binary(value), do: true
+
+  defp valid_literal_value?(:bytes, value) when is_list(value) do
+    Enum.all?(value, fn
+      {:bin_segment, _, _} = seg -> conforms?(seg)
+      _ -> false
+    end)
+  end
+
+  defp valid_literal_value?(:bytes, _value), do: false
 
   # ----- Variable Extraction -----
 
@@ -1804,6 +1914,53 @@ defmodule Metastatic.AST do
     {:type_annotation, meta, [target, type_expr]}
   end
 
+  @doc """
+  Create a bitstring segment node (Cure v0.20.0+).
+
+  Segments appear as children of `{:literal, [subtype: :bytes], [...]}`
+  nodes and mirror Elixir's `<<value::type-size(n)-unit(u)-sign-endian>>`
+  grammar. The `value` is a conforming MetaAST node; the accepted meta
+  keys are `:type`, `:signedness`, `:endianness`, `:size` (AST node)
+  and `:unit` (integer).
+
+  ## Examples
+
+      iex> v = {:variable, [], "x"}
+      iex> Metastatic.AST.bin_segment(v, type: :utf8)
+      {:bin_segment, [type: :utf8], [{:variable, [], "x"}]}
+
+      iex> v = {:variable, [], "rest"}
+      iex> Metastatic.AST.bin_segment(v, type: :binary)
+      {:bin_segment, [type: :binary], [{:variable, [], "rest"}]}
+  """
+  @spec bin_segment(meta_ast(), keyword()) :: meta_ast()
+  def bin_segment(value, meta \\ []) when is_list(meta) do
+    {:bin_segment, meta, [value]}
+  end
+
+  @doc """
+  Create a trivia comment node (Cure v0.20.0+).
+
+  Comments are trivia: analyzers and code generators skip them, but
+  formatters and documentation tooling need them back. `kind` is one
+  of `:line` (plain `#` or `//`), `:doc` (Elixir `@doc` / Cure `##`)
+  or `:block` (C-style `/* ... */`).
+
+  ## Examples
+
+      iex> Metastatic.AST.comment("TODO: revisit")
+      {:comment, [comment_kind: :line], "TODO: revisit"}
+
+      iex> Metastatic.AST.comment("Public API entry point", :doc, line: 5)
+      {:comment, [comment_kind: :doc, line: 5], "Public API entry point"}
+  """
+  @spec comment(String.t(), atom(), keyword()) :: meta_ast()
+  def comment(text, kind \\ :line, extra_meta \\ [])
+      when is_binary(text) and kind in [:line, :doc, :block] do
+    meta = Keyword.merge([comment_kind: kind], extra_meta)
+    {:comment, meta, text}
+  end
+
   # ----- Enumerable Walkers -----
 
   @doc """
@@ -1847,8 +2004,15 @@ defmodule Metastatic.AST do
   end
 
   # Extracts child MetaAST nodes from a node (skips leaf values).
+  # A `:literal` with a bin_segment list payload (Cure v0.20.0+) is an
+  # exception: it is structurally a leaf but semantically composite, so
+  # we surface the bin_segment children for walker/path traversals.
+  defp child_nodes({:literal, _meta, value}) when is_list(value) do
+    if Enum.all?(value, &match?({:bin_segment, _, _}, &1)), do: value, else: []
+  end
+
   defp child_nodes({type, _meta, children})
-       when is_atom(type) and type in [:literal, :variable] do
+       when is_atom(type) and type in [:literal, :variable, :comment] do
     # Leaf nodes have no traversable children
     _ = children
     []
@@ -2041,7 +2205,44 @@ defmodule Metastatic.AST do
       :null -> "nil"
       :boolean -> Kernel.to_string(value)
       :regex -> "~r/#{value}/"
+      :bytes when is_list(value) -> "<<#{Enum.map_join(value, ", ", &do_to_string/1)}>>"
       _ -> Kernel.to_string(value)
+    end
+  end
+
+  defp do_to_string({:bin_segment, meta, [value]}) do
+    specifiers =
+      [
+        Keyword.get(meta, :type),
+        Keyword.get(meta, :signedness),
+        Keyword.get(meta, :endianness)
+      ]
+      |> Enum.filter(& &1)
+      |> Enum.map(&Kernel.to_string/1)
+
+    specifiers =
+      case Keyword.get(meta, :size) do
+        nil -> specifiers
+        size -> specifiers ++ ["size(#{do_to_string(size)})"]
+      end
+
+    specifiers =
+      case Keyword.get(meta, :unit) do
+        nil -> specifiers
+        unit when is_integer(unit) -> specifiers ++ ["unit(#{unit})"]
+      end
+
+    case specifiers do
+      [] -> do_to_string(value)
+      chain -> "#{do_to_string(value)}::#{Enum.join(chain, "-")}"
+    end
+  end
+
+  defp do_to_string({:comment, meta, text}) when is_binary(text) do
+    case Keyword.get(meta, :comment_kind, :line) do
+      :doc -> "## #{text}"
+      :block -> "/* #{text} */"
+      _ -> "# #{text}"
     end
   end
 

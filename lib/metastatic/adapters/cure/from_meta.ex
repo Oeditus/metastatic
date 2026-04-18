@@ -10,7 +10,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   @spec to_source(Metastatic.AST.meta_ast()) :: String.t()
   def to_source(ast), do: emit(ast, 0)
 
-  defp emit({:literal, meta, value}, _indent) do
+  defp emit({:literal, meta, value}, indent) do
     case meta[:subtype] do
       :integer ->
         to_string(value)
@@ -36,6 +36,9 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
       :regex ->
         {body, flags} = value
         "~r/#{body}/#{flags}"
+
+      :bytes ->
+        emit_bytes_literal(value, indent)
 
       _ ->
         inspect(value)
@@ -204,6 +207,24 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
     "#{emit(l, indent)}#{op}#{emit(r, indent)}"
   end
 
+  # Bitstring segment (Cure v0.20.0+). Rendered as `value` or
+  # `value::spec1-spec2-...` depending on which meta keys are present.
+  defp emit({:bin_segment, meta, [value]}, indent) do
+    emit_bin_segment(value, meta, indent)
+  end
+
+  # Trivia comment (Cure v0.20.0+). Rendered as a `# text` or `## text`
+  # line depending on `:comment_kind`. Callers (block, container) are
+  # responsible for placing the result at the correct column; this helper
+  # returns only the leading marker and the payload text.
+  defp emit({:comment, meta, text}, _indent) when is_binary(text) do
+    case meta[:comment_kind] do
+      :doc -> "## #{text}"
+      :block -> "/* #{text} */"
+      _ -> "# #{text}"
+    end
+  end
+
   defp emit({:attribute_access, meta, [obj]}, indent) do
     "#{emit(obj, indent)}.#{meta[:attribute]}"
   end
@@ -271,4 +292,52 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   end
 
   defp pad(n), do: String.duplicate(" ", n)
+
+  # Render a `{:literal, [subtype: :bytes], _}` payload.
+  # Accepts both legacy binary form (`<<1, 2, 3>>`) and the Cure v0.20.0
+  # segment-list form (`<<x::utf8, rest::binary>>`).
+  defp emit_bytes_literal(value, _indent) when is_binary(value) do
+    inner =
+      value
+      |> :binary.bin_to_list()
+      |> Enum.map_join(", ", &Integer.to_string/1)
+
+    "<<#{inner}>>"
+  end
+
+  defp emit_bytes_literal(segments, indent) when is_list(segments) do
+    inner = Enum.map_join(segments, ", ", &emit(&1, indent))
+    "<<#{inner}>>"
+  end
+
+  defp emit_bytes_literal(other, _indent), do: inspect(other)
+
+  # Render a single bin_segment specifier chain.
+  defp emit_bin_segment(value, meta, indent) do
+    specifiers =
+      [
+        meta[:type],
+        meta[:signedness],
+        meta[:endianness]
+      ]
+      |> Enum.filter(& &1)
+      |> Enum.map(&Atom.to_string/1)
+
+    specifiers =
+      case meta[:size] do
+        nil -> specifiers
+        size_ast -> specifiers ++ ["size(#{emit(size_ast, indent)})"]
+      end
+
+    specifiers =
+      case meta[:unit] do
+        nil -> specifiers
+        unit when is_integer(unit) -> specifiers ++ ["unit(#{unit})"]
+      end
+
+    case specifiers do
+      [] -> emit(value, indent)
+      chain -> "#{emit(value, indent)}::#{Enum.join(chain, "-")}"
+    end
+  end
 end

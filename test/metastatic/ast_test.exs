@@ -757,4 +757,124 @@ defmodule Metastatic.ASTTest do
       assert AST.variables(ast) == MapSet.new(["x"])
     end
   end
+
+  describe "Cure v0.20.0 bin_segment" do
+    test "minimal bin_segment conforms" do
+      ast = {:bin_segment, [], [{:variable, [], "x"}]}
+      assert AST.conforms?(ast)
+    end
+
+    test "bin_segment with full specifier chain conforms" do
+      ast =
+        {:bin_segment,
+         [
+           type: :integer,
+           signedness: :unsigned,
+           endianness: :big,
+           size: {:literal, [subtype: :integer], 8},
+           unit: 1
+         ], [{:variable, [], "b"}]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "bin_segment rejects unknown type" do
+      ast = {:bin_segment, [type: :not_a_real_type], [{:variable, [], "x"}]}
+      refute AST.conforms?(ast)
+    end
+
+    test "bin_segment rejects non-conforming value" do
+      ast = {:bin_segment, [], ["not an ast"]}
+      refute AST.conforms?(ast)
+    end
+
+    test "bin_segment rejects malformed children" do
+      refute AST.conforms?({:bin_segment, [], []})
+      refute AST.conforms?({:bin_segment, [], [{:variable, [], "x"}, {:variable, [], "y"}]})
+    end
+
+    test ":literal :bytes accepts raw binary payload" do
+      ast = {:literal, [subtype: :bytes], <<1, 2, 3>>}
+      assert AST.conforms?(ast)
+    end
+
+    test ":literal :bytes accepts bin_segment list payload" do
+      ast =
+        {:literal, [subtype: :bytes],
+         [
+           {:bin_segment, [type: :utf8], [{:variable, [], "x"}]},
+           {:bin_segment, [type: :binary], [{:variable, [], "rest"}]}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test ":literal :bytes rejects mixed list payload" do
+      ast =
+        {:literal, [subtype: :bytes],
+         [{:bin_segment, [], [{:variable, [], "x"}]}, {:literal, [subtype: :integer], 42}]}
+
+      refute AST.conforms?(ast)
+    end
+
+    test "variables/1 descends into bin_segment children of :literal :bytes" do
+      ast =
+        {:literal, [subtype: :bytes],
+         [
+           {:bin_segment, [type: :utf8], [{:variable, [], "x"}]},
+           {:bin_segment, [type: :binary], [{:variable, [], "rest"}]}
+         ]}
+
+      assert AST.variables(ast) == MapSet.new(["x", "rest"])
+    end
+
+    test "builder AST.bin_segment/2 produces a conforming node" do
+      seg = AST.bin_segment({:variable, [], "x"}, type: :utf8)
+      assert seg == {:bin_segment, [type: :utf8], [{:variable, [], "x"}]}
+      assert AST.conforms?(seg)
+    end
+  end
+
+  describe "Cure v0.20.0 comment" do
+    test "line comment conforms" do
+      assert AST.conforms?({:comment, [comment_kind: :line], "TODO"})
+    end
+
+    test "doc comment conforms" do
+      assert AST.conforms?({:comment, [comment_kind: :doc], "Public API"})
+    end
+
+    test "block comment conforms" do
+      assert AST.conforms?({:comment, [comment_kind: :block], "deleted"})
+    end
+
+    test "comment without :comment_kind defaults to :line and conforms" do
+      assert AST.conforms?({:comment, [line: 5], "TODO"})
+    end
+
+    test "comment with unknown kind is rejected" do
+      refute AST.conforms?({:comment, [comment_kind: :novel], "?"})
+    end
+
+    test "comment value must be a binary" do
+      refute AST.conforms?({:comment, [], nil})
+      refute AST.conforms?({:comment, [], ["not", "binary"]})
+    end
+
+    test "builder AST.comment/3 produces a conforming node" do
+      ast = AST.comment("TODO: revisit")
+      assert ast == {:comment, [comment_kind: :line], "TODO: revisit"}
+      assert AST.conforms?(ast)
+
+      ast = AST.comment("Public API", :doc, line: 5)
+      assert ast == {:comment, [comment_kind: :doc, line: 5], "Public API"}
+      assert AST.conforms?(ast)
+    end
+
+    test "comment nodes are leaves for traversal" do
+      ast = {:comment, [], "trivia"}
+      {_, count} = AST.traverse(ast, 0, fn n, c -> {n, c + 1} end, fn n, c -> {n, c} end)
+      assert count == 1
+    end
+  end
 end
