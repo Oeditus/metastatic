@@ -127,6 +127,46 @@ defmodule Metastatic.AST do
       AST.traverse(ast, acc, &pre/2, &post/2)
 
   This mirrors `Macro.traverse/4` from Elixir's standard library.
+
+  ## Dependently-Typed / Proof Extensions (Cure v0.18.0 / v0.19.0)
+
+  Three MetaAST additions were back-ported from Cure v0.18.0 -- v0.19.0.
+  They live at the M2.2 Extended and M2.2s Structural layers so that any
+  language with the same semantics can reuse the shapes.
+
+  - **`:pin`** -- pattern-position pin operator `^x`. Shape
+    `{:pin, meta, [inner]}`. `inner` is the value to be pin-matched; it
+    is most commonly a `:variable` node but may be any expression. In
+    pattern position it constrains the subject to equal the referenced
+    value rather than rebinding the name.
+  - **`:assert_type`** -- compile-time type assertion `assert_type expr : T`.
+    Shape `{:assert_type, meta, [expr, type_ast]}`. Lowered by the host
+    language's type checker; erased by the code generator so it has zero
+    runtime cost.
+  - **`container_type: :proof`** -- new value of the `:container`
+    metadata key. Shape `{:container, [container_type: :proof, name: ...],
+    body}`. Structurally identical to `:module`, but every binding is
+    expected to elaborate to an equality / refinement witness.
+
+  ## Record / FSM Extensions (Cure v0.7.0 / v0.15.0)
+
+  Two further MetaAST additions were back-ported from earlier Cure
+  releases that the meta-model previously lacked:
+
+  - **`:record_update`** (Cure v0.15.0) -- functional record update
+    `Name{base | field: val, ...}`. Shape
+    `{:record_update, [name: "Name", ...], [base | field_pairs]}`. The
+    first child is the expression supplying the original record; the
+    remaining children are `:pair` nodes describing the per-field
+    overrides.
+  - **`container_type: :fsm`** (Cure v0.7.0) -- finite state machine
+    container `fsm Name with Payload`. Shape
+    `{:container, [container_type: :fsm, name: ...], body}`. Carries
+    optional FSM-only metadata keys such as `:payload`,
+    `:terminal_states`, `:invariants`, `:verify`, `:timer`,
+    `:on_transition`, `:on_enter`, `:on_exit`, `:on_failure`,
+    `:on_timer`. Body elements are typically transition `:function_call`
+    nodes carrying `:from`, `:event`, `:to`, and `:event_kind` metadata.
   """
 
   # ----- Type Definitions -----
@@ -178,6 +218,8 @@ defmodule Metastatic.AST do
           | :generator
           | :filter
           | :pipe
+          | :pin
+          | :assert_type
 
   @typedoc """
   Node type atoms for M2.2s Structural Layer - organizational constructs.
@@ -192,6 +234,7 @@ defmodule Metastatic.AST do
           | :import
           | :type_annotation
           | :decorator
+          | :record_update
 
   @typedoc """
   Clause entry for grouped multi-clause function definitions.
@@ -241,9 +284,29 @@ defmodule Metastatic.AST do
 
   @typedoc """
   Container type classification.
+
+  `:proof` is emitted by Cure v0.19.0+ for `proof Name.Path` containers;
+  structurally identical to `:module`, semantically a proposition-level
+  namespace.
+
+  `:fsm` is emitted by Cure for `fsm Name with Payload` containers; the
+  body is a list of transition `:function_call` nodes (carrying `:from`,
+  `:event`, `:to`, `:event_kind` metadata), and FSM-only metadata such
+  as `:payload`, `:terminal_states`, `:invariants`, `:verify`, `:timer`,
+  `:on_transition`, `:on_enter`, `:on_exit`, `:on_failure`, `:on_timer`
+  is carried on the container's own `meta`.
   """
   @type container_type ::
-          :module | :class | :namespace | :interface | :trait | :protocol | :enum | :struct
+          :module
+          | :class
+          | :namespace
+          | :interface
+          | :trait
+          | :protocol
+          | :enum
+          | :struct
+          | :proof
+          | :fsm
 
   @typedoc """
   Visibility modifier.
@@ -366,7 +429,9 @@ defmodule Metastatic.AST do
     :comprehension,
     :generator,
     :filter,
-    :pipe
+    :pipe,
+    :pin,
+    :assert_type
   ]
 
   @structural_types [
@@ -378,7 +443,8 @@ defmodule Metastatic.AST do
     :property,
     :import,
     :type_annotation,
-    :decorator
+    :decorator,
+    :record_update
   ]
 
   @native_types [:language_specific]
@@ -389,7 +455,18 @@ defmodule Metastatic.AST do
 
   @operator_categories [:arithmetic, :comparison, :boolean, :bitwise, :range, :string]
 
-  @container_types [:module, :class, :namespace, :interface, :trait, :protocol, :enum, :struct]
+  @container_types [
+    :module,
+    :class,
+    :namespace,
+    :interface,
+    :trait,
+    :protocol,
+    :enum,
+    :struct,
+    :proof,
+    :fsm
+  ]
 
   # ----- Accessors -----
 
@@ -931,6 +1008,24 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:filter, _meta, _), do: false
 
+  # Pin: {:pin, meta, [inner]} -- pattern-position pin operator (Cure v0.18.0+).
+  # `inner` is typically a `:variable`, but the shape accepts any conforming
+  # MetaAST node so that fallback paths (e.g. pinning a call result) are valid.
+  defp valid_node?(:pin, _meta, [inner]) do
+    conforms?(inner)
+  end
+
+  defp valid_node?(:pin, _meta, _), do: false
+
+  # Assert-type: {:assert_type, meta, [expr, type_ast]} -- compile-time type
+  # assertion (Cure v0.19.0+). The type checker verifies `expr : type_ast`;
+  # the code generator erases the wrapper.
+  defp valid_node?(:assert_type, _meta, [expr, type_ast]) do
+    conforms?(expr) and conforms?(type_ast)
+  end
+
+  defp valid_node?(:assert_type, _meta, _), do: false
+
   # M2.2s Structural types
   defp valid_node?(:container, meta, body) do
     container_type = Keyword.get(meta, :container_type)
@@ -1019,6 +1114,19 @@ defmodule Metastatic.AST do
     name = Keyword.get(meta, :name)
     is_binary(name) and is_list(args) and Enum.all?(args, &conforms?/1)
   end
+
+  # Record update: {:record_update, [name: "Name", ...], [base | field_pairs]}
+  # (Cure v0.15.0+). The first child supplies the original record value;
+  # the remaining children are typically `:pair` nodes describing the
+  # per-field overrides. The list must be non-empty (the base is required).
+  defp valid_node?(:record_update, meta, [base | field_pairs] = children) do
+    name = Keyword.get(meta, :name)
+
+    is_binary(name) and is_list(children) and
+      conforms?(base) and Enum.all?(field_pairs, &conforms?/1)
+  end
+
+  defp valid_node?(:record_update, _meta, _), do: false
 
   # M2.3 Native type
   defp valid_node?(:language_specific, meta, _native_ast) do

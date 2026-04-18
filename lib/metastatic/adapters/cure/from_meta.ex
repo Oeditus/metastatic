@@ -128,6 +128,13 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
         body_str = Enum.map_join(body, "\n#{pad(indent + 2)}", &emit(&1, indent + 2))
         "mod #{meta[:name]}\n#{pad(indent + 2)}#{body_str}"
 
+      :proof ->
+        body_str = Enum.map_join(body, "\n#{pad(indent + 2)}", &emit(&1, indent + 2))
+        "proof #{meta[:name]}\n#{pad(indent + 2)}#{body_str}"
+
+      :fsm ->
+        emit_fsm(meta, body, indent)
+
       :struct ->
         fields = Enum.map_join(body, "\n#{pad(indent + 2)}", &emit_field(&1, indent + 2))
         "rec #{meta[:name]}\n#{pad(indent + 2)}#{fields}"
@@ -176,6 +183,22 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   defp emit({:throw, _meta, [expr]}, indent), do: "throw #{emit(expr, indent)}"
   defp emit({:yield, _meta, [expr]}, indent), do: "yield #{emit(expr, indent)}"
 
+  # Pin operator (Cure v0.18.0+): ^inner
+  defp emit({:pin, _meta, [inner]}, indent), do: "^#{emit(inner, indent)}"
+
+  # Compile-time type assertion (Cure v0.19.0+): assert_type expr : T
+  defp emit({:assert_type, _meta, [expr, type_ast]}, indent) do
+    "assert_type #{emit(expr, indent)} : #{emit(type_ast, indent)}"
+  end
+
+  # Functional record update (Cure v0.15.0+): Name{base | field: val, ...}
+  defp emit({:record_update, meta, [base | fields]}, indent) do
+    name = meta[:name]
+    base_str = emit(base, indent)
+    fields_str = Enum.map_join(fields, ", ", &emit(&1, indent))
+    "#{name}{#{base_str} | #{fields_str}}"
+  end
+
   defp emit({:range, meta, [l, r]}, indent) do
     op = if meta[:inclusive], do: "..=", else: ".."
     "#{emit(l, indent)}#{op}#{emit(r, indent)}"
@@ -211,6 +234,41 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   end
 
   defp emit_variant({:variable, _, name}), do: name
+
+  # FSM container rendering (Cure v0.7.0+).
+  # Emits `fsm Name [with Payload]` followed by indented transition lines
+  # and any annotation/callback metadata carried on the container.
+  @fsm_callback_keys [:on_transition, :on_enter, :on_exit, :on_failure, :on_timer]
+  defp emit_fsm(meta, body, indent) do
+    name = meta[:name]
+    payload = meta[:payload]
+    timer = meta[:timer]
+    pad_inner = pad(indent + 2)
+
+    payload_str =
+      case payload do
+        nil -> ""
+        ast -> " with #{emit(ast, indent)}"
+      end
+
+    transitions_str = Enum.map_join(body, "\n#{pad_inner}", &emit(&1, indent + 2))
+
+    timer_str = if timer, do: "\n#{pad_inner}@timer #{timer}", else: ""
+
+    callbacks_str =
+      Enum.map_join(@fsm_callback_keys, "", fn cb ->
+        case meta[cb] do
+          clauses when is_list(clauses) and clauses != [] ->
+            inner = Enum.map_join(clauses, "\n#{pad(indent + 4)}", &emit(&1, indent + 4))
+            "\n#{pad_inner}#{cb}\n#{pad(indent + 4)}#{inner}"
+
+          _ ->
+            ""
+        end
+      end)
+
+    "fsm #{name}#{payload_str}\n#{pad_inner}#{transitions_str}#{timer_str}#{callbacks_str}"
+  end
 
   defp pad(n), do: String.duplicate(" ", n)
 end

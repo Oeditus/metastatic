@@ -144,6 +144,7 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     :language_specific,
     # Helpers
     :pin,
+    :assert_type,
     :cons_pattern
   ]
 
@@ -603,9 +604,18 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   # ----- Pin Operator -----
 
-  defp transform_node(:pin, meta, var, acc) do
+  # Canonical MetaAST shape: {:pin, meta, [inner]} (list with one child).
+  # Matches the Cure v0.18.0 convention and this module's documented spec.
+  defp transform_node(:pin, meta, [inner], acc) do
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
-    {{:^, elixir_meta, [var]}, acc}
+    {{:^, elixir_meta, [inner]}, acc}
+  end
+
+  # Compile-time type assertion (Cure v0.19.0+).
+  # Elixir has no direct surface syntax for this; reify to the inner
+  # expression and drop the wrapper, which matches Cure's codegen behaviour.
+  defp transform_node(:assert_type, _meta, [expr, _type_ast], acc) do
+    {expr, acc}
   end
 
   # ----- Cons Pattern [head | tail] -----

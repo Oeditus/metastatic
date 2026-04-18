@@ -397,6 +397,130 @@ defmodule Metastatic.ASTTest do
 
       assert AST.conforms?(ast)
     end
+
+    test "pin on a variable (Cure v0.18.0)" do
+      # ^x
+      ast = {:pin, [line: 1, col: 1], [{:variable, [scope: :local], "x"}]}
+      assert AST.conforms?(ast)
+    end
+
+    test "pin on an arbitrary expression (fallback path)" do
+      # ^(f())
+      ast =
+        {:pin, [line: 2, col: 3], [{:function_call, [name: "f"], []}]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "pin rejects non-list children" do
+      refute AST.conforms?({:pin, [], {:variable, [], "x"}})
+    end
+
+    test "pin rejects the wrong arity" do
+      refute AST.conforms?({:pin, [], []})
+
+      refute AST.conforms?(
+               {:pin, [],
+                [
+                  {:variable, [], "x"},
+                  {:variable, [], "y"}
+                ]}
+             )
+    end
+
+    test "pin rejects a non-conforming inner expression" do
+      refute AST.conforms?({:pin, [], [:not_an_ast]})
+    end
+
+    test "assert_type (Cure v0.19.0)" do
+      # assert_type x : Int
+      ast =
+        {:assert_type, [line: 1, col: 1],
+         [
+           {:variable, [scope: :local], "x"},
+           {:type_annotation, [annotation_type: :type, name: "Int"], [{:variable, [], "Int"}]}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "assert_type rejects the wrong arity" do
+      refute AST.conforms?({:assert_type, [], []})
+      refute AST.conforms?({:assert_type, [], [{:variable, [], "x"}]})
+    end
+
+    test "assert_type rejects non-conforming children" do
+      refute AST.conforms?({:assert_type, [], [:not_an_ast, :also_not]})
+    end
+  end
+
+  describe "M2.2s Structural conformance/1" do
+    test "container with container_type :proof (Cure v0.19.0)" do
+      ast =
+        {:container, [container_type: :proof, name: "Nat.Laws", language: :cure, line: 1, col: 1],
+         [
+           {:function_def, [name: "plus_zero", params: []], []}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "container with container_type :fsm (Cure v0.7.0)" do
+      ast =
+        {:container,
+         [
+           container_type: :fsm,
+           name: "Turnstile",
+           language: :cure,
+           timer: 5_000,
+           terminal_states: ["locked"],
+           line: 1
+         ],
+         [
+           {:function_call, [name: "transition", from: "locked", event: "coin", to: "unlocked"],
+            []}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "record_update (Cure v0.15.0)" do
+      # Point{p | x: 1}
+      ast =
+        {:record_update, [name: "Point", line: 1, col: 1],
+         [
+           {:variable, [scope: :local], "p"},
+           {:pair, [], [{:literal, [subtype: :symbol], :x}, {:literal, [subtype: :integer], 1}]}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "record_update with multiple fields" do
+      ast =
+        {:record_update, [name: "Point"],
+         [
+           {:variable, [], "p"},
+           {:pair, [], [{:literal, [subtype: :symbol], :x}, {:literal, [subtype: :integer], 1}]},
+           {:pair, [], [{:literal, [subtype: :symbol], :y}, {:literal, [subtype: :integer], 2}]}
+         ]}
+
+      assert AST.conforms?(ast)
+    end
+
+    test "record_update rejects an empty children list" do
+      refute AST.conforms?({:record_update, [name: "Point"], []})
+    end
+
+    test "record_update rejects a missing :name in metadata" do
+      refute AST.conforms?({:record_update, [], [{:variable, [], "p"}]})
+    end
+
+    test "record_update rejects a non-conforming base or field" do
+      refute AST.conforms?({:record_update, [name: "Point"], [:not_an_ast]})
+
+      refute AST.conforms?({:record_update, [name: "Point"], [{:variable, [], "p"}, :not_an_ast]})
+    end
   end
 
   describe "M2.3 Native conformance/1" do

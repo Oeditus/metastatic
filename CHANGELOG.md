@@ -8,6 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MetaAST nodes backported from Cure v0.18.0 -- v0.19.0:**
+  - `:pin` (M2.2 Extended) -- pattern-position pin operator `^x`.
+    Shape `{:pin, meta, [inner]}`. Promoted from a dead placeholder
+    entry in the Elixir adapter to a first-class node type recognised
+    by `Metastatic.AST.conforms?/1`.
+  - `:assert_type` (M2.2 Extended) -- compile-time type assertion
+    `assert_type expr : T`. Shape `{:assert_type, meta, [expr, type_ast]}`.
+    Reified by the Cure adapter; dropped to `expr` by the Elixir adapter
+    (Elixir has no surface syntax for it).
+  - `container_type: :proof` -- new value of the `:container` metadata
+    key emitted by Cure for `proof Name.Path` containers. Structurally
+    identical to `:module` but semantically a proposition-level namespace.
+- **MetaAST nodes backported from earlier Cure releases:**
+  - `:record_update` (M2.2s Structural, Cure v0.15.0) -- functional
+    record update `Name{base | field: val, ...}`. Shape
+    `{:record_update, [name: "Name", ...], [base | field_pairs]}`.
+  - `container_type: :fsm` (Cure v0.7.0) -- finite state machine
+    container `fsm Name with Payload`. Carries optional FSM metadata
+    (`:payload`, `:terminal_states`, `:invariants`, `:verify`, `:timer`,
+    `:on_transition`, `:on_enter`, `:on_exit`, `:on_failure`,
+    `:on_timer`); transitions are `:function_call` nodes with `:from`,
+    `:event`, `:to`, and `:event_kind` metadata.
+- `Metastatic.Adapters.Cure.FromMeta` now reifies `:pin`, `:assert_type`,
+  `:record_update`, and `container_type: :proof` / `:fsm` instead of
+  falling back to `inspect/1`. The new `emit_fsm/3` helper renders the
+  container header (`fsm Name [with Payload]`), the transition body, the
+  optional `@timer <ms>` annotation, and any `on_transition` /
+  `on_enter` / `on_exit` / `on_failure` / `on_timer` callback blocks.
 - **Macro-like AST traversal and manipulation API** -- mirrors Elixir's `Macro` module for MetaAST:
   - `prewalk/2`, `postwalk/2` -- transform-only tree walks (no accumulator)
   - `prewalker/1`, `postwalker/1` -- lazy enumerable traversals (`Stream`-based)
