@@ -68,8 +68,11 @@ defmodule Metastatic.Analysis.BusinessLogic.HardcodedValue do
   alias Metastatic.Analysis.Analyzer
 
   # Regex patterns
-  @url_pattern ~r/^https?:\/\/[^\s]+$/
-  @ip_pattern ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/
+  defmodule R do
+    @moduledoc false
+    def url_pattern, do: ~r/^https?:\/\/[^\s]+$/
+    def ip_pattern, do: ~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/
+  end
 
   @impl true
   def info do
@@ -160,12 +163,12 @@ defmodule Metastatic.Analysis.BusinessLogic.HardcodedValue do
 
   # Check if string is a URL
   defp url?(string) when is_binary(string) do
-    Regex.match?(@url_pattern, string)
+    Regex.match?(R.url_pattern(), string)
   end
 
   # Check if string is an IP address
   defp ip?(string) when is_binary(string) do
-    Regex.match?(@ip_pattern, string) and valid_ip?(string)
+    Regex.match?(R.ip_pattern(), string) and valid_ip?(string)
   end
 
   # Validate IP address octets are in valid range (0-255)
