@@ -2,7 +2,7 @@ defmodule Metastatic.MixProject do
   use Mix.Project
 
   @app :metastatic
-  @version "0.20.2"
+  @version "0.20.3"
   @source_url "https://github.com/Oeditus/metastatic"
 
   def project do
