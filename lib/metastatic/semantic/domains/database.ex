@@ -44,277 +44,322 @@ defmodule Metastatic.Semantic.Domains.Database do
 
   alias Metastatic.Semantic.Patterns
 
-  # ----- Elixir/Ecto Patterns -----
+  defmodule R do
+    @moduledoc false
 
-  @elixir_patterns [
-    # Single record retrieval
-    {"Repo.get", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"Repo.get!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"Repo.get_by", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"Repo.get_by!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"Repo.one", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"Repo.one!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+    # ----- Elixir/Ecto Patterns -----
 
-    # Multiple record retrieval
-    {"Repo.all", %{operation: :retrieve_all, framework: :ecto, extract_target: :first_arg}},
+    def elixir_patterns,
+      do: [
+        # Single record retrieval
+        {"Repo.get", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"Repo.get!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"Repo.get_by", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"Repo.get_by!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"Repo.one", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"Repo.one!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
 
-    # Create operations
-    {"Repo.insert", %{operation: :create, framework: :ecto, extract_target: :none}},
-    {"Repo.insert!", %{operation: :create, framework: :ecto, extract_target: :none}},
-    {"Repo.insert_all", %{operation: :create, framework: :ecto, extract_target: :first_arg}},
-    {"Repo.insert_or_update", %{operation: :create, framework: :ecto, extract_target: :none}},
-    {"Repo.insert_or_update!", %{operation: :create, framework: :ecto, extract_target: :none}},
+        # Multiple record retrieval
+        {"Repo.all", %{operation: :retrieve_all, framework: :ecto, extract_target: :first_arg}},
 
-    # Update operations
-    {"Repo.update", %{operation: :update, framework: :ecto, extract_target: :none}},
-    {"Repo.update!", %{operation: :update, framework: :ecto, extract_target: :none}},
-    {"Repo.update_all", %{operation: :update, framework: :ecto, extract_target: :first_arg}},
+        # Create operations
+        {"Repo.insert", %{operation: :create, framework: :ecto, extract_target: :none}},
+        {"Repo.insert!", %{operation: :create, framework: :ecto, extract_target: :none}},
+        {"Repo.insert_all", %{operation: :create, framework: :ecto, extract_target: :first_arg}},
+        {"Repo.insert_or_update", %{operation: :create, framework: :ecto, extract_target: :none}},
+        {"Repo.insert_or_update!",
+         %{operation: :create, framework: :ecto, extract_target: :none}},
 
-    # Delete operations
-    {"Repo.delete", %{operation: :delete, framework: :ecto, extract_target: :none}},
-    {"Repo.delete!", %{operation: :delete, framework: :ecto, extract_target: :none}},
-    {"Repo.delete_all", %{operation: :delete, framework: :ecto, extract_target: :first_arg}},
+        # Update operations
+        {"Repo.update", %{operation: :update, framework: :ecto, extract_target: :none}},
+        {"Repo.update!", %{operation: :update, framework: :ecto, extract_target: :none}},
+        {"Repo.update_all", %{operation: :update, framework: :ecto, extract_target: :first_arg}},
 
-    # Transactions
-    {"Repo.transaction", %{operation: :transaction, framework: :ecto, extract_target: :none}},
+        # Delete operations
+        {"Repo.delete", %{operation: :delete, framework: :ecto, extract_target: :none}},
+        {"Repo.delete!", %{operation: :delete, framework: :ecto, extract_target: :none}},
+        {"Repo.delete_all", %{operation: :delete, framework: :ecto, extract_target: :first_arg}},
 
-    # Preloading
-    {"Repo.preload", %{operation: :preload, framework: :ecto, extract_target: :none}},
+        # Transactions
+        {"Repo.transaction", %{operation: :transaction, framework: :ecto, extract_target: :none}},
 
-    # Aggregates
-    {"Repo.aggregate", %{operation: :aggregate, framework: :ecto, extract_target: :first_arg}},
-    {"Repo.exists?", %{operation: :query, framework: :ecto, extract_target: :first_arg}},
+        # Preloading
+        {"Repo.preload", %{operation: :preload, framework: :ecto, extract_target: :none}},
 
-    # Query building (when piped to Repo)
-    {"Ecto.Query.from", %{operation: :query, framework: :ecto, extract_target: :none}},
+        # Aggregates
+        {"Repo.aggregate",
+         %{operation: :aggregate, framework: :ecto, extract_target: :first_arg}},
+        {"Repo.exists?", %{operation: :query, framework: :ecto, extract_target: :first_arg}},
 
-    # Wildcard for custom Repo modules (e.g., MyApp.Repo.get)
-    {"*.Repo.get", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"*.Repo.get!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"*.Repo.all", %{operation: :retrieve_all, framework: :ecto, extract_target: :first_arg}},
-    {"*.Repo.one", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-    {"*.Repo.insert", %{operation: :create, framework: :ecto, extract_target: :none}},
-    {"*.Repo.insert!", %{operation: :create, framework: :ecto, extract_target: :none}},
-    {"*.Repo.update", %{operation: :update, framework: :ecto, extract_target: :none}},
-    {"*.Repo.update!", %{operation: :update, framework: :ecto, extract_target: :none}},
-    {"*.Repo.delete", %{operation: :delete, framework: :ecto, extract_target: :none}},
-    {"*.Repo.delete!", %{operation: :delete, framework: :ecto, extract_target: :none}},
-    {"*.Repo.transaction", %{operation: :transaction, framework: :ecto, extract_target: :none}},
-    {"*.Repo.preload", %{operation: :preload, framework: :ecto, extract_target: :none}}
-  ]
+        # Query building (when piped to Repo)
+        {"Ecto.Query.from", %{operation: :query, framework: :ecto, extract_target: :none}},
 
-  # ----- Python/SQLAlchemy Patterns -----
+        # Wildcard for custom Repo modules (e.g., MyApp.Repo.get)
+        {"*.Repo.get", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"*.Repo.get!", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"*.Repo.all", %{operation: :retrieve_all, framework: :ecto, extract_target: :first_arg}},
+        {"*.Repo.one", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+        {"*.Repo.insert", %{operation: :create, framework: :ecto, extract_target: :none}},
+        {"*.Repo.insert!", %{operation: :create, framework: :ecto, extract_target: :none}},
+        {"*.Repo.update", %{operation: :update, framework: :ecto, extract_target: :none}},
+        {"*.Repo.update!", %{operation: :update, framework: :ecto, extract_target: :none}},
+        {"*.Repo.delete", %{operation: :delete, framework: :ecto, extract_target: :none}},
+        {"*.Repo.delete!", %{operation: :delete, framework: :ecto, extract_target: :none}},
+        {"*.Repo.transaction",
+         %{operation: :transaction, framework: :ecto, extract_target: :none}},
+        {"*.Repo.preload", %{operation: :preload, framework: :ecto, extract_target: :none}}
+      ]
 
-  @python_sqlalchemy_patterns [
-    # Session operations
-    {"session.query", %{operation: :query, framework: :sqlalchemy, extract_target: :first_arg}},
-    {"session.add", %{operation: :create, framework: :sqlalchemy, extract_target: :first_arg}},
-    {"session.add_all", %{operation: :create, framework: :sqlalchemy, extract_target: :none}},
-    {"session.delete", %{operation: :delete, framework: :sqlalchemy, extract_target: :first_arg}},
-    {"session.merge", %{operation: :update, framework: :sqlalchemy, extract_target: :first_arg}},
-    {"session.commit", %{operation: :transaction, framework: :sqlalchemy, extract_target: :none}},
-    {"session.rollback",
-     %{operation: :transaction, framework: :sqlalchemy, extract_target: :none}},
-    {"session.flush", %{operation: :transaction, framework: :sqlalchemy, extract_target: :none}},
+    # ----- Python/SQLAlchemy Patterns -----
 
-    # Query methods (chained) - use regex to avoid matching Django .objects. patterns
-    {~r/^[^.]+\.get$/, %{operation: :retrieve, framework: :sqlalchemy, extract_target: :none}},
-    {~r/^[^.]+\.first$/, %{operation: :retrieve, framework: :sqlalchemy, extract_target: :none}},
-    {~r/^[^.]+\.one$/, %{operation: :retrieve, framework: :sqlalchemy, extract_target: :none}},
-    {~r/^[^.]+\.all$/,
-     %{operation: :retrieve_all, framework: :sqlalchemy, extract_target: :none}},
-    {~r/^[^.]+\.filter$/, %{operation: :query, framework: :sqlalchemy, extract_target: :none}},
-    {~r/^[^.]+\.filter_by$/, %{operation: :query, framework: :sqlalchemy, extract_target: :none}},
-    {~r/^[^.]+\.count$/, %{operation: :aggregate, framework: :sqlalchemy, extract_target: :none}}
-  ]
+    def python_sqlalchemy_patterns,
+      do: [
+        # Session operations
+        {"session.query",
+         %{operation: :query, framework: :sqlalchemy, extract_target: :first_arg}},
+        {"session.add",
+         %{operation: :create, framework: :sqlalchemy, extract_target: :first_arg}},
+        {"session.add_all", %{operation: :create, framework: :sqlalchemy, extract_target: :none}},
+        {"session.delete",
+         %{operation: :delete, framework: :sqlalchemy, extract_target: :first_arg}},
+        {"session.merge",
+         %{operation: :update, framework: :sqlalchemy, extract_target: :first_arg}},
+        {"session.commit",
+         %{operation: :transaction, framework: :sqlalchemy, extract_target: :none}},
+        {"session.rollback",
+         %{operation: :transaction, framework: :sqlalchemy, extract_target: :none}},
+        {"session.flush",
+         %{operation: :transaction, framework: :sqlalchemy, extract_target: :none}},
 
-  # ----- Python/Django ORM Patterns -----
+        # Query methods (chained) - use regex to avoid matching Django .objects. patterns
+        {~r/^[^.]+\.get$/,
+         %{operation: :retrieve, framework: :sqlalchemy, extract_target: :none}},
+        {~r/^[^.]+\.first$/,
+         %{operation: :retrieve, framework: :sqlalchemy, extract_target: :none}},
+        {~r/^[^.]+\.one$/,
+         %{operation: :retrieve, framework: :sqlalchemy, extract_target: :none}},
+        {~r/^[^.]+\.all$/,
+         %{operation: :retrieve_all, framework: :sqlalchemy, extract_target: :none}},
+        {~r/^[^.]+\.filter$/,
+         %{operation: :query, framework: :sqlalchemy, extract_target: :none}},
+        {~r/^[^.]+\.filter_by$/,
+         %{operation: :query, framework: :sqlalchemy, extract_target: :none}},
+        {~r/^[^.]+\.count$/,
+         %{operation: :aggregate, framework: :sqlalchemy, extract_target: :none}}
+      ]
 
-  @python_django_patterns [
-    # Manager operations (Model.objects.*)
-    {~r/\.objects\.get\b/,
-     %{operation: :retrieve, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.get_or_create\b/,
-     %{operation: :retrieve, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.filter\b/,
-     %{operation: :query, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.exclude\b/,
-     %{operation: :query, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.all\b/,
-     %{operation: :retrieve_all, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.first\b/,
-     %{operation: :retrieve, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.last\b/,
-     %{operation: :retrieve, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.create\b/,
-     %{operation: :create, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.bulk_create\b/,
-     %{operation: :create, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.update\b/,
-     %{operation: :update, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.delete\b/,
-     %{operation: :delete, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.count\b/,
-     %{operation: :aggregate, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.aggregate\b/,
-     %{operation: :aggregate, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.select_related\b/,
-     %{operation: :preload, framework: :django, extract_target: :receiver}},
-    {~r/\.objects\.prefetch_related\b/,
-     %{operation: :preload, framework: :django, extract_target: :receiver}},
+    # ----- Python/Django ORM Patterns -----
 
-    # Instance save/delete
-    {~r/\.save\b/, %{operation: :update, framework: :django, extract_target: :receiver}},
-    {~r/\.delete\b/, %{operation: :delete, framework: :django, extract_target: :receiver}}
-  ]
+    def python_django_patterns,
+      do: [
+        # Manager operations (Model.objects.*)
+        {~r/\.objects\.get\b/,
+         %{operation: :retrieve, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.get_or_create\b/,
+         %{operation: :retrieve, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.filter\b/,
+         %{operation: :query, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.exclude\b/,
+         %{operation: :query, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.all\b/,
+         %{operation: :retrieve_all, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.first\b/,
+         %{operation: :retrieve, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.last\b/,
+         %{operation: :retrieve, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.create\b/,
+         %{operation: :create, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.bulk_create\b/,
+         %{operation: :create, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.update\b/,
+         %{operation: :update, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.delete\b/,
+         %{operation: :delete, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.count\b/,
+         %{operation: :aggregate, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.aggregate\b/,
+         %{operation: :aggregate, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.select_related\b/,
+         %{operation: :preload, framework: :django, extract_target: :receiver}},
+        {~r/\.objects\.prefetch_related\b/,
+         %{operation: :preload, framework: :django, extract_target: :receiver}},
 
-  # ----- Ruby/ActiveRecord Patterns -----
+        # Instance save/delete
+        {~r/\.save\b/, %{operation: :update, framework: :django, extract_target: :receiver}},
+        {~r/\.delete\b/, %{operation: :delete, framework: :django, extract_target: :receiver}}
+      ]
 
-  @ruby_patterns [
-    # Class methods for finding
-    {"*.find", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
-    {"*.find_by", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
-    {"*.find_by!", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
-    {"*.find_or_create_by",
-     %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
-    {"*.find_or_initialize_by",
-     %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
-    {"*.first", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
-    {"*.last", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
-    {"*.take", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+    # ----- Ruby/ActiveRecord Patterns -----
 
-    # Collection retrieval
-    {"*.all", %{operation: :retrieve_all, framework: :activerecord, extract_target: :receiver}},
-    {"*.where", %{operation: :query, framework: :activerecord, extract_target: :receiver}},
-    {"*.select", %{operation: :query, framework: :activerecord, extract_target: :receiver}},
-    {"*.joins", %{operation: :query, framework: :activerecord, extract_target: :receiver}},
-    {"*.includes", %{operation: :preload, framework: :activerecord, extract_target: :receiver}},
-    {"*.eager_load", %{operation: :preload, framework: :activerecord, extract_target: :receiver}},
-    {"*.preload", %{operation: :preload, framework: :activerecord, extract_target: :receiver}},
+    def ruby_patterns,
+      do: [
+        # Class methods for finding
+        {"*.find", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+        {"*.find_by",
+         %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+        {"*.find_by!",
+         %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+        {"*.find_or_create_by",
+         %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+        {"*.find_or_initialize_by",
+         %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+        {"*.first", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+        {"*.last", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
+        {"*.take", %{operation: :retrieve, framework: :activerecord, extract_target: :receiver}},
 
-    # Create operations
-    {"*.create", %{operation: :create, framework: :activerecord, extract_target: :receiver}},
-    {"*.create!", %{operation: :create, framework: :activerecord, extract_target: :receiver}},
-    {"*.new", %{operation: :create, framework: :activerecord, extract_target: :receiver}},
-    {"*.insert_all", %{operation: :create, framework: :activerecord, extract_target: :receiver}},
+        # Collection retrieval
+        {"*.all",
+         %{operation: :retrieve_all, framework: :activerecord, extract_target: :receiver}},
+        {"*.where", %{operation: :query, framework: :activerecord, extract_target: :receiver}},
+        {"*.select", %{operation: :query, framework: :activerecord, extract_target: :receiver}},
+        {"*.joins", %{operation: :query, framework: :activerecord, extract_target: :receiver}},
+        {"*.includes",
+         %{operation: :preload, framework: :activerecord, extract_target: :receiver}},
+        {"*.eager_load",
+         %{operation: :preload, framework: :activerecord, extract_target: :receiver}},
+        {"*.preload",
+         %{operation: :preload, framework: :activerecord, extract_target: :receiver}},
 
-    # Update operations
-    {"*.update", %{operation: :update, framework: :activerecord, extract_target: :receiver}},
-    {"*.update!", %{operation: :update, framework: :activerecord, extract_target: :receiver}},
-    {"*.update_all", %{operation: :update, framework: :activerecord, extract_target: :receiver}},
-    {"*.save", %{operation: :update, framework: :activerecord, extract_target: :none}},
-    {"*.save!", %{operation: :update, framework: :activerecord, extract_target: :none}},
+        # Create operations
+        {"*.create", %{operation: :create, framework: :activerecord, extract_target: :receiver}},
+        {"*.create!", %{operation: :create, framework: :activerecord, extract_target: :receiver}},
+        {"*.new", %{operation: :create, framework: :activerecord, extract_target: :receiver}},
+        {"*.insert_all",
+         %{operation: :create, framework: :activerecord, extract_target: :receiver}},
 
-    # Delete operations
-    {"*.destroy", %{operation: :delete, framework: :activerecord, extract_target: :none}},
-    {"*.destroy!", %{operation: :delete, framework: :activerecord, extract_target: :none}},
-    {"*.destroy_all", %{operation: :delete, framework: :activerecord, extract_target: :receiver}},
-    {"*.delete", %{operation: :delete, framework: :activerecord, extract_target: :none}},
-    {"*.delete_all", %{operation: :delete, framework: :activerecord, extract_target: :receiver}},
+        # Update operations
+        {"*.update", %{operation: :update, framework: :activerecord, extract_target: :receiver}},
+        {"*.update!", %{operation: :update, framework: :activerecord, extract_target: :receiver}},
+        {"*.update_all",
+         %{operation: :update, framework: :activerecord, extract_target: :receiver}},
+        {"*.save", %{operation: :update, framework: :activerecord, extract_target: :none}},
+        {"*.save!", %{operation: :update, framework: :activerecord, extract_target: :none}},
 
-    # Aggregates
-    {"*.count", %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
-    {"*.sum", %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
-    {"*.average", %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
-    {"*.minimum", %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
-    {"*.maximum", %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
+        # Delete operations
+        {"*.destroy", %{operation: :delete, framework: :activerecord, extract_target: :none}},
+        {"*.destroy!", %{operation: :delete, framework: :activerecord, extract_target: :none}},
+        {"*.destroy_all",
+         %{operation: :delete, framework: :activerecord, extract_target: :receiver}},
+        {"*.delete", %{operation: :delete, framework: :activerecord, extract_target: :none}},
+        {"*.delete_all",
+         %{operation: :delete, framework: :activerecord, extract_target: :receiver}},
 
-    # Transactions
-    {"*.transaction", %{operation: :transaction, framework: :activerecord, extract_target: :none}}
-  ]
+        # Aggregates
+        {"*.count",
+         %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
+        {"*.sum", %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
+        {"*.average",
+         %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
+        {"*.minimum",
+         %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
+        {"*.maximum",
+         %{operation: :aggregate, framework: :activerecord, extract_target: :receiver}},
 
-  # ----- JavaScript/Sequelize Patterns -----
+        # Transactions
+        {"*.transaction",
+         %{operation: :transaction, framework: :activerecord, extract_target: :none}}
+      ]
 
-  @javascript_sequelize_patterns [
-    # Find operations
-    {"*.findByPk", %{operation: :retrieve, framework: :sequelize, extract_target: :receiver}},
-    {"*.findOne", %{operation: :retrieve, framework: :sequelize, extract_target: :receiver}},
-    {"*.findAll", %{operation: :retrieve_all, framework: :sequelize, extract_target: :receiver}},
-    {"*.findAndCountAll",
-     %{operation: :retrieve_all, framework: :sequelize, extract_target: :receiver}},
-    {"*.findOrCreate", %{operation: :retrieve, framework: :sequelize, extract_target: :receiver}},
+    # ----- JavaScript/Sequelize Patterns -----
 
-    # Create operations
-    {"*.create", %{operation: :create, framework: :sequelize, extract_target: :receiver}},
-    {"*.bulkCreate", %{operation: :create, framework: :sequelize, extract_target: :receiver}},
+    def javascript_sequelize_patterns,
+      do: [
+        # Find operations
+        {"*.findByPk", %{operation: :retrieve, framework: :sequelize, extract_target: :receiver}},
+        {"*.findOne", %{operation: :retrieve, framework: :sequelize, extract_target: :receiver}},
+        {"*.findAll",
+         %{operation: :retrieve_all, framework: :sequelize, extract_target: :receiver}},
+        {"*.findAndCountAll",
+         %{operation: :retrieve_all, framework: :sequelize, extract_target: :receiver}},
+        {"*.findOrCreate",
+         %{operation: :retrieve, framework: :sequelize, extract_target: :receiver}},
 
-    # Update operations
-    {"*.update", %{operation: :update, framework: :sequelize, extract_target: :receiver}},
-    {"*.save", %{operation: :update, framework: :sequelize, extract_target: :none}},
+        # Create operations
+        {"*.create", %{operation: :create, framework: :sequelize, extract_target: :receiver}},
+        {"*.bulkCreate", %{operation: :create, framework: :sequelize, extract_target: :receiver}},
 
-    # Delete operations
-    {"*.destroy", %{operation: :delete, framework: :sequelize, extract_target: :receiver}},
+        # Update operations
+        {"*.update", %{operation: :update, framework: :sequelize, extract_target: :receiver}},
+        {"*.save", %{operation: :update, framework: :sequelize, extract_target: :none}},
 
-    # Aggregates
-    {"*.count", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}},
-    {"*.max", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}},
-    {"*.min", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}},
-    {"*.sum", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}}
-  ]
+        # Delete operations
+        {"*.destroy", %{operation: :delete, framework: :sequelize, extract_target: :receiver}},
 
-  # ----- JavaScript/TypeORM Patterns -----
+        # Aggregates
+        {"*.count", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}},
+        {"*.max", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}},
+        {"*.min", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}},
+        {"*.sum", %{operation: :aggregate, framework: :sequelize, extract_target: :receiver}}
+      ]
 
-  @javascript_typeorm_patterns [
-    # Repository operations
-    {"*.findOne", %{operation: :retrieve, framework: :typeorm, extract_target: :none}},
-    {"*.findOneBy", %{operation: :retrieve, framework: :typeorm, extract_target: :none}},
-    {"*.findOneOrFail", %{operation: :retrieve, framework: :typeorm, extract_target: :none}},
-    {"*.find", %{operation: :retrieve_all, framework: :typeorm, extract_target: :none}},
-    {"*.findBy", %{operation: :retrieve_all, framework: :typeorm, extract_target: :none}},
-    {"*.findAndCount", %{operation: :retrieve_all, framework: :typeorm, extract_target: :none}},
+    # ----- JavaScript/TypeORM Patterns -----
 
-    # Save operations
-    {"*.save", %{operation: :create, framework: :typeorm, extract_target: :none}},
-    {"*.insert", %{operation: :create, framework: :typeorm, extract_target: :none}},
+    def javascript_typeorm_patterns,
+      do: [
+        # Repository operations
+        {"*.findOne", %{operation: :retrieve, framework: :typeorm, extract_target: :none}},
+        {"*.findOneBy", %{operation: :retrieve, framework: :typeorm, extract_target: :none}},
+        {"*.findOneOrFail", %{operation: :retrieve, framework: :typeorm, extract_target: :none}},
+        {"*.find", %{operation: :retrieve_all, framework: :typeorm, extract_target: :none}},
+        {"*.findBy", %{operation: :retrieve_all, framework: :typeorm, extract_target: :none}},
+        {"*.findAndCount",
+         %{operation: :retrieve_all, framework: :typeorm, extract_target: :none}},
 
-    # Update operations
-    {"*.update", %{operation: :update, framework: :typeorm, extract_target: :none}},
+        # Save operations
+        {"*.save", %{operation: :create, framework: :typeorm, extract_target: :none}},
+        {"*.insert", %{operation: :create, framework: :typeorm, extract_target: :none}},
 
-    # Delete operations
-    {"*.delete", %{operation: :delete, framework: :typeorm, extract_target: :none}},
-    {"*.remove", %{operation: :delete, framework: :typeorm, extract_target: :none}},
+        # Update operations
+        {"*.update", %{operation: :update, framework: :typeorm, extract_target: :none}},
 
-    # Query builder
-    {"*.createQueryBuilder",
-     %{operation: :query, framework: :typeorm, extract_target: :first_arg}},
+        # Delete operations
+        {"*.delete", %{operation: :delete, framework: :typeorm, extract_target: :none}},
+        {"*.remove", %{operation: :delete, framework: :typeorm, extract_target: :none}},
 
-    # Transactions
-    {"*.transaction", %{operation: :transaction, framework: :typeorm, extract_target: :none}}
-  ]
+        # Query builder
+        {"*.createQueryBuilder",
+         %{operation: :query, framework: :typeorm, extract_target: :first_arg}},
 
-  # ----- JavaScript/Prisma Patterns -----
+        # Transactions
+        {"*.transaction", %{operation: :transaction, framework: :typeorm, extract_target: :none}}
+      ]
 
-  @javascript_prisma_patterns [
-    # Prisma client operations
-    {"*.findUnique", %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
-    {"*.findUniqueOrThrow",
-     %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
-    {"*.findFirst", %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
-    {"*.findFirstOrThrow",
-     %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
-    {"*.findMany", %{operation: :retrieve_all, framework: :prisma, extract_target: :receiver}},
+    # ----- JavaScript/Prisma Patterns -----
 
-    # Create operations
-    {"*.create", %{operation: :create, framework: :prisma, extract_target: :receiver}},
-    {"*.createMany", %{operation: :create, framework: :prisma, extract_target: :receiver}},
+    def javascript_prisma_patterns,
+      do: [
+        # Prisma client operations
+        {"*.findUnique", %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
+        {"*.findUniqueOrThrow",
+         %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
+        {"*.findFirst", %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
+        {"*.findFirstOrThrow",
+         %{operation: :retrieve, framework: :prisma, extract_target: :receiver}},
+        {"*.findMany",
+         %{operation: :retrieve_all, framework: :prisma, extract_target: :receiver}},
 
-    # Update operations
-    {"*.update", %{operation: :update, framework: :prisma, extract_target: :receiver}},
-    {"*.updateMany", %{operation: :update, framework: :prisma, extract_target: :receiver}},
-    {"*.upsert", %{operation: :update, framework: :prisma, extract_target: :receiver}},
+        # Create operations
+        {"*.create", %{operation: :create, framework: :prisma, extract_target: :receiver}},
+        {"*.createMany", %{operation: :create, framework: :prisma, extract_target: :receiver}},
 
-    # Delete operations
-    {"*.delete", %{operation: :delete, framework: :prisma, extract_target: :receiver}},
-    {"*.deleteMany", %{operation: :delete, framework: :prisma, extract_target: :receiver}},
+        # Update operations
+        {"*.update", %{operation: :update, framework: :prisma, extract_target: :receiver}},
+        {"*.updateMany", %{operation: :update, framework: :prisma, extract_target: :receiver}},
+        {"*.upsert", %{operation: :update, framework: :prisma, extract_target: :receiver}},
 
-    # Aggregates
-    {"*.count", %{operation: :aggregate, framework: :prisma, extract_target: :receiver}},
-    {"*.aggregate", %{operation: :aggregate, framework: :prisma, extract_target: :receiver}},
-    {"*.groupBy", %{operation: :aggregate, framework: :prisma, extract_target: :receiver}},
+        # Delete operations
+        {"*.delete", %{operation: :delete, framework: :prisma, extract_target: :receiver}},
+        {"*.deleteMany", %{operation: :delete, framework: :prisma, extract_target: :receiver}},
 
-    # Transactions
-    {"$transaction", %{operation: :transaction, framework: :prisma, extract_target: :none}}
-  ]
+        # Aggregates
+        {"*.count", %{operation: :aggregate, framework: :prisma, extract_target: :receiver}},
+        {"*.aggregate", %{operation: :aggregate, framework: :prisma, extract_target: :receiver}},
+        {"*.groupBy", %{operation: :aggregate, framework: :prisma, extract_target: :receiver}},
+
+        # Transactions
+        {"$transaction", %{operation: :transaction, framework: :prisma, extract_target: :none}}
+      ]
+  end
 
   # ----- Registration -----
 
@@ -327,20 +372,20 @@ defmodule Metastatic.Semantic.Domains.Database do
   @spec register_all() :: :ok
   def register_all do
     # Elixir patterns
-    Patterns.register(:db, :elixir, @elixir_patterns)
+    Patterns.register(:db, :elixir, R.elixir_patterns())
 
     # Python patterns (Django first - more specific, then SQLAlchemy)
-    Patterns.register(:db, :python, @python_django_patterns ++ @python_sqlalchemy_patterns)
+    Patterns.register(:db, :python, R.python_django_patterns() ++ R.python_sqlalchemy_patterns())
 
     # Ruby patterns
-    Patterns.register(:db, :ruby, @ruby_patterns)
+    Patterns.register(:db, :ruby, R.ruby_patterns())
 
     # JavaScript patterns (Sequelize + TypeORM + Prisma)
     Patterns.register(
       :db,
       :javascript,
-      @javascript_sequelize_patterns ++
-        @javascript_typeorm_patterns ++ @javascript_prisma_patterns
+      R.javascript_sequelize_patterns() ++
+        R.javascript_typeorm_patterns() ++ R.javascript_prisma_patterns()
     )
 
     :ok

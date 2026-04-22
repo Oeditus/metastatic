@@ -59,198 +59,239 @@ defmodule Metastatic.Semantic.Domains.Queue do
 
   alias Metastatic.Semantic.Patterns
 
-  # ----- Elixir/Broadway Patterns -----
+  defmodule R do
+    @moduledoc false
 
-  @elixir_broadway_patterns [
-    {"Broadway.start_link", %{operation: :consume, framework: :broadway, extract_target: :none}},
-    {"Broadway.push_messages",
-     %{operation: :publish, framework: :broadway, extract_target: :first_arg}},
-    {"Broadway.test_message",
-     %{operation: :publish, framework: :broadway, extract_target: :first_arg}},
-    {"Broadway.Producer.push_messages",
-     %{operation: :publish, framework: :broadway, extract_target: :first_arg}}
-  ]
+    # ----- Elixir/Broadway Patterns -----
 
-  # ----- Elixir/Oban Patterns -----
+    def elixir_broadway_patterns,
+      do: [
+        {"Broadway.start_link",
+         %{operation: :consume, framework: :broadway, extract_target: :none}},
+        {"Broadway.push_messages",
+         %{operation: :publish, framework: :broadway, extract_target: :first_arg}},
+        {"Broadway.test_message",
+         %{operation: :publish, framework: :broadway, extract_target: :first_arg}},
+        {"Broadway.Producer.push_messages",
+         %{operation: :publish, framework: :broadway, extract_target: :first_arg}}
+      ]
 
-  @elixir_oban_patterns [
-    {"Oban.insert", %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
-    {"Oban.insert!", %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
-    {"Oban.insert_all", %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
-    {"Oban.insert_all!", %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
-    {"Oban.start_queue", %{operation: :consume, framework: :oban, extract_target: :first_arg}},
-    {"Oban.stop_queue", %{operation: :consume, framework: :oban, extract_target: :first_arg}},
-    {"Oban.pause_queue", %{operation: :consume, framework: :oban, extract_target: :first_arg}},
-    {"Oban.resume_queue", %{operation: :consume, framework: :oban, extract_target: :first_arg}},
-    {"Oban.retry_job", %{operation: :retry, framework: :oban, extract_target: :first_arg}},
-    {"Oban.retry_all_jobs", %{operation: :retry, framework: :oban, extract_target: :none}},
-    {"Oban.cancel_job", %{operation: :reject, framework: :oban, extract_target: :first_arg}},
-    {"*.new", %{operation: :enqueue, framework: :oban, extract_target: :none}},
-    # Worker perform callback
-    {"perform", %{operation: :process, framework: :oban, extract_target: :none}}
-  ]
+    # ----- Elixir/Oban Patterns -----
 
-  # ----- Elixir/GenStage Patterns -----
+    def elixir_oban_patterns,
+      do: [
+        {"Oban.insert", %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
+        {"Oban.insert!", %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
+        {"Oban.insert_all", %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
+        {"Oban.insert_all!",
+         %{operation: :enqueue, framework: :oban, extract_target: :first_arg}},
+        {"Oban.start_queue",
+         %{operation: :consume, framework: :oban, extract_target: :first_arg}},
+        {"Oban.stop_queue", %{operation: :consume, framework: :oban, extract_target: :first_arg}},
+        {"Oban.pause_queue",
+         %{operation: :consume, framework: :oban, extract_target: :first_arg}},
+        {"Oban.resume_queue",
+         %{operation: :consume, framework: :oban, extract_target: :first_arg}},
+        {"Oban.retry_job", %{operation: :retry, framework: :oban, extract_target: :first_arg}},
+        {"Oban.retry_all_jobs", %{operation: :retry, framework: :oban, extract_target: :none}},
+        {"Oban.cancel_job", %{operation: :reject, framework: :oban, extract_target: :first_arg}},
+        {"*.new", %{operation: :enqueue, framework: :oban, extract_target: :none}},
+        # Worker perform callback
+        {"perform", %{operation: :process, framework: :oban, extract_target: :none}}
+      ]
 
-  @elixir_genstage_patterns [
-    {"GenStage.start_link", %{operation: :consume, framework: :genstage, extract_target: :none}},
-    {"GenStage.sync_subscribe",
-     %{operation: :subscribe, framework: :genstage, extract_target: :first_arg}},
-    {"GenStage.async_subscribe",
-     %{operation: :subscribe, framework: :genstage, extract_target: :first_arg}},
-    {"GenStage.demand", %{operation: :consume, framework: :genstage, extract_target: :none}},
-    {"GenStage.reply", %{operation: :publish, framework: :genstage, extract_target: :none}}
-  ]
+    # ----- Elixir/GenStage Patterns -----
 
-  # ----- Elixir/AMQP (RabbitMQ) Patterns -----
+    def elixir_genstage_patterns,
+      do: [
+        {"GenStage.start_link",
+         %{operation: :consume, framework: :genstage, extract_target: :none}},
+        {"GenStage.sync_subscribe",
+         %{operation: :subscribe, framework: :genstage, extract_target: :first_arg}},
+        {"GenStage.async_subscribe",
+         %{operation: :subscribe, framework: :genstage, extract_target: :first_arg}},
+        {"GenStage.demand", %{operation: :consume, framework: :genstage, extract_target: :none}},
+        {"GenStage.reply", %{operation: :publish, framework: :genstage, extract_target: :none}}
+      ]
 
-  @elixir_amqp_patterns [
-    {"AMQP.Basic.publish", %{operation: :publish, framework: :amqp, extract_target: :first_arg}},
-    {"AMQP.Basic.consume", %{operation: :consume, framework: :amqp, extract_target: :first_arg}},
-    {"AMQP.Basic.ack", %{operation: :acknowledge, framework: :amqp, extract_target: :none}},
-    {"AMQP.Basic.nack", %{operation: :reject, framework: :amqp, extract_target: :none}},
-    {"AMQP.Basic.reject", %{operation: :reject, framework: :amqp, extract_target: :none}},
-    {"AMQP.Basic.get", %{operation: :dequeue, framework: :amqp, extract_target: :first_arg}},
-    {"AMQP.Queue.declare",
-     %{operation: :subscribe, framework: :amqp, extract_target: :first_arg}},
-    {"AMQP.Queue.bind", %{operation: :subscribe, framework: :amqp, extract_target: :first_arg}},
-    {"AMQP.Exchange.declare",
-     %{operation: :subscribe, framework: :amqp, extract_target: :first_arg}}
-  ]
+    # ----- Elixir/AMQP (RabbitMQ) Patterns -----
 
-  # ----- Python/Celery Patterns -----
+    def elixir_amqp_patterns,
+      do: [
+        {"AMQP.Basic.publish",
+         %{operation: :publish, framework: :amqp, extract_target: :first_arg}},
+        {"AMQP.Basic.consume",
+         %{operation: :consume, framework: :amqp, extract_target: :first_arg}},
+        {"AMQP.Basic.ack", %{operation: :acknowledge, framework: :amqp, extract_target: :none}},
+        {"AMQP.Basic.nack", %{operation: :reject, framework: :amqp, extract_target: :none}},
+        {"AMQP.Basic.reject", %{operation: :reject, framework: :amqp, extract_target: :none}},
+        {"AMQP.Basic.get", %{operation: :dequeue, framework: :amqp, extract_target: :first_arg}},
+        {"AMQP.Queue.declare",
+         %{operation: :subscribe, framework: :amqp, extract_target: :first_arg}},
+        {"AMQP.Queue.bind",
+         %{operation: :subscribe, framework: :amqp, extract_target: :first_arg}},
+        {"AMQP.Exchange.declare",
+         %{operation: :subscribe, framework: :amqp, extract_target: :first_arg}}
+      ]
 
-  @python_celery_patterns [
-    {"task.delay", %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
-    {"task.apply_async", %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
-    {"task.apply", %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
-    {"celery.send_task", %{operation: :enqueue, framework: :celery, extract_target: :first_arg}},
-    {"app.send_task", %{operation: :enqueue, framework: :celery, extract_target: :first_arg}},
-    {~r/\.delay$/, %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
-    {~r/\.apply_async$/, %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
-    {"celery.task", %{operation: :process, framework: :celery, extract_target: :none}},
-    {"app.task", %{operation: :process, framework: :celery, extract_target: :none}},
-    {"retry", %{operation: :retry, framework: :celery, extract_target: :none}}
-  ]
+    # ----- Python/Celery Patterns -----
 
-  # ----- Python/RQ Patterns -----
+    def python_celery_patterns,
+      do: [
+        {"task.delay", %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
+        {"task.apply_async",
+         %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
+        {"task.apply", %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
+        {"celery.send_task",
+         %{operation: :enqueue, framework: :celery, extract_target: :first_arg}},
+        {"app.send_task", %{operation: :enqueue, framework: :celery, extract_target: :first_arg}},
+        {~r/\.delay$/, %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
+        {~r/\.apply_async$/,
+         %{operation: :enqueue, framework: :celery, extract_target: :receiver}},
+        {"celery.task", %{operation: :process, framework: :celery, extract_target: :none}},
+        {"app.task", %{operation: :process, framework: :celery, extract_target: :none}},
+        {"retry", %{operation: :retry, framework: :celery, extract_target: :none}}
+      ]
 
-  @python_rq_patterns [
-    {"queue.enqueue", %{operation: :enqueue, framework: :rq, extract_target: :first_arg}},
-    {"queue.enqueue_at", %{operation: :schedule, framework: :rq, extract_target: :first_arg}},
-    {"queue.enqueue_in", %{operation: :schedule, framework: :rq, extract_target: :first_arg}},
-    {"Queue.enqueue", %{operation: :enqueue, framework: :rq, extract_target: :first_arg}},
-    {"job.get_status", %{operation: :consume, framework: :rq, extract_target: :none}},
-    {"job.cancel", %{operation: :reject, framework: :rq, extract_target: :none}},
-    {"job.requeue", %{operation: :retry, framework: :rq, extract_target: :none}},
-    {"Worker.work", %{operation: :process, framework: :rq, extract_target: :none}}
-  ]
+    # ----- Python/RQ Patterns -----
 
-  # ----- Python/Kombu Patterns -----
+    def python_rq_patterns,
+      do: [
+        {"queue.enqueue", %{operation: :enqueue, framework: :rq, extract_target: :first_arg}},
+        {"queue.enqueue_at", %{operation: :schedule, framework: :rq, extract_target: :first_arg}},
+        {"queue.enqueue_in", %{operation: :schedule, framework: :rq, extract_target: :first_arg}},
+        {"Queue.enqueue", %{operation: :enqueue, framework: :rq, extract_target: :first_arg}},
+        {"job.get_status", %{operation: :consume, framework: :rq, extract_target: :none}},
+        {"job.cancel", %{operation: :reject, framework: :rq, extract_target: :none}},
+        {"job.requeue", %{operation: :retry, framework: :rq, extract_target: :none}},
+        {"Worker.work", %{operation: :process, framework: :rq, extract_target: :none}}
+      ]
 
-  @python_kombu_patterns [
-    {"producer.publish", %{operation: :publish, framework: :kombu, extract_target: :first_arg}},
-    {"connection.Producer", %{operation: :publish, framework: :kombu, extract_target: :none}},
-    {"connection.Consumer", %{operation: :consume, framework: :kombu, extract_target: :none}},
-    {"consumer.consume", %{operation: :consume, framework: :kombu, extract_target: :none}},
-    {"message.ack", %{operation: :acknowledge, framework: :kombu, extract_target: :none}},
-    {"message.reject", %{operation: :reject, framework: :kombu, extract_target: :none}},
-    {"message.requeue", %{operation: :retry, framework: :kombu, extract_target: :none}},
-    {"Queue", %{operation: :subscribe, framework: :kombu, extract_target: :first_arg}},
-    {"Exchange", %{operation: :subscribe, framework: :kombu, extract_target: :first_arg}}
-  ]
+    # ----- Python/Kombu Patterns -----
 
-  # ----- Ruby/Sidekiq Patterns -----
+    def python_kombu_patterns,
+      do: [
+        {"producer.publish",
+         %{operation: :publish, framework: :kombu, extract_target: :first_arg}},
+        {"connection.Producer", %{operation: :publish, framework: :kombu, extract_target: :none}},
+        {"connection.Consumer", %{operation: :consume, framework: :kombu, extract_target: :none}},
+        {"consumer.consume", %{operation: :consume, framework: :kombu, extract_target: :none}},
+        {"message.ack", %{operation: :acknowledge, framework: :kombu, extract_target: :none}},
+        {"message.reject", %{operation: :reject, framework: :kombu, extract_target: :none}},
+        {"message.requeue", %{operation: :retry, framework: :kombu, extract_target: :none}},
+        {"Queue", %{operation: :subscribe, framework: :kombu, extract_target: :first_arg}},
+        {"Exchange", %{operation: :subscribe, framework: :kombu, extract_target: :first_arg}}
+      ]
 
-  @ruby_sidekiq_patterns [
-    {"*.perform_async", %{operation: :enqueue, framework: :sidekiq, extract_target: :receiver}},
-    {"*.perform_in", %{operation: :schedule, framework: :sidekiq, extract_target: :receiver}},
-    {"*.perform_at", %{operation: :schedule, framework: :sidekiq, extract_target: :receiver}},
-    {"Sidekiq::Client.push",
-     %{operation: :enqueue, framework: :sidekiq, extract_target: :first_arg}},
-    {"Sidekiq::Client.push_bulk",
-     %{operation: :enqueue, framework: :sidekiq, extract_target: :first_arg}},
-    {"perform", %{operation: :process, framework: :sidekiq, extract_target: :none}},
-    {"sidekiq_retry_in", %{operation: :retry, framework: :sidekiq, extract_target: :none}}
-  ]
+    # ----- Ruby/Sidekiq Patterns -----
 
-  # ----- Ruby/ActiveJob Patterns -----
+    def ruby_sidekiq_patterns,
+      do: [
+        {"*.perform_async",
+         %{operation: :enqueue, framework: :sidekiq, extract_target: :receiver}},
+        {"*.perform_in", %{operation: :schedule, framework: :sidekiq, extract_target: :receiver}},
+        {"*.perform_at", %{operation: :schedule, framework: :sidekiq, extract_target: :receiver}},
+        {"Sidekiq::Client.push",
+         %{operation: :enqueue, framework: :sidekiq, extract_target: :first_arg}},
+        {"Sidekiq::Client.push_bulk",
+         %{operation: :enqueue, framework: :sidekiq, extract_target: :first_arg}},
+        {"perform", %{operation: :process, framework: :sidekiq, extract_target: :none}},
+        {"sidekiq_retry_in", %{operation: :retry, framework: :sidekiq, extract_target: :none}}
+      ]
 
-  @ruby_activejob_patterns [
-    {"*.perform_later", %{operation: :enqueue, framework: :activejob, extract_target: :receiver}},
-    {"*.perform_now", %{operation: :process, framework: :activejob, extract_target: :receiver}},
-    {"*.set", %{operation: :schedule, framework: :activejob, extract_target: :receiver}},
-    {"ActiveJob::Base.queue_as",
-     %{operation: :subscribe, framework: :activejob, extract_target: :first_arg}},
-    {"perform", %{operation: :process, framework: :activejob, extract_target: :none}},
-    {"retry_job", %{operation: :retry, framework: :activejob, extract_target: :none}},
-    {"discard_on", %{operation: :reject, framework: :activejob, extract_target: :none}}
-  ]
+    # ----- Ruby/ActiveJob Patterns -----
 
-  # ----- Ruby/Resque Patterns -----
+    def ruby_activejob_patterns,
+      do: [
+        {"*.perform_later",
+         %{operation: :enqueue, framework: :activejob, extract_target: :receiver}},
+        {"*.perform_now",
+         %{operation: :process, framework: :activejob, extract_target: :receiver}},
+        {"*.set", %{operation: :schedule, framework: :activejob, extract_target: :receiver}},
+        {"ActiveJob::Base.queue_as",
+         %{operation: :subscribe, framework: :activejob, extract_target: :first_arg}},
+        {"perform", %{operation: :process, framework: :activejob, extract_target: :none}},
+        {"retry_job", %{operation: :retry, framework: :activejob, extract_target: :none}},
+        {"discard_on", %{operation: :reject, framework: :activejob, extract_target: :none}}
+      ]
 
-  @ruby_resque_patterns [
-    {"Resque.enqueue", %{operation: :enqueue, framework: :resque, extract_target: :first_arg}},
-    {"Resque.enqueue_at",
-     %{operation: :schedule, framework: :resque, extract_target: :first_arg}},
-    {"Resque.enqueue_in",
-     %{operation: :schedule, framework: :resque, extract_target: :first_arg}},
-    {"Resque.dequeue", %{operation: :dequeue, framework: :resque, extract_target: :first_arg}},
-    {"Resque.reserve", %{operation: :consume, framework: :resque, extract_target: :first_arg}},
-    {"perform", %{operation: :process, framework: :resque, extract_target: :none}}
-  ]
+    # ----- Ruby/Resque Patterns -----
 
-  # ----- JavaScript/BullMQ Patterns -----
+    def ruby_resque_patterns,
+      do: [
+        {"Resque.enqueue",
+         %{operation: :enqueue, framework: :resque, extract_target: :first_arg}},
+        {"Resque.enqueue_at",
+         %{operation: :schedule, framework: :resque, extract_target: :first_arg}},
+        {"Resque.enqueue_in",
+         %{operation: :schedule, framework: :resque, extract_target: :first_arg}},
+        {"Resque.dequeue",
+         %{operation: :dequeue, framework: :resque, extract_target: :first_arg}},
+        {"Resque.reserve",
+         %{operation: :consume, framework: :resque, extract_target: :first_arg}},
+        {"perform", %{operation: :process, framework: :resque, extract_target: :none}}
+      ]
 
-  @javascript_bullmq_patterns [
-    {"queue.add", %{operation: :enqueue, framework: :bullmq, extract_target: :first_arg}},
-    {"queue.addBulk", %{operation: :enqueue, framework: :bullmq, extract_target: :first_arg}},
-    {"queue.getJob", %{operation: :consume, framework: :bullmq, extract_target: :first_arg}},
-    {"queue.getJobs", %{operation: :consume, framework: :bullmq, extract_target: :none}},
-    {"queue.pause", %{operation: :consume, framework: :bullmq, extract_target: :none}},
-    {"queue.resume", %{operation: :consume, framework: :bullmq, extract_target: :none}},
-    {"worker.on", %{operation: :subscribe, framework: :bullmq, extract_target: :first_arg}},
-    {"Worker", %{operation: :consume, framework: :bullmq, extract_target: :first_arg}},
-    {"job.moveToCompleted",
-     %{operation: :acknowledge, framework: :bullmq, extract_target: :none}},
-    {"job.moveToFailed", %{operation: :reject, framework: :bullmq, extract_target: :none}},
-    {"job.retry", %{operation: :retry, framework: :bullmq, extract_target: :none}},
-    {"job.remove", %{operation: :dequeue, framework: :bullmq, extract_target: :none}}
-  ]
+    # ----- JavaScript/BullMQ Patterns -----
 
-  # ----- JavaScript/amqplib (RabbitMQ) Patterns -----
+    def javascript_bullmq_patterns,
+      do: [
+        {"queue.add", %{operation: :enqueue, framework: :bullmq, extract_target: :first_arg}},
+        {"queue.addBulk", %{operation: :enqueue, framework: :bullmq, extract_target: :first_arg}},
+        {"queue.getJob", %{operation: :consume, framework: :bullmq, extract_target: :first_arg}},
+        {"queue.getJobs", %{operation: :consume, framework: :bullmq, extract_target: :none}},
+        {"queue.pause", %{operation: :consume, framework: :bullmq, extract_target: :none}},
+        {"queue.resume", %{operation: :consume, framework: :bullmq, extract_target: :none}},
+        {"worker.on", %{operation: :subscribe, framework: :bullmq, extract_target: :first_arg}},
+        {"Worker", %{operation: :consume, framework: :bullmq, extract_target: :first_arg}},
+        {"job.moveToCompleted",
+         %{operation: :acknowledge, framework: :bullmq, extract_target: :none}},
+        {"job.moveToFailed", %{operation: :reject, framework: :bullmq, extract_target: :none}},
+        {"job.retry", %{operation: :retry, framework: :bullmq, extract_target: :none}},
+        {"job.remove", %{operation: :dequeue, framework: :bullmq, extract_target: :none}}
+      ]
 
-  @javascript_amqplib_patterns [
-    {"channel.publish", %{operation: :publish, framework: :amqplib, extract_target: :first_arg}},
-    {"channel.sendToQueue",
-     %{operation: :publish, framework: :amqplib, extract_target: :first_arg}},
-    {"channel.consume", %{operation: :consume, framework: :amqplib, extract_target: :first_arg}},
-    {"channel.ack", %{operation: :acknowledge, framework: :amqplib, extract_target: :none}},
-    {"channel.nack", %{operation: :reject, framework: :amqplib, extract_target: :none}},
-    {"channel.reject", %{operation: :reject, framework: :amqplib, extract_target: :none}},
-    {"channel.assertQueue",
-     %{operation: :subscribe, framework: :amqplib, extract_target: :first_arg}},
-    {"channel.assertExchange",
-     %{operation: :subscribe, framework: :amqplib, extract_target: :first_arg}},
-    {"channel.bindQueue",
-     %{operation: :subscribe, framework: :amqplib, extract_target: :first_arg}},
-    {"channel.get", %{operation: :dequeue, framework: :amqplib, extract_target: :first_arg}}
-  ]
+    # ----- JavaScript/amqplib (RabbitMQ) Patterns -----
 
-  # ----- JavaScript/Agenda Patterns -----
+    def javascript_amqplib_patterns,
+      do: [
+        {"channel.publish",
+         %{operation: :publish, framework: :amqplib, extract_target: :first_arg}},
+        {"channel.sendToQueue",
+         %{operation: :publish, framework: :amqplib, extract_target: :first_arg}},
+        {"channel.consume",
+         %{operation: :consume, framework: :amqplib, extract_target: :first_arg}},
+        {"channel.ack", %{operation: :acknowledge, framework: :amqplib, extract_target: :none}},
+        {"channel.nack", %{operation: :reject, framework: :amqplib, extract_target: :none}},
+        {"channel.reject", %{operation: :reject, framework: :amqplib, extract_target: :none}},
+        {"channel.assertQueue",
+         %{operation: :subscribe, framework: :amqplib, extract_target: :first_arg}},
+        {"channel.assertExchange",
+         %{operation: :subscribe, framework: :amqplib, extract_target: :first_arg}},
+        {"channel.bindQueue",
+         %{operation: :subscribe, framework: :amqplib, extract_target: :first_arg}},
+        {"channel.get", %{operation: :dequeue, framework: :amqplib, extract_target: :first_arg}}
+      ]
 
-  @javascript_agenda_patterns [
-    {"agenda.define", %{operation: :subscribe, framework: :agenda, extract_target: :first_arg}},
-    {"agenda.every", %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
-    {"agenda.schedule", %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
-    {"agenda.now", %{operation: :enqueue, framework: :agenda, extract_target: :first_arg}},
-    {"agenda.start", %{operation: :consume, framework: :agenda, extract_target: :none}},
-    {"agenda.stop", %{operation: :consume, framework: :agenda, extract_target: :none}},
-    {"agenda.cancel", %{operation: :reject, framework: :agenda, extract_target: :first_arg}},
-    {"job.repeatEvery", %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
-    {"job.schedule", %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
-    {"job.save", %{operation: :enqueue, framework: :agenda, extract_target: :none}}
-  ]
+    # ----- JavaScript/Agenda Patterns -----
+
+    def javascript_agenda_patterns,
+      do: [
+        {"agenda.define",
+         %{operation: :subscribe, framework: :agenda, extract_target: :first_arg}},
+        {"agenda.every", %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
+        {"agenda.schedule",
+         %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
+        {"agenda.now", %{operation: :enqueue, framework: :agenda, extract_target: :first_arg}},
+        {"agenda.start", %{operation: :consume, framework: :agenda, extract_target: :none}},
+        {"agenda.stop", %{operation: :consume, framework: :agenda, extract_target: :none}},
+        {"agenda.cancel", %{operation: :reject, framework: :agenda, extract_target: :first_arg}},
+        {"job.repeatEvery",
+         %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
+        {"job.schedule", %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
+        {"job.save", %{operation: :enqueue, framework: :agenda, extract_target: :none}}
+      ]
+  end
 
   # ----- Registration -----
 
@@ -266,29 +307,31 @@ defmodule Metastatic.Semantic.Domains.Queue do
     Patterns.register(
       :queue,
       :elixir,
-      @elixir_broadway_patterns ++
-        @elixir_oban_patterns ++ @elixir_genstage_patterns ++ @elixir_amqp_patterns
+      R.elixir_broadway_patterns() ++
+        R.elixir_oban_patterns() ++
+        R.elixir_genstage_patterns() ++ R.elixir_amqp_patterns()
     )
 
     # Python patterns (Celery + RQ + Kombu)
     Patterns.register(
       :queue,
       :python,
-      @python_celery_patterns ++ @python_rq_patterns ++ @python_kombu_patterns
+      R.python_celery_patterns() ++ R.python_rq_patterns() ++ R.python_kombu_patterns()
     )
 
     # Ruby patterns (Sidekiq + ActiveJob + Resque)
     Patterns.register(
       :queue,
       :ruby,
-      @ruby_sidekiq_patterns ++ @ruby_activejob_patterns ++ @ruby_resque_patterns
+      R.ruby_sidekiq_patterns() ++ R.ruby_activejob_patterns() ++ R.ruby_resque_patterns()
     )
 
     # JavaScript patterns (BullMQ + amqplib + Agenda)
     Patterns.register(
       :queue,
       :javascript,
-      @javascript_bullmq_patterns ++ @javascript_amqplib_patterns ++ @javascript_agenda_patterns
+      R.javascript_bullmq_patterns() ++
+        R.javascript_amqplib_patterns() ++ R.javascript_agenda_patterns()
     )
 
     :ok

@@ -59,232 +59,281 @@ defmodule Metastatic.Semantic.Domains.File do
 
   alias Metastatic.Semantic.Patterns
 
-  # ----- Elixir/File Patterns -----
+  defmodule R do
+    @moduledoc false
 
-  @elixir_file_patterns [
-    {"File.read", %{operation: :read, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.read!", %{operation: :read, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.write", %{operation: :write, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.write!", %{operation: :write, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.open", %{operation: :open, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.open!", %{operation: :open, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.close", %{operation: :close, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rm", %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rm!", %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rm_rf", %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rm_rf!", %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.cp", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.cp!", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.cp_r", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.cp_r!", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rename", %{operation: :move, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rename!", %{operation: :move, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.exists?", %{operation: :exists, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.stat", %{operation: :stat, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.stat!", %{operation: :stat, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.mkdir", %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.mkdir!", %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.mkdir_p", %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.mkdir_p!", %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rmdir", %{operation: :rmdir, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.rmdir!", %{operation: :rmdir, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.ls", %{operation: :list, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.ls!", %{operation: :list, framework: :elixir_file, extract_target: :first_arg}},
-    {"File.stream!", %{operation: :read, framework: :elixir_file, extract_target: :first_arg}}
-  ]
+    # ----- Elixir/File Patterns -----
 
-  # ----- Elixir/IO Patterns -----
+    def elixir_file_patterns,
+      do: [
+        {"File.read", %{operation: :read, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.read!", %{operation: :read, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.write", %{operation: :write, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.write!",
+         %{operation: :write, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.open", %{operation: :open, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.open!", %{operation: :open, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.close", %{operation: :close, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rm", %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rm!", %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rm_rf",
+         %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rm_rf!",
+         %{operation: :delete, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.cp", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.cp!", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.cp_r", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.cp_r!", %{operation: :copy, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rename", %{operation: :move, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rename!",
+         %{operation: :move, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.exists?",
+         %{operation: :exists, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.stat", %{operation: :stat, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.stat!", %{operation: :stat, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.mkdir", %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.mkdir!",
+         %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.mkdir_p",
+         %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.mkdir_p!",
+         %{operation: :mkdir, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rmdir", %{operation: :rmdir, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.rmdir!",
+         %{operation: :rmdir, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.ls", %{operation: :list, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.ls!", %{operation: :list, framework: :elixir_file, extract_target: :first_arg}},
+        {"File.stream!", %{operation: :read, framework: :elixir_file, extract_target: :first_arg}}
+      ]
 
-  @elixir_io_patterns [
-    {"IO.read", %{operation: :read, framework: :elixir_io, extract_target: :first_arg}},
-    {"IO.write", %{operation: :write, framework: :elixir_io, extract_target: :first_arg}},
-    {"IO.binread", %{operation: :read, framework: :elixir_io, extract_target: :first_arg}},
-    {"IO.binwrite", %{operation: :write, framework: :elixir_io, extract_target: :first_arg}},
-    {"IO.gets", %{operation: :read, framework: :elixir_io, extract_target: :first_arg}},
-    {"IO.puts", %{operation: :write, framework: :elixir_io, extract_target: :first_arg}}
-  ]
+    # ----- Elixir/IO Patterns -----
 
-  # ----- Python/builtins Patterns -----
+    def elixir_io_patterns,
+      do: [
+        {"IO.read", %{operation: :read, framework: :elixir_io, extract_target: :first_arg}},
+        {"IO.write", %{operation: :write, framework: :elixir_io, extract_target: :first_arg}},
+        {"IO.binread", %{operation: :read, framework: :elixir_io, extract_target: :first_arg}},
+        {"IO.binwrite", %{operation: :write, framework: :elixir_io, extract_target: :first_arg}},
+        {"IO.gets", %{operation: :read, framework: :elixir_io, extract_target: :first_arg}},
+        {"IO.puts", %{operation: :write, framework: :elixir_io, extract_target: :first_arg}}
+      ]
 
-  @python_builtin_patterns [
-    {"open", %{operation: :open, framework: :python_builtin, extract_target: :first_arg}},
-    {"file.read", %{operation: :read, framework: :python_builtin, extract_target: :none}},
-    {"file.write", %{operation: :write, framework: :python_builtin, extract_target: :none}},
-    {"file.close", %{operation: :close, framework: :python_builtin, extract_target: :none}},
-    {"file.readline", %{operation: :read, framework: :python_builtin, extract_target: :none}},
-    {"file.readlines", %{operation: :read, framework: :python_builtin, extract_target: :none}},
-    {"file.writelines", %{operation: :write, framework: :python_builtin, extract_target: :none}},
-    {"f.read", %{operation: :read, framework: :python_builtin, extract_target: :none}},
-    {"f.write", %{operation: :write, framework: :python_builtin, extract_target: :none}},
-    {"f.close", %{operation: :close, framework: :python_builtin, extract_target: :none}}
-  ]
+    # ----- Python/builtins Patterns -----
 
-  # ----- Python/os Patterns -----
+    def python_builtin_patterns,
+      do: [
+        {"open", %{operation: :open, framework: :python_builtin, extract_target: :first_arg}},
+        {"file.read", %{operation: :read, framework: :python_builtin, extract_target: :none}},
+        {"file.write", %{operation: :write, framework: :python_builtin, extract_target: :none}},
+        {"file.close", %{operation: :close, framework: :python_builtin, extract_target: :none}},
+        {"file.readline", %{operation: :read, framework: :python_builtin, extract_target: :none}},
+        {"file.readlines",
+         %{operation: :read, framework: :python_builtin, extract_target: :none}},
+        {"file.writelines",
+         %{operation: :write, framework: :python_builtin, extract_target: :none}},
+        {"f.read", %{operation: :read, framework: :python_builtin, extract_target: :none}},
+        {"f.write", %{operation: :write, framework: :python_builtin, extract_target: :none}},
+        {"f.close", %{operation: :close, framework: :python_builtin, extract_target: :none}}
+      ]
 
-  @python_os_patterns [
-    {"os.remove", %{operation: :delete, framework: :python_os, extract_target: :first_arg}},
-    {"os.unlink", %{operation: :delete, framework: :python_os, extract_target: :first_arg}},
-    {"os.rename", %{operation: :move, framework: :python_os, extract_target: :first_arg}},
-    {"os.replace", %{operation: :move, framework: :python_os, extract_target: :first_arg}},
-    {"os.mkdir", %{operation: :mkdir, framework: :python_os, extract_target: :first_arg}},
-    {"os.makedirs", %{operation: :mkdir, framework: :python_os, extract_target: :first_arg}},
-    {"os.rmdir", %{operation: :rmdir, framework: :python_os, extract_target: :first_arg}},
-    {"os.removedirs", %{operation: :rmdir, framework: :python_os, extract_target: :first_arg}},
-    {"os.listdir", %{operation: :list, framework: :python_os, extract_target: :first_arg}},
-    {"os.scandir", %{operation: :list, framework: :python_os, extract_target: :first_arg}},
-    {"os.stat", %{operation: :stat, framework: :python_os, extract_target: :first_arg}},
-    {"os.path.exists", %{operation: :exists, framework: :python_os, extract_target: :first_arg}},
-    {"os.path.isfile", %{operation: :exists, framework: :python_os, extract_target: :first_arg}},
-    {"os.path.isdir", %{operation: :exists, framework: :python_os, extract_target: :first_arg}}
-  ]
+    # ----- Python/os Patterns -----
 
-  # ----- Python/pathlib Patterns -----
+    def python_os_patterns,
+      do: [
+        {"os.remove", %{operation: :delete, framework: :python_os, extract_target: :first_arg}},
+        {"os.unlink", %{operation: :delete, framework: :python_os, extract_target: :first_arg}},
+        {"os.rename", %{operation: :move, framework: :python_os, extract_target: :first_arg}},
+        {"os.replace", %{operation: :move, framework: :python_os, extract_target: :first_arg}},
+        {"os.mkdir", %{operation: :mkdir, framework: :python_os, extract_target: :first_arg}},
+        {"os.makedirs", %{operation: :mkdir, framework: :python_os, extract_target: :first_arg}},
+        {"os.rmdir", %{operation: :rmdir, framework: :python_os, extract_target: :first_arg}},
+        {"os.removedirs",
+         %{operation: :rmdir, framework: :python_os, extract_target: :first_arg}},
+        {"os.listdir", %{operation: :list, framework: :python_os, extract_target: :first_arg}},
+        {"os.scandir", %{operation: :list, framework: :python_os, extract_target: :first_arg}},
+        {"os.stat", %{operation: :stat, framework: :python_os, extract_target: :first_arg}},
+        {"os.path.exists",
+         %{operation: :exists, framework: :python_os, extract_target: :first_arg}},
+        {"os.path.isfile",
+         %{operation: :exists, framework: :python_os, extract_target: :first_arg}},
+        {"os.path.isdir",
+         %{operation: :exists, framework: :python_os, extract_target: :first_arg}}
+      ]
 
-  @python_pathlib_patterns [
-    {~r/\.read_text$/, %{operation: :read, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.read_bytes$/, %{operation: :read, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.write_text$/, %{operation: :write, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.write_bytes$/, %{operation: :write, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.unlink$/, %{operation: :delete, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.rename$/, %{operation: :move, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.replace$/, %{operation: :move, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.mkdir$/, %{operation: :mkdir, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.rmdir$/, %{operation: :rmdir, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.iterdir$/, %{operation: :list, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.exists$/, %{operation: :exists, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.is_file$/, %{operation: :exists, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.is_dir$/, %{operation: :exists, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.stat$/, %{operation: :stat, framework: :pathlib, extract_target: :receiver}},
-    {~r/\.open$/, %{operation: :open, framework: :pathlib, extract_target: :receiver}},
-    {"Path", %{operation: :stat, framework: :pathlib, extract_target: :first_arg}}
-  ]
+    # ----- Python/pathlib Patterns -----
 
-  # ----- Python/shutil Patterns -----
+    def python_pathlib_patterns,
+      do: [
+        {~r/\.read_text$/, %{operation: :read, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.read_bytes$/, %{operation: :read, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.write_text$/, %{operation: :write, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.write_bytes$/,
+         %{operation: :write, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.unlink$/, %{operation: :delete, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.rename$/, %{operation: :move, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.replace$/, %{operation: :move, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.mkdir$/, %{operation: :mkdir, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.rmdir$/, %{operation: :rmdir, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.iterdir$/, %{operation: :list, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.exists$/, %{operation: :exists, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.is_file$/, %{operation: :exists, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.is_dir$/, %{operation: :exists, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.stat$/, %{operation: :stat, framework: :pathlib, extract_target: :receiver}},
+        {~r/\.open$/, %{operation: :open, framework: :pathlib, extract_target: :receiver}},
+        {"Path", %{operation: :stat, framework: :pathlib, extract_target: :first_arg}}
+      ]
 
-  @python_shutil_patterns [
-    {"shutil.copy", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
-    {"shutil.copy2", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
-    {"shutil.copyfile", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
-    {"shutil.copytree", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
-    {"shutil.move", %{operation: :move, framework: :shutil, extract_target: :first_arg}},
-    {"shutil.rmtree", %{operation: :delete, framework: :shutil, extract_target: :first_arg}}
-  ]
+    # ----- Python/shutil Patterns -----
 
-  # ----- Ruby/File Patterns -----
+    def python_shutil_patterns,
+      do: [
+        {"shutil.copy", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
+        {"shutil.copy2", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
+        {"shutil.copyfile", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
+        {"shutil.copytree", %{operation: :copy, framework: :shutil, extract_target: :first_arg}},
+        {"shutil.move", %{operation: :move, framework: :shutil, extract_target: :first_arg}},
+        {"shutil.rmtree", %{operation: :delete, framework: :shutil, extract_target: :first_arg}}
+      ]
 
-  @ruby_file_patterns [
-    {"File.read", %{operation: :read, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.write", %{operation: :write, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.open", %{operation: :open, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.delete", %{operation: :delete, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.unlink", %{operation: :delete, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.rename", %{operation: :move, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.exist?", %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.exists?", %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.file?", %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.directory?", %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.stat", %{operation: :stat, framework: :ruby_file, extract_target: :first_arg}},
-    {"File.size", %{operation: :stat, framework: :ruby_file, extract_target: :first_arg}},
-    {"Dir.mkdir", %{operation: :mkdir, framework: :ruby_file, extract_target: :first_arg}},
-    {"Dir.rmdir", %{operation: :rmdir, framework: :ruby_file, extract_target: :first_arg}},
-    {"Dir.delete", %{operation: :rmdir, framework: :ruby_file, extract_target: :first_arg}},
-    {"Dir.entries", %{operation: :list, framework: :ruby_file, extract_target: :first_arg}},
-    {"Dir.glob", %{operation: :list, framework: :ruby_file, extract_target: :first_arg}},
-    {"Dir.foreach", %{operation: :list, framework: :ruby_file, extract_target: :first_arg}}
-  ]
+    # ----- Ruby/File Patterns -----
 
-  # ----- Ruby/FileUtils Patterns -----
+    def ruby_file_patterns,
+      do: [
+        {"File.read", %{operation: :read, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.write", %{operation: :write, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.open", %{operation: :open, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.delete", %{operation: :delete, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.unlink", %{operation: :delete, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.rename", %{operation: :move, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.exist?", %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.exists?",
+         %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.file?", %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.directory?",
+         %{operation: :exists, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.stat", %{operation: :stat, framework: :ruby_file, extract_target: :first_arg}},
+        {"File.size", %{operation: :stat, framework: :ruby_file, extract_target: :first_arg}},
+        {"Dir.mkdir", %{operation: :mkdir, framework: :ruby_file, extract_target: :first_arg}},
+        {"Dir.rmdir", %{operation: :rmdir, framework: :ruby_file, extract_target: :first_arg}},
+        {"Dir.delete", %{operation: :rmdir, framework: :ruby_file, extract_target: :first_arg}},
+        {"Dir.entries", %{operation: :list, framework: :ruby_file, extract_target: :first_arg}},
+        {"Dir.glob", %{operation: :list, framework: :ruby_file, extract_target: :first_arg}},
+        {"Dir.foreach", %{operation: :list, framework: :ruby_file, extract_target: :first_arg}}
+      ]
 
-  @ruby_fileutils_patterns [
-    {"FileUtils.cp", %{operation: :copy, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.copy", %{operation: :copy, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.cp_r", %{operation: :copy, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.mv", %{operation: :move, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.move", %{operation: :move, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.rm", %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.rm_f", %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.rm_r", %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.rm_rf", %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.mkdir", %{operation: :mkdir, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.mkdir_p",
-     %{operation: :mkdir, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.rmdir", %{operation: :rmdir, framework: :fileutils, extract_target: :first_arg}},
-    {"FileUtils.touch", %{operation: :write, framework: :fileutils, extract_target: :first_arg}}
-  ]
+    # ----- Ruby/FileUtils Patterns -----
 
-  # ----- JavaScript/fs Patterns -----
+    def ruby_fileutils_patterns,
+      do: [
+        {"FileUtils.cp", %{operation: :copy, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.copy",
+         %{operation: :copy, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.cp_r",
+         %{operation: :copy, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.mv", %{operation: :move, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.move",
+         %{operation: :move, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.rm",
+         %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.rm_f",
+         %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.rm_r",
+         %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.rm_rf",
+         %{operation: :delete, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.mkdir",
+         %{operation: :mkdir, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.mkdir_p",
+         %{operation: :mkdir, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.rmdir",
+         %{operation: :rmdir, framework: :fileutils, extract_target: :first_arg}},
+        {"FileUtils.touch",
+         %{operation: :write, framework: :fileutils, extract_target: :first_arg}}
+      ]
 
-  @javascript_fs_patterns [
-    {"fs.readFile", %{operation: :read, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.readFileSync", %{operation: :read, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.writeFile", %{operation: :write, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.writeFileSync", %{operation: :write, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.appendFile", %{operation: :append, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.appendFileSync",
-     %{operation: :append, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.unlink", %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.unlinkSync", %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.rm", %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.rmSync", %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.copyFile", %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.copyFileSync", %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.cp", %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.cpSync", %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.rename", %{operation: :move, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.renameSync", %{operation: :move, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.existsSync", %{operation: :exists, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.stat", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.statSync", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.lstat", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.lstatSync", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.mkdir", %{operation: :mkdir, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.mkdirSync", %{operation: :mkdir, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.rmdir", %{operation: :rmdir, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.rmdirSync", %{operation: :rmdir, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.readdir", %{operation: :list, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.readdirSync", %{operation: :list, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.open", %{operation: :open, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.openSync", %{operation: :open, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.close", %{operation: :close, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.closeSync", %{operation: :close, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.createReadStream",
-     %{operation: :read, framework: :nodejs_fs, extract_target: :first_arg}},
-    {"fs.createWriteStream",
-     %{operation: :write, framework: :nodejs_fs, extract_target: :first_arg}}
-  ]
+    # ----- JavaScript/fs Patterns -----
 
-  # ----- JavaScript/fs/promises Patterns -----
+    def javascript_fs_patterns,
+      do: [
+        {"fs.readFile", %{operation: :read, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.readFileSync",
+         %{operation: :read, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.writeFile", %{operation: :write, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.writeFileSync",
+         %{operation: :write, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.appendFile",
+         %{operation: :append, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.appendFileSync",
+         %{operation: :append, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.unlink", %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.unlinkSync",
+         %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.rm", %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.rmSync", %{operation: :delete, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.copyFile", %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.copyFileSync",
+         %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.cp", %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.cpSync", %{operation: :copy, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.rename", %{operation: :move, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.renameSync", %{operation: :move, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.existsSync",
+         %{operation: :exists, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.stat", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.statSync", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.lstat", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.lstatSync", %{operation: :stat, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.mkdir", %{operation: :mkdir, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.mkdirSync", %{operation: :mkdir, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.rmdir", %{operation: :rmdir, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.rmdirSync", %{operation: :rmdir, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.readdir", %{operation: :list, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.readdirSync",
+         %{operation: :list, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.open", %{operation: :open, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.openSync", %{operation: :open, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.close", %{operation: :close, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.closeSync", %{operation: :close, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.createReadStream",
+         %{operation: :read, framework: :nodejs_fs, extract_target: :first_arg}},
+        {"fs.createWriteStream",
+         %{operation: :write, framework: :nodejs_fs, extract_target: :first_arg}}
+      ]
 
-  @javascript_fspromises_patterns [
-    {"fsPromises.readFile",
-     %{operation: :read, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.writeFile",
-     %{operation: :write, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.appendFile",
-     %{operation: :append, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.unlink",
-     %{operation: :delete, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.rm",
-     %{operation: :delete, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.copyFile",
-     %{operation: :copy, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.cp",
-     %{operation: :copy, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.rename",
-     %{operation: :move, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.stat",
-     %{operation: :stat, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.mkdir",
-     %{operation: :mkdir, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.rmdir",
-     %{operation: :rmdir, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.readdir",
-     %{operation: :list, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.open",
-     %{operation: :open, framework: :nodejs_fs_promises, extract_target: :first_arg}},
-    {"fsPromises.access",
-     %{operation: :exists, framework: :nodejs_fs_promises, extract_target: :first_arg}}
-  ]
+    # ----- JavaScript/fs/promises Patterns -----
+
+    def javascript_fspromises_patterns,
+      do: [
+        {"fsPromises.readFile",
+         %{operation: :read, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.writeFile",
+         %{operation: :write, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.appendFile",
+         %{operation: :append, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.unlink",
+         %{operation: :delete, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.rm",
+         %{operation: :delete, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.copyFile",
+         %{operation: :copy, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.cp",
+         %{operation: :copy, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.rename",
+         %{operation: :move, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.stat",
+         %{operation: :stat, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.mkdir",
+         %{operation: :mkdir, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.rmdir",
+         %{operation: :rmdir, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.readdir",
+         %{operation: :list, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.open",
+         %{operation: :open, framework: :nodejs_fs_promises, extract_target: :first_arg}},
+        {"fsPromises.access",
+         %{operation: :exists, framework: :nodejs_fs_promises, extract_target: :first_arg}}
+      ]
+  end
 
   # ----- Registration -----
 
@@ -300,29 +349,29 @@ defmodule Metastatic.Semantic.Domains.File do
     Patterns.register(
       :file,
       :elixir,
-      @elixir_file_patterns ++ @elixir_io_patterns
+      R.elixir_file_patterns() ++ R.elixir_io_patterns()
     )
 
     # Python patterns (builtins + os + pathlib + shutil)
     Patterns.register(
       :file,
       :python,
-      @python_builtin_patterns ++
-        @python_os_patterns ++ @python_pathlib_patterns ++ @python_shutil_patterns
+      R.python_builtin_patterns() ++
+        R.python_os_patterns() ++ R.python_pathlib_patterns() ++ R.python_shutil_patterns()
     )
 
     # Ruby patterns (File + FileUtils)
     Patterns.register(
       :file,
       :ruby,
-      @ruby_file_patterns ++ @ruby_fileutils_patterns
+      R.ruby_file_patterns() ++ R.ruby_fileutils_patterns()
     )
 
     # JavaScript patterns (fs + fs/promises)
     Patterns.register(
       :file,
       :javascript,
-      @javascript_fs_patterns ++ @javascript_fspromises_patterns
+      R.javascript_fs_patterns() ++ R.javascript_fspromises_patterns()
     )
 
     :ok
