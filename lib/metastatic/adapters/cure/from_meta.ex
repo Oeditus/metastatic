@@ -138,6 +138,15 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
       :fsm ->
         emit_fsm(meta, body, indent)
 
+      :actor ->
+        emit_actor(meta, body, indent)
+
+      :supervisor ->
+        emit_supervisor(meta, body, indent)
+
+      :app ->
+        emit_app(meta, body, indent)
+
       :struct ->
         fields = Enum.map_join(body, "\n#{pad(indent + 2)}", &emit_field(&1, indent + 2))
         "rec #{meta[:name]}\n#{pad(indent + 2)}#{fields}"
@@ -236,6 +245,30 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
     "@#{meta[:name]}(#{arg_strs})"
   end
 
+  defp emit({:child_spec, meta, []}, _indent) do
+    kind = meta[:kind]
+    module = meta[:module] || ""
+    id = meta[:id] || ""
+
+    prefix = if kind == :supervisor, do: "sup ", else: ""
+
+    opts_keys = meta |> Keyword.drop([:module, :id, :kind, :line, :col])
+
+    opts_str =
+      if opts_keys == [] do
+        ""
+      else
+        inner =
+          Enum.map_join(opts_keys, ", ", fn {k, v} ->
+            "#{k}: #{emit(v, 0)}"
+          end)
+
+        " (#{inner})"
+      end
+
+    "#{prefix}#{module} as #{id}#{opts_str}"
+  end
+
   defp emit(other, _indent), do: inspect(other)
 
   defp emit_field({:param, meta, name}, indent) do
@@ -255,6 +288,111 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   end
 
   defp emit_variant({:variable, _, name}), do: name
+
+  # Actor container rendering (Cure v0.25.0+).
+  # Emits `actor Name [with InitExpr]` followed by lifecycle callback blocks.
+  # All callbacks live in meta (the body is always []).
+  @actor_callback_keys [:on_start, :on_message, :on_stop]
+  defp emit_actor(meta, _body, indent) do
+    name = meta[:name]
+    init = meta[:init]
+    pad_inner = pad(indent + 2)
+
+    init_str = if init, do: " with #{emit(init, indent)}", else: ""
+
+    callbacks_str =
+      Enum.map_join(@actor_callback_keys, "", fn cb ->
+        case meta[cb] do
+          clauses when is_list(clauses) and clauses != [] ->
+            inner = Enum.map_join(clauses, "\n#{pad(indent + 4)}", &emit(&1, indent + 4))
+            "\n#{pad_inner}#{cb}\n#{pad(indent + 4)}#{inner}"
+
+          _ ->
+            ""
+        end
+      end)
+
+    "actor #{name}#{init_str}#{callbacks_str}"
+  end
+
+  # Supervisor container rendering (Cure v0.25.0+).
+  # Emits `sup Name` followed by optional strategy settings and a
+  # `children` block containing one line per child_spec in the body.
+  @sup_setting_keys [:strategy, :intensity, :period]
+  defp emit_supervisor(meta, body, indent) do
+    name = meta[:name]
+    pad_inner = pad(indent + 2)
+
+    settings_str =
+      Enum.map_join(@sup_setting_keys, "", fn key ->
+        case meta[key] do
+          nil -> ""
+          val -> "\n#{pad_inner}#{key} = #{emit(val, indent)}"
+        end
+      end)
+
+    children_str =
+      if body == [] do
+        ""
+      else
+        specs = Enum.map_join(body, "\n#{pad(indent + 4)}", &emit(&1, indent + 4))
+        "\n#{pad_inner}children\n#{pad(indent + 4)}#{specs}"
+      end
+
+    "sup #{name}#{settings_str}#{children_str}"
+  end
+
+  # App container rendering (Cure v0.26.0+).
+  # Emits `app Name` followed by all declarative settings and callbacks.
+  # All content lives in meta (the body is always []).
+  @app_setting_keys [
+    :vsn,
+    :description,
+    :root,
+    :applications,
+    :included_applications,
+    :env,
+    :registered
+  ]
+  @app_callback_keys [:on_start, :on_stop]
+  defp emit_app(meta, _body, indent) do
+    name = meta[:name]
+    pad_inner = pad(indent + 2)
+
+    settings_str =
+      Enum.map_join(@app_setting_keys, "", fn key ->
+        case meta[key] do
+          nil -> ""
+          val -> "\n#{pad_inner}#{key} = #{emit(val, indent)}"
+        end
+      end)
+
+    callbacks_str =
+      Enum.map_join(@app_callback_keys, "", fn cb ->
+        case meta[cb] do
+          clauses when is_list(clauses) and clauses != [] ->
+            inner = Enum.map_join(clauses, "\n#{pad(indent + 4)}", &emit(&1, indent + 4))
+            "\n#{pad_inner}#{cb}\n#{pad(indent + 4)}#{inner}"
+
+          _ ->
+            ""
+        end
+      end)
+
+    # on_phase entries: keyword list of [{phase_atom, [clauses]}]
+    phase_entries =
+      meta
+      |> Keyword.get_values(:on_phase)
+      |> List.flatten()
+
+    phases_str =
+      Enum.map_join(phase_entries, "", fn {phase, clauses} ->
+        inner = Enum.map_join(clauses, "\n#{pad(indent + 4)}", &emit(&1, indent + 4))
+        "\n#{pad_inner}on_phase :#{phase}\n#{pad(indent + 4)}#{inner}"
+      end)
+
+    "app #{name}#{settings_str}#{callbacks_str}#{phases_str}"
+  end
 
   # FSM container rendering (Cure v0.7.0+).
   # Emits `fsm Name [with Payload]` followed by indented transition lines

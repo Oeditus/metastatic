@@ -162,8 +162,9 @@ defmodule Metastatic.Semantic.Domains.Auth do
     {"check_password", %{operation: :verify_password, framework: :django, extract_target: :none}},
     {"make_password", %{operation: :hash_password, framework: :django, extract_target: :none}},
     {"set_password", %{operation: :hash_password, framework: :django, extract_target: :none}},
-    {~r/\.has_perm$/, %{operation: :authorize, framework: :django, extract_target: :receiver}},
-    {~r/\.has_perms$/, %{operation: :authorize, framework: :django, extract_target: :receiver}},
+    # [TODO!] Fix this properly
+    # {~r/\.has_perm$/, %{operation: :authorize, framework: :django, extract_target: :receiver}},
+    # {~r/\.has_perms$/, %{operation: :authorize, framework: :django, extract_target: :receiver}},
     {"permission_required",
      %{operation: :authorize, framework: :django, extract_target: :first_arg}},
     {"login_required", %{operation: :authorize, framework: :django, extract_target: :none}}

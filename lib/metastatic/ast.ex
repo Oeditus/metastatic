@@ -168,6 +168,42 @@ defmodule Metastatic.AST do
     `:on_timer`. Body elements are typically transition `:function_call`
     nodes carrying `:from`, `:event`, `:to`, and `:event_kind` metadata.
 
+  ## Actor / Supervisor / App Extensions (Cure v0.25.0 / v0.26.0)
+
+  Three container_type values were back-ported from Cure v0.25.0 and
+  v0.26.0 into the meta-model:
+
+  - **`container_type: :actor`** (Cure v0.25.0) -- typed GenServer-backed
+    process `actor Name [with InitExpr]`. Carries optional lifecycle
+    callback metadata keys: `:on_start`, `:on_message`, `:on_stop` (each a
+    list of `:match_arm` nodes). Optional `:init` metadata holds the initial
+    payload expression. Body is `[]`; all content is hoisted onto the
+    container meta by the parser.
+
+  - **`container_type: :supervisor`** (Cure v0.25.0) -- OTP supervisor
+    `sup Name`. Carries optional `:strategy`, `:intensity`, `:period`
+    metadata (MetaAST literal nodes). Body is a list of `:child_spec` nodes,
+    one per child declared in the `children` block.
+
+  - **`container_type: :app`** (Cure v0.26.0) -- OTP Application container
+    `app Name`. Carries optional metadata: `:vsn`, `:description`, `:root`,
+    `:applications`, `:included_applications`, `:env`, `:registered` (all
+    MetaAST nodes), plus `:on_start`, `:on_stop` callback clause lists and
+    `:on_phase` entries (each `[{phase_atom, [match_arm]}]`). Body is `[]`;
+    all declarative content is hoisted onto the container meta.
+
+  A companion structural node `:child_spec` is also added:
+
+  - **`:child_spec`** -- a single supervisor child declaration `Module as id
+    [(opts)]`. Shape `{:child_spec, meta, []}` where meta carries:
+      * `:module` (binary) -- the child module path (dotted string);
+      * `:id` (binary) -- the local child identifier;
+      * `:kind` (`:worker` | `:supervisor`) -- whether the child is a plain
+        worker or a nested supervisor;
+      * `:restart`, `:shutdown`, etc. -- OTP child-spec options as MetaAST
+        literal nodes.
+    The body is always `[]`.
+
   ## Bitstring / Comment Extensions (Cure v0.20.0)
 
   Two M2.1 Core additions were back-ported from Cure v0.20.0 -- "The
@@ -265,6 +301,7 @@ defmodule Metastatic.AST do
           | :type_annotation
           | :decorator
           | :record_update
+          | :child_spec
 
   @typedoc """
   Clause entry for grouped multi-clause function definitions.
@@ -325,6 +362,20 @@ defmodule Metastatic.AST do
   as `:payload`, `:terminal_states`, `:invariants`, `:verify`, `:timer`,
   `:on_transition`, `:on_enter`, `:on_exit`, `:on_failure`, `:on_timer`
   is carried on the container's own `meta`.
+
+  `:actor` is emitted by Cure v0.25.0+ for `actor Name [with InitExpr]`
+  containers. Lifecycle callbacks (`:on_start`, `:on_message`, `:on_stop`)
+  are stored as keyword list entries on `meta`; the body is always `[]`.
+  Optional `:init` metadata carries the initial state expression.
+
+  `:supervisor` is emitted by Cure v0.25.0+ for `sup Name` containers.
+  Supervision settings (`:strategy`, `:intensity`, `:period`) are stored
+  on `meta`; the body is a list of `:child_spec` nodes.
+
+  `:app` is emitted by Cure v0.26.0+ for `app Name` containers. All
+  declarative content (`:vsn`, `:description`, `:root`, `:applications`,
+  `:included_applications`, `:env`, `:registered`, `:on_start`, `:on_stop`,
+  `:on_phase`) is stored on `meta`; the body is always `[]`.
   """
   @type container_type ::
           :module
@@ -337,6 +388,9 @@ defmodule Metastatic.AST do
           | :struct
           | :proof
           | :fsm
+          | :actor
+          | :supervisor
+          | :app
 
   @typedoc """
   Visibility modifier.
@@ -476,7 +530,8 @@ defmodule Metastatic.AST do
     :import,
     :type_annotation,
     :decorator,
-    :record_update
+    :record_update,
+    :child_spec
   ]
 
   @native_types [:language_specific]
@@ -497,7 +552,10 @@ defmodule Metastatic.AST do
     :enum,
     :struct,
     :proof,
-    :fsm
+    :fsm,
+    :actor,
+    :supervisor,
+    :app
   ]
 
   # ----- Accessors -----
@@ -1221,6 +1279,22 @@ defmodule Metastatic.AST do
   end
 
   defp valid_node?(:record_update, _meta, _), do: false
+
+  # Child spec: {:child_spec, meta, []} -- a supervisor child entry.
+  # (Cure v0.25.0+). Meta must have a non-empty `:module` string (the
+  # module path) and a non-empty `:id` string. `:kind` must be `:worker`
+  # or `:supervisor` (defaults to `:worker`). Body is always empty.
+  defp valid_node?(:child_spec, meta, []) do
+    module = Keyword.get(meta, :module)
+    id = Keyword.get(meta, :id)
+    kind = Keyword.get(meta, :kind, :worker)
+
+    is_binary(module) and module != "" and
+      is_binary(id) and id != "" and
+      kind in [:worker, :supervisor]
+  end
+
+  defp valid_node?(:child_spec, _meta, _), do: false
 
   # M2.3 Native type
   defp valid_node?(:language_specific, meta, _native_ast) do
