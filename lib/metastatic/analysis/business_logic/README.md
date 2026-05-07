@@ -105,6 +105,24 @@ Bad: url = "https://api.example.com"; host = "192.168.1.100";
 Good: url = env.get("API_URL"); host = env.get("DB_HOST");
 ```
 
+#### ImperativeStatusHandling
+- **Layer**: M2.1 Core + M2.2s Structural
+- **Category**: Refactoring
+- **Detection**: Imperative status/state management patterns that should be modeled as an FSM
+- **Applies to**: All languages with entity lifecycle management
+- **Configurable**: Yes (`status_field_names`, `min_states`, `transition_verbs`)
+
+Detects three tiers of evidence:
+1. **Status branching** -- conditionals on `.status`/`.state` with 3+ literal branches
+2. **Status assignment** -- direct writes to status fields with literal values
+3. **Transition-verb functions** -- function names encoding state transitions (`activate`, `archive`, `suspend`, etc.)
+
+**Example (any language)**:
+```
+Bad: case record.status do :draft -> ... :pending -> ... :active -> ... end
+Good: Use Finitomata (Elixir), gen_statem (Erlang), or equivalent FSM library
+```
+
 ## Usage
 
 ### Basic Usage
@@ -142,12 +160,14 @@ analyzers = [
   BusinessLogic.MissingErrorHandling,
   BusinessLogic.SilentErrorCase,
   BusinessLogic.SwallowingException,
-  BusinessLogic.HardcodedValue
+  BusinessLogic.HardcodedValue,
+  BusinessLogic.ImperativeStatusHandling
 ]
 
 config = %{
   callback_hell: %{max_nesting: 3},
-  hardcoded_value: %{exclude_localhost: true}
+  hardcoded_value: %{exclude_localhost: true},
+  imperative_status_handling: %{min_states: 3}
 }
 
 issues = Runner.run(document, analyzers, config)
