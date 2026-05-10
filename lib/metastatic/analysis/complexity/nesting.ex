@@ -84,6 +84,7 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
   # Loop (3-tuple): increment depth for body
   defp walk({:loop, meta, children}, current, max) when is_list(meta) do
     loop_type = Keyword.get(meta, :loop_type)
+    children = if is_list(children), do: children, else: []
 
     case {loop_type, children} do
       {:while, [cond_expr, body]} ->

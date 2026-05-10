@@ -371,6 +371,7 @@ defmodule Metastatic.Analysis.Complexity do
       case children do
         [single] -> single
         statements when is_list(statements) -> {:block, [], statements}
+        nil -> {:block, [], []}
         other -> other
       end
 

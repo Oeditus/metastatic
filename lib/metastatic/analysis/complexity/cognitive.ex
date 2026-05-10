@@ -91,6 +91,7 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   defp walk({:loop, meta, children}, nesting, acc) when is_list(meta) do
     loop_type = Keyword.get(meta, :loop_type)
     acc = acc + 1 + nesting
+    children = if is_list(children), do: children, else: []
 
     case {loop_type, children} do
       {:while, [cond_expr, body]} ->
