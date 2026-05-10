@@ -129,6 +129,7 @@ defmodule Metastatic.Analysis.Purity do
   defp walk_node({:loop, meta, children}, ctx) when is_list(meta) do
     loop_type = Keyword.get(meta, :loop_type)
     loop_ctx = %{ctx | in_loop: true}
+    children = if is_list(children), do: children, else: []
 
     case {loop_type, children} do
       {:while, [cond_expr, body]} ->

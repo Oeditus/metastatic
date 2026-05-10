@@ -149,7 +149,9 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
     {_, max} =
       Enum.reduce(arms, {current, max}, fn
         {:match_arm, _meta, body_list}, {_c, m} ->
-          Enum.reduce(body_list, {current, m}, fn child, {_cc, mm} ->
+          body = if is_list(body_list), do: body_list, else: []
+
+          Enum.reduce(body, {current, m}, fn child, {_cc, mm} ->
             walk(child, current + 1, mm)
           end)
 
@@ -161,8 +163,10 @@ defmodule Metastatic.Analysis.Complexity.Nesting do
   end
 
   # Match arm (3-tuple): increment depth for body
-  defp walk({:match_arm, _meta, body_list}, current, max) when is_list(body_list) do
-    Enum.reduce(body_list, {current, max}, fn child, {_c, m} ->
+  defp walk({:match_arm, _meta, body_list}, current, max) do
+    body = if is_list(body_list), do: body_list, else: []
+
+    Enum.reduce(body, {current, max}, fn child, {_c, m} ->
       walk(child, current + 1, m)
     end)
   end

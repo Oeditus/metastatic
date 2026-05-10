@@ -132,6 +132,7 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
       {:loop, meta, children} when is_list(meta) ->
         loop_type = Keyword.get(meta, :loop_type, :for)
         acc = %{acc | operators: [to_string(loop_type) | acc.operators]}
+        children = if is_list(children), do: children, else: []
         Enum.reduce(children, acc, fn child, a -> walk(child, a) end)
 
       # Assignment (3-tuple)
@@ -176,17 +177,19 @@ defmodule Metastatic.Analysis.Complexity.Halstead do
           {:match_arm, meta, body_list}, a ->
             pattern = Keyword.get(meta, :pattern)
             a = if pattern, do: walk(pattern, a), else: a
-            Enum.reduce(body_list, a, fn child, inner -> walk(child, inner) end)
+            body = if is_list(body_list), do: body_list, else: []
+            Enum.reduce(body, a, fn child, inner -> walk(child, inner) end)
 
           other, a ->
             walk(other, a)
         end)
 
       # Match arm (3-tuple)
-      {:match_arm, meta, body_list} when is_list(body_list) ->
+      {:match_arm, meta, body_list} ->
         pattern = Keyword.get(meta, :pattern)
         acc = if pattern, do: walk(pattern, acc), else: acc
-        Enum.reduce(body_list, acc, fn child, a -> walk(child, a) end)
+        body = if is_list(body_list), do: body_list, else: []
+        Enum.reduce(body, acc, fn child, a -> walk(child, a) end)
 
       # Early return (3-tuple)
       {:early_return, _meta, [value]} ->

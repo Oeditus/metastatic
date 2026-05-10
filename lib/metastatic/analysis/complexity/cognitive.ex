@@ -158,7 +158,8 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
     Enum.reduce(arms, acc, fn
       {:match_arm, _meta, body_list}, a ->
         a = a + 1 + nesting
-        Enum.reduce(body_list, a, fn child, inner -> walk(child, nesting + 1, inner) end)
+        body = if is_list(body_list), do: body_list, else: []
+        Enum.reduce(body, a, fn child, inner -> walk(child, nesting + 1, inner) end)
 
       other, a ->
         walk(other, nesting, a)
@@ -166,8 +167,9 @@ defmodule Metastatic.Analysis.Complexity.Cognitive do
   end
 
   # Match arm (3-tuple)
-  defp walk({:match_arm, _meta, body_list}, nesting, acc) when is_list(body_list) do
-    Enum.reduce(body_list, acc, fn child, a -> walk(child, nesting + 1, a) end)
+  defp walk({:match_arm, _meta, body_list}, nesting, acc) do
+    body = if is_list(body_list), do: body_list, else: []
+    Enum.reduce(body, acc, fn child, a -> walk(child, nesting + 1, a) end)
   end
 
   # Block (3-tuple): walk statements at same nesting level

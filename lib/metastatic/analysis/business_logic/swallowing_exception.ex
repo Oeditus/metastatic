@@ -135,6 +135,7 @@ defmodule Metastatic.Analysis.BusinessLogic.SwallowingException do
       Enum.filter(catch_clauses, fn
         {:match_arm, meta, body_list} ->
           # match_arm format: {:match_arm, [pattern: p], [body]}
+          body_list = if is_list(body_list), do: body_list, else: []
           body = List.last(body_list) || Keyword.get(meta, :body)
           not has_logging_or_reraise?(body)
 

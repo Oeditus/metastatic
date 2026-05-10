@@ -231,7 +231,8 @@ defmodule Metastatic.Analysis.Duplication.Fingerprint do
   end
 
   defp normalize_ast({:exception_handling, meta, [try_block, handlers, finally_block]}) do
-    normalized_handlers = Enum.map(handlers, &normalize_ast/1)
+    handlers_list = if is_list(handlers), do: handlers, else: []
+    normalized_handlers = Enum.map(handlers_list, &normalize_ast/1)
 
     {:exception_handling, meta,
      [

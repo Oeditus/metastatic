@@ -142,17 +142,19 @@ defmodule Metastatic.Analysis.Complexity.LoC do
       {:match_arm, meta, body_list}, c ->
         pattern = Keyword.get(meta, :pattern)
         c = if pattern, do: walk_expr(pattern, c), else: c
-        Enum.reduce(body_list, c, fn child, inner -> walk(child, inner) end)
+        body = if is_list(body_list), do: body_list, else: []
+        Enum.reduce(body, c, fn child, inner -> walk(child, inner) end)
 
       other, c ->
         walk(other, c)
     end)
   end
 
-  defp walk({:match_arm, meta, body_list}, count) when is_list(body_list) do
+  defp walk({:match_arm, meta, body_list}, count) do
     pattern = Keyword.get(meta, :pattern)
     count = if pattern, do: walk_expr(pattern, count), else: count
-    Enum.reduce(body_list, count, fn child, c -> walk(child, c) end)
+    body = if is_list(body_list), do: body_list, else: []
+    Enum.reduce(body, count, fn child, c -> walk(child, c) end)
   end
 
   defp walk({:lambda, _meta, [body]}, count) do

@@ -375,6 +375,9 @@ defmodule Metastatic.Analysis.Complexity do
         other -> other
       end
 
+    # Guard against nil body (e.g. children was [nil])
+    body = body || {:block, [], []}
+
     variables = Metastatic.AST.variables(body)
 
     %{

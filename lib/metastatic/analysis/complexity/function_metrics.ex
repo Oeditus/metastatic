@@ -103,15 +103,17 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
 
     Enum.reduce(arms, count, fn
       {:match_arm, _meta, body_list}, c ->
-        Enum.reduce(body_list, c, fn child, inner -> walk_statements(child, inner) end)
+        body = if is_list(body_list), do: body_list, else: []
+        Enum.reduce(body, c, fn child, inner -> walk_statements(child, inner) end)
 
       other, c ->
         walk_statements(other, c)
     end)
   end
 
-  defp walk_statements({:match_arm, _meta, body_list}, count) when is_list(body_list) do
-    Enum.reduce(body_list, count, fn child, c -> walk_statements(child, c) end)
+  defp walk_statements({:match_arm, _meta, body_list}, count) do
+    body = if is_list(body_list), do: body_list, else: []
+    Enum.reduce(body, count, fn child, c -> walk_statements(child, c) end)
   end
 
   defp walk_statements({:lambda, _meta, [body]}, count) do
@@ -224,15 +226,17 @@ defmodule Metastatic.Analysis.Complexity.FunctionMetrics do
   defp walk_returns({:pattern_match, _meta, [_scrutinee | arms]}, count) when is_list(arms) do
     Enum.reduce(arms, count, fn
       {:match_arm, _meta, body_list}, c ->
-        Enum.reduce(body_list, c, fn child, inner -> walk_returns(child, inner) end)
+        body = if is_list(body_list), do: body_list, else: []
+        Enum.reduce(body, c, fn child, inner -> walk_returns(child, inner) end)
 
       other, c ->
         walk_returns(other, c)
     end)
   end
 
-  defp walk_returns({:match_arm, _meta, body_list}, count) when is_list(body_list) do
-    Enum.reduce(body_list, count, fn child, c -> walk_returns(child, c) end)
+  defp walk_returns({:match_arm, _meta, body_list}, count) do
+    body = if is_list(body_list), do: body_list, else: []
+    Enum.reduce(body, count, fn child, c -> walk_returns(child, c) end)
   end
 
   defp walk_returns({:lambda, _meta, [body]}, count), do: walk_returns(body, count)

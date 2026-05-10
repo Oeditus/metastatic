@@ -143,7 +143,8 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
 
     Enum.reduce(arms, count, fn
       {:match_arm, _meta, body_list}, c ->
-        Enum.reduce(body_list, c, fn child, acc -> walk(child, acc) end)
+        body = if is_list(body_list), do: body_list, else: []
+        Enum.reduce(body, c, fn child, acc -> walk(child, acc) end)
 
       other, c ->
         walk(other, c)
@@ -151,8 +152,9 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
   end
 
   # Match arm (3-tuple)
-  defp walk({:match_arm, _meta, body_list}, count) when is_list(body_list) do
-    Enum.reduce(body_list, count, fn child, c -> walk(child, c) end)
+  defp walk({:match_arm, _meta, body_list}, count) do
+    body = if is_list(body_list), do: body_list, else: []
+    Enum.reduce(body, count, fn child, c -> walk(child, c) end)
   end
 
   # Block (3-tuple): walk statements
