@@ -87,7 +87,7 @@ defmodule Metastatic.Analysis.Complexity.Cyclomatic do
   end
 
   # Loop (3-tuple): +1 decision point
-  defp walk({:loop, meta, children}, count) when is_list(meta) do
+  defp walk({:loop, meta, children}, count) when is_list(meta) and is_list(children) do
     loop_type = Keyword.get(meta, :loop_type)
     count = count + 1
 
