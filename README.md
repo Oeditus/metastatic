@@ -2,15 +2,15 @@
 
 # Metastatic
 
-**Cross-language code analysis through unified MetaAST representation**
+**Cross-language code meta-model library using unified MetaAST representation**
 
-Metastatic is a library that provides a unified MetaAST (Meta-level Abstract Syntax Tree) intermediate representation for parsing, transforming, and analyzing code across multiple programming languages using a three-layer meta-model architecture.
+Metastatic provides a unified MetaAST (Meta-level Abstract Syntax Tree) intermediate representation for parsing, transforming, and translating code across multiple programming languages using a three-layer meta-model architecture.
 
 ## Vision
 
-Build tools once, apply them everywhere. Create a universal meta-model for program syntax that enables cross-language code analysis, transformation, and tooling.
+Parse once, use everywhere. A universal meta-model for program syntax that enables cross-language code transformation and tooling.
 
-**Metastatic provides the foundation** - the MetaAST meta-model and language adapters. Tools that leverage this foundation (mutation testing, purity analysis, complexity metrics) are built separately.
+**Metastatic provides the foundation** - the MetaAST meta-model and language adapters. Analysis tools are provided by the companion library [MetaCredo](https://github.com/Oeditus/metacredo).
 
 ## Key Features
 
@@ -19,10 +19,7 @@ Build tools once, apply them everywhere. Create a universal meta-model for progr
 - **Round-Trip Fidelity**: Transform source → MetaAST → source with >90% accuracy
 - **Meta-Model Foundation**: MOF-based meta-modeling (M2 level) for universal AST representation
 - **Cross-Language Equivalence**: Semantically equivalent code produces identical MetaAST across languages
-- **Code Duplication Detection**: Find code clones across different programming languages (Type I-IV clones)
-- **Advanced Analysis**: 9 built-in analyzers (purity, complexity, security, dead code, taint, smells, CFG, unused vars)
-- **Business Logic Analyzers**: 20 language-agnostic analyzers detecting anti-patterns across all languages
-- **Semantic Analysis**: OpKind metadata system for accurate operation detection (DB, HTTP, file, cache, auth, queue, external API)
+- **Semantic Enrichment**: OpKind metadata system for accurate operation detection (DB, HTTP, file, cache, auth, queue, external API)
 
 ## Scope
 
@@ -31,11 +28,10 @@ Build tools once, apply them everywhere. Create a universal meta-model for progr
 - Language adapters (Python, Elixir, Erlang, Ruby, Haskell)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
-- Code duplication detection (Type I-IV clones across languages)
-- Comprehensive static analysis suite (9 analyzers)
+- Semantic enrichment (OpKind metadata)
 
 **What Metastatic Does NOT Provide:**
-- Code quality auditing (see Oeditus ecosystem at https://oeditus.com)
+- Static analysis (see [MetaCredo](https://github.com/Oeditus/metacredo))
 
 Metastatic is a **foundation library** that other tools build upon.
 
@@ -43,7 +39,7 @@ Metastatic is a **foundation library** that other tools build upon.
 
 ### CLI Tools
 
-MetASTatic provides command-line tools for cross-language translation, AST inspection, and semantic analysis:
+Metastatic provides command-line tools for cross-language translation, AST inspection, and equivalence validation:
 
 ```bash
 # Cross-language translation
@@ -62,21 +58,11 @@ mix metastatic.inspect --layer core hello.py
 # Extract variables only
 mix metastatic.inspect --variables hello.py
 
-# Analyze MetaAST metrics
-mix metastatic.analyze hello.py
-
-# Validate with strict mode
-mix metastatic.analyze --validate strict hello.py
-
 # Check semantic equivalence
 mix metastatic.validate_equivalence hello.py hello.ex
 
 # Show detailed differences
 mix metastatic.validate_equivalence --verbose file1.py file2.ex
-
-# Cross-language code duplication detection
-mix metastatic.detect_duplicates file1.py file2.ex
-mix metastatic.detect_duplicates --dir lib/ --format json
 ```
 
 ### Using Language Adapters
@@ -220,8 +206,8 @@ AST.conforms?(ast)  # => true
 
 ### AST Traversal & Manipulation
 
-MetaAST trees need to be walked, searched, and transformed -- for code analysis,
-refactoring, linting, or building new cross-language tools. Metastatic provides a
+MetaAST trees need to be walked, searched, and transformed -- for refactoring,
+linting, or building new cross-language tools. Metastatic provides a
 full set of traversal and manipulation functions that mirror Elixir's `Macro` module,
 adapted for the MetaAST 3-tuple format. All are available both on `Metastatic.AST`
 (canonical) and as convenience wrappers on the `Metastatic` module itself.
@@ -229,9 +215,8 @@ adapted for the MetaAST 3-tuple format. All are available both on `Metastatic.AS
 #### Why traversal matters
 
 Unlike Elixir's native AST, MetaAST nodes come from many languages. A single
-traversal API means you write a variable renamer, a dead-code finder, or a
-complexity counter *once* and it works on Python, Ruby, Erlang, Haskell, and
-Elixir code.
+traversal API means you write a variable renamer or a refactoring tool *once*
+and it works on Python, Ruby, Erlang, Haskell, and Elixir code.
 
 #### Walking the tree
 
@@ -342,521 +327,6 @@ analysis.required_supplementals  # => [:pykka, :asyncio]
 
 See **[Supplemental Modules](SUPPLEMENTAL_MODULES.md)** for comprehensive guide on using and creating supplementals.
 
-### Code Duplication Detection
-
-Detect code clones across same or different programming languages using unified MetaAST representation:
-
-```bash
-# Detect duplicates (note: requires language adapters, Phase 2+)
-mix metastatic.detect_duplicates file1.py file2.ex
-
-# Scan entire directory
-mix metastatic.detect_duplicates --dir lib/
-
-# JSON output with custom threshold
-mix metastatic.detect_duplicates file1.py file2.ex --format json --threshold 0.85
-
-# Save detailed report
-mix metastatic.detect_duplicates --dir lib/ --format detailed --output report.txt
-```
-
-```elixir
-alias Metastatic.{Document, Analysis.Duplication}
-alias Metastatic.Analysis.Duplication.Reporter
-
-# Detect duplication between two documents (uniform 3-tuple format)
-ast1 = {:binary_op, [category: :arithmetic, operator: :+], 
-        [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
-ast2 = {:binary_op, [category: :arithmetic, operator: :+], 
-        [{:variable, [], "y"}, {:literal, [subtype: :integer], 5}]}
-doc1 = Document.new(ast1, :python)
-doc2 = Document.new(ast2, :elixir)
-
-{:ok, result} = Duplication.detect(doc1, doc2)
-
-result.duplicate?         # => true
-result.clone_type         # => :type_ii (renamed clone)
-result.similarity_score   # => 1.0
-
-# Format results
-Reporter.format(result, :text)
-# "Duplicate detected: Type II (Renamed Clone)
-#  Similarity score: 1.0
-#  ..."
-
-# Detect across multiple documents
-ast3 = {:binary_op, [category: :arithmetic, operator: :+], 
-        [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
-doc3 = Document.new(ast3, :elixir)
-
-{:ok, groups} = Duplication.detect_in_list([doc1, doc2, doc3])
-length(groups)  # => 1 (all three form a clone group)
-
-# Format clone groups
-Reporter.format_groups(groups, :detailed)
-```
-
-**Clone Types Detected:**
-- **Type I**: Exact clones (identical AST across languages)
-- **Type II**: Renamed clones (same structure, different identifiers)
-- **Type III**: Near-miss clones (similar structure above threshold)
-- **Type IV**: Semantic clones (implicit in cross-language Type I-III)
-
-**Features:**
-- Cross-language detection (Python ↔ Elixir ↔ Erlang, etc.)
-- Configurable similarity threshold (0.0-1.0, default 0.8)
-- Multiple output formats (text, JSON, detailed)
-- Batch detection with clone grouping
-- Structural and token-based similarity metrics
-
-**Based on:**
-- Ira Baxter et al. “Clone Detection Using Abstract Syntax Trees” (1998)
-- Chanchal K. Roy and James R. Cordy “A Survey on Software Clone Detection Research” (2007)
-
-### Purity Analysis
-
-Analyze code for side effects and functional purity across all supported languages:
-
-```bash
-# Check if code is pure
-mix metastatic.purity_check my_file.py
-# Output: PURE or IMPURE: [effects]
-
-# Detailed analysis
-mix metastatic.purity_check my_file.ex --format detailed
-
-# JSON output for CI/CD
-mix metastatic.purity_check my_file.erl --format json
-```
-
-```elixir
-alias Metastatic.{Document, Analysis.Purity}
-
-# Pure arithmetic (uniform 3-tuple format)
-ast = {:binary_op, [category: :arithmetic, operator: :+], 
-       [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
-doc = Document.new(ast, :python)
-{:ok, result} = Purity.analyze(doc)
-
-result.pure?              # => true
-result.effects            # => []
-result.confidence         # => :high
-
-# Impure with I/O
-ast = {:function_call, [name: "print"], [{:literal, [subtype: :string], "hello"}]}
-doc = Document.new(ast, :python)
-{:ok, result} = Purity.analyze(doc)
-
-result.pure?              # => false
-result.effects            # => [:io]
-result.summary            # => "Function is impure due to I/O operations"
-```
-
-**Detected Effects:**
-- I/O operations (print, file access, network, database)
-- Mutations (assignments in loops)
-- Random operations (random, rand)
-- Time operations (time, date, now)
-- Exception handling (try/catch)
-- Unknown function calls (low confidence)
-
-#### Direct Native AST Input
-
-All analyzers accept native language AST directly as `{language, native_ast}` tuples for integration with existing tooling:
-
-```elixir
-alias Metastatic.Analysis.Purity
-
-# Python native AST (from Python's ast module)
-python_ast = %{"_type" => "Constant", "value" => 42}
-{:ok, result} = Purity.analyze({:python, python_ast})
-result.pure?  # => true
-
-# Elixir native AST  
-elixir_ast = {:+, [], [{:x, [], nil}, 5]}
-{:ok, result} = Purity.analyze({:elixir, elixir_ast})
-result.pure?  # => true
-
-# Supports all analyzers
-alias Metastatic.Analysis.Complexity
-{:ok, result} = Complexity.analyze({:python, python_ast})
-
-# Error handling for unsupported languages
-{:error, {:unsupported_language, _}} = Purity.analyze({:unsupported, :some_ast})
-```
-
-This enables seamless integration with language-specific parsers and build tools without requiring Document struct creation.
-
-### Complexity Analysis
-
-Analyze code complexity with six comprehensive metrics that work uniformly across all supported languages:
-
-```bash
-# Analyze complexity
-mix metastatic.complexity my_file.py
-
-# JSON output
-mix metastatic.complexity my_file.ex --format json
-
-# Detailed report with recommendations
-mix metastatic.complexity my_file.erl --format detailed
-
-# Custom thresholds
-mix metastatic.complexity my_file.py --max-cyclomatic 15 --max-cognitive 20
-```
-
-```elixir
-alias Metastatic.{Document, Analysis.Complexity}
-
-# Analyze all metrics (uniform 3-tuple format)
-ast = {:conditional, [], [
-  {:variable, [], "x"}, 
-  {:conditional, [], [
-    {:variable, [], "y"}, 
-    {:literal, [subtype: :integer], 1}, 
-    {:literal, [subtype: :integer], 2}]},
-  {:literal, [subtype: :integer], 3}]}
-doc = Document.new(ast, :python)
-{:ok, result} = Complexity.analyze(doc)
-
-result.cyclomatic      # => 3 (McCabe complexity)
-result.cognitive       # => 3 (with nesting penalties)
-result.max_nesting     # => 2
-result.halstead.volume # => 45.6 (program volume)
-result.loc.logical     # => 2
-result.warnings        # => []
-result.summary         # => "Code has low complexity"
-```
-
-**Available Metrics:**
-- **Cyclomatic Complexity** - McCabe metric measuring decision points
-- **Cognitive Complexity** - Measures understandability with nesting penalties
-- **Nesting Depth** - Maximum nesting level
-- **Halstead Metrics** - Volume, difficulty, and effort calculations
-- **Lines of Code** - Physical, logical, and comment line counts
-- **Function Metrics** - Statement count, return points, variable count
-
-**Default Thresholds:**
-- Cyclomatic: 10 (warning), 20 (error)
-- Cognitive: 15 (warning), 30 (error)
-- Nesting: 3 (warning), 5 (error)
-- Logical LoC: 50 (warning), 100 (error)
-
-### Advanced Analysis Features
-
-Metastatic provides six additional static analysis capabilities that work uniformly across all supported languages:
-
-#### Dead Code Detection
-
-Identify unreachable code paths and constant conditional branches:
-
-```bash
-# Detect dead code
-mix metastatic.dead_code my_file.py
-
-# JSON output
-mix metastatic.dead_code my_file.ex --format json
-
-# Filter by confidence level
-mix metastatic.dead_code my_file.rb --confidence high
-```
-
-```elixir
-alias Metastatic.{Document, Analysis.DeadCode}
-
-# Code after return statement (uniform 3-tuple format)
-ast = {:block, [], [
-  {:early_return, [], [{:literal, [subtype: :integer], 42}]},
-  {:function_call, [name: "print"], [{:literal, [subtype: :string], "unreachable"}]}
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = DeadCode.analyze(doc)
-
-result.has_dead_code?  # => true
-result.issues          # => [{:code_after_return, :high, ...}]
-result.summary         # => "1 dead code issue detected"
-```
-
-**Detects:**
-- Code after return/break/continue statements
-- Constant conditional branches (always true/false)
-- Unreachable exception handlers
-
-#### Unused Variables
-
-Track variable definitions and usage with scope-aware analysis:
-
-```bash
-# Find unused variables
-mix metastatic.unused_vars my_file.py
-
-# Ignore underscore-prefixed variables
-mix metastatic.unused_vars my_file.ex --ignore-underscore
-
-# JSON output
-mix metastatic.unused_vars my_file.erl --format json
-```
-
-```elixir
-alias Metastatic.Analysis.UnusedVariables
-
-ast = {:block, [], [
-  {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
-  {:assignment, [], [{:variable, [], "y"}, {:literal, [subtype: :integer], 10}]},
-  {:variable, [], "y"}
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = UnusedVariables.analyze(doc)
-
-result.has_unused?     # => true
-result.unused          # => MapSet.new(["x"])
-result.summary         # => "1 unused variable: x"
-```
-
-**Features:**
-- Symbol table with scope tracking
-- Distinguishes reads from writes
-- Handles nested scopes (blocks, loops, conditionals)
-
-#### Control Flow Graph
-
-Generate control flow graphs with multiple export formats:
-
-```bash
-# Generate CFG in DOT format (for Graphviz)
-mix metastatic.control_flow my_file.py --format dot
-
-# Generate D3.js JSON for interactive visualization
-mix metastatic.control_flow my_file.ex --format d3 --output cfg.json
-
-# Text representation
-mix metastatic.control_flow my_file.rb --format text
-```
-
-```elixir
-alias Metastatic.Analysis.ControlFlow
-
-ast = {:conditional, [], [
-  {:variable, [], "x"}, 
-  {:early_return, [], [{:literal, [subtype: :integer], 1}]},
-  {:literal, [subtype: :integer], 2}
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = ControlFlow.analyze(doc)
-
-result.node_count      # => 5
-result.edge_count      # => 4
-result.has_cycles?     # => false
-result.to_dot()        # => "digraph CFG { ... }"
-result.to_d3_json()    # => %{nodes: [...], links: [...]}
-```
-
-**Export Formats:**
-- DOT format for Graphviz rendering
-- D3.js JSON for web visualization
-- Plain text representation
-- Elixir map structure
-
-**Features:**
-- Cycle detection
-- Entry/exit node identification
-- Branch and merge point tracking
-
-#### Taint Analysis
-
-Track data flow from untrusted sources to sensitive operations:
-
-```bash
-# Check for taint vulnerabilities
-mix metastatic.taint_check my_file.py
-
-# JSON output
-mix metastatic.taint_check my_file.ex --format json
-```
-
-```elixir
-alias Metastatic.Analysis.Taint
-
-# Dangerous pattern: eval(input())
-ast = {:function_call, [name: "eval"], [
-  {:function_call, [name: "input"], []}
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = Taint.analyze(doc)
-
-result.has_vulnerabilities?  # => true
-result.vulnerabilities       # => [{:code_injection, ...}]
-result.summary               # => "1 taint vulnerability detected"
-```
-
-**Detects:**
-- Code injection (eval, exec with untrusted input)
-- Command injection (system, shell commands)
-- SQL injection patterns
-- Path traversal vulnerabilities
-
-**Note:** Current implementation detects direct flows. Variable tracking and interprocedural analysis planned for future releases.
-
-#### Security Vulnerability Detection
-
-Pattern-based security scanning with CWE identifiers:
-
-```bash
-# Scan for security issues
-mix metastatic.security_scan my_file.py
-
-# JSON output with CWE details
-mix metastatic.security_scan my_file.ex --format json
-```
-
-```elixir
-alias Metastatic.Analysis.Security
-
-# Hardcoded password
-ast = {:assignment, [], [{:variable, [], "password"}, {:literal, [subtype: :string], "admin123"}]}
-doc = Document.new(ast, :python)
-{:ok, result} = Security.analyze(doc)
-
-result.has_vulnerabilities?  # => true
-result.vulnerabilities[0].type       # => :hardcoded_secret
-result.vulnerabilities[0].severity   # => :high
-result.vulnerabilities[0].cwe        # => "CWE-798"
-```
-
-**Vulnerability Categories:**
-- Dangerous functions (eval, exec, pickle.loads)
-- Hardcoded secrets (passwords, API keys, tokens)
-- Weak cryptography (MD5, SHA1, DES)
-- Insecure protocols (HTTP for sensitive data)
-- SQL injection patterns
-- Command injection patterns
-
-**Severity Levels:** Critical, High, Medium, Low
-
-#### Code Smell Detection
-
-Identify maintainability issues and anti-patterns:
-
-```bash
-# Detect code smells
-mix metastatic.code_smells my_file.py
-
-# Detailed report
-mix metastatic.code_smells my_file.ex --format detailed
-
-# JSON output
-mix metastatic.code_smells my_file.rb --format json
-```
-
-```elixir
-alias Metastatic.Analysis.Smells
-
-# Long function with deep nesting
-ast = {:block, [
-  # ... 25+ statements with nesting depth 6
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = Smells.analyze(doc)
-
-result.has_smells?     # => true
-result.smells          # => [:long_function, :deep_nesting]
-result.severity        # => :high
-```
-
-**Detected Smells:**
-- Long functions (>20 statements)
-- Deep nesting (>4 levels)
-- High cyclomatic complexity (>10)
-- High cognitive complexity (>15)
-- Magic numbers (unexplained literals)
-- Complex conditionals (>3 boolean operators)
-
-**Integration:** Leverages existing complexity metrics for detection.
-
-### Business Logic Analyzers
-
-Detect universal anti-patterns and code quality issues across all supported languages using 20 language-agnostic analyzers:
-
-```bash
-# Run specific analyzer
-mix metastatic.analyze --analyzer callback_hell my_file.py
-
-# Run all business logic analyzers
-mix metastatic.analyze --business-logic my_file.ex
-
-# JSON output for CI/CD
-mix metastatic.analyze --format json my_file.rb
-```
-
-```elixir
-alias Metastatic.Analysis.Runner
-alias Metastatic.Document
-
-# Run all analyzers (uniform 3-tuple format)
-ast = {:conditional, [], [
-  {:variable, [], "x"},
-  {:conditional, [], [
-    {:variable, [], "y"}, 
-    {:conditional, [], [
-      {:variable, [], "z"}, 
-      {:literal, [subtype: :integer], 1}, 
-      {:literal, [subtype: :integer], 2}]},
-    {:literal, [subtype: :integer], 3}]},
-  {:literal, [subtype: :integer], 4}]}
-doc = Document.new(ast, :python)
-
-{:ok, issues} = Runner.run(doc)
-# Returns issues from all enabled analyzers
-
-# Run specific analyzers
-config = %{analyzers: [:callback_hell, :missing_error_handling]}
-{:ok, issues} = Runner.run(doc, config)
-```
-
-**Available Analyzers (20 total):**
-
-**Tier 1 - Pure MetaAST (9 analyzers):**
-- CallbackHell - Detects deeply nested conditionals
-- MissingErrorHandling - Pattern matching without error cases
-- SilentErrorCase - Conditionals with only success path
-- SwallowingException - Exception handling without logging
-- HardcodedValue - Hardcoded URLs/IPs/secrets in literals
-- NPlusOneQuery - Database queries in collection operations
-- InefficientFilter - Fetch-all then filter anti-pattern
-- UnmanagedTask - Unsupervised async operations
-- TelemetryInRecursiveFunction - Metrics in recursive functions
-
-**Tier 2 - Function Name Heuristics (4 analyzers):**
-- MissingTelemetryForExternalHttp - HTTP calls without observability
-- SyncOverAsync - Blocking operations in async contexts
-- DirectStructUpdate - Struct updates bypassing validation
-- MissingHandleAsync - Fire-and-forget async operations
-
-**Tier 3 - Naming Conventions (4 analyzers):**
-- BlockingInPlug - Blocking I/O in middleware
-- MissingTelemetryInAuthPlug - Auth checks without audit logging
-- MissingTelemetryInLiveviewMount - Component lifecycle without telemetry
-- MissingTelemetryInObanWorker - Background jobs without metrics
-
-**Tier 4 - Content Analysis (3 analyzers):**
-- MissingPreload - Database queries without eager loading (N+1)
-- InlineJavascript - Inline scripts in strings (XSS risk)
-- MissingThrottle - Expensive operations without rate limiting
-
-**Key Features:**
-- Works across Python, JavaScript, Elixir, C#, Go, Java, Ruby, Rust
-- Each analyzer includes 7-8 cross-language examples
-- Configurable severity levels and thresholds
-- Integrated with Analysis Runner for batch processing
-- Comprehensive documentation in ANALYZER_PORTING_COMPLETE.md
-
-**Cross-Language Detection:**
-These analyzers demonstrate that many "language-specific" patterns are actually universal anti-patterns:
-- N+1 queries affect all ORMs (Django, Sequelize, Ecto, Entity Framework, Hibernate)
-- Callback hell exists in JavaScript, Python, Ruby, C#, Java, Go
-- Missing telemetry in auth is critical across all frameworks
-- XSS vulnerabilities appear in all template systems
-
 ## Documentation
 
 - **[Theoretical Foundations](THEORETICAL_FOUNDATIONS.md)** - Formal meta-modeling theory and proofs
@@ -899,7 +369,6 @@ elixir examples/shopping_cart/visualize_ast.exs
 **What you'll learn:**
 - How MetaAST represents real business logic (pricing, discounts, validation)
 - Cross-language semantic equivalence (same logic in Python, JavaScript, Elixir, etc.)
-- Foundation for universal tools (mutation testing, purity analysis, complexity metrics)
 - Three-layer architecture in practice (Core/Extended/Native)
 
 **Files:**
@@ -943,14 +412,16 @@ Verify that code across languages has identical semantics:
 py_doc.ast == ex_doc.ast  # => true (same MetaAST)
 ```
 
-### AST Analysis Infrastructure
-Build language-agnostic analysis tools:
+### AST Infrastructure
+Build language-agnostic tools on top of MetaAST:
 
 ```elixir
 # Extract all variables from any supported language
 {:ok, doc} = Metastatic.Builder.from_source(source, language)
 variables = Metastatic.AST.variables(doc.ast)
 ```
+
+For static analysis, see [MetaCredo](https://github.com/Oeditus/metacredo) which provides 72 checks built on MetaAST.
 
 ## Contributing
 
@@ -966,7 +437,7 @@ Metastatic is inspired by research from:
 
 Created as part of the Oeditus code quality tooling ecosystem.
 
-Research synthesis from muex and propwise multi-language analysis projects.
+Research synthesis from muex and propwise multi-language projects.
 
 ## Installation
 

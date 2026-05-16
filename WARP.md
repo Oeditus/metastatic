@@ -4,7 +4,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Project Overview
 
-Metastatic is a cross-language code analysis library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Build tools once, apply them everywhere** - write mutation operators, purity analyzers, or complexity metrics in Elixir and have them work seamlessly across Python, JavaScript, Elixir, Ruby, Go, Rust, and more.
+Metastatic is a cross-language code meta-model library using a unified MetaAST (Meta-level Abstract Syntax Tree) representation. The core vision is: **Parse once, use everywhere** - parse, transform, and translate code across Python, Elixir, Ruby, Erlang, Haskell, and more via a shared three-tuple AST format. Analysis tools are provided by the companion library [MetaCredo](https://github.com/Oeditus/metacredo).
 
 **Current Status:** v0.15.2-dev - Production Ready
 - 336 doctests + 1656 tests passing (excluding haskell tag), 100% coverage
@@ -21,10 +21,8 @@ Metastatic is a cross-language code analysis library using a unified MetaAST (Me
 - Ruby: string interpolation, ranges, break/next, regex all produce proper M2 nodes
 - Haskell: modules, functions, type signatures, list comprehensions, typeclasses all produce proper M2 nodes
 - Erlang: modules, functions, lambdas, try/catch, maps, bitwise ops produce proper M2 nodes
-- All 9 analysis tools support structural types and 3-tuple format
-- Business Logic Analyzers: 20 language-agnostic analyzers updated for 3-tuple format
 - OpKind Semantic Metadata System: 7 domains (db, http, auth, cache, queue, file, external_api)
-- All 15 mix tasks have full documentation and support all 5 languages
+- 5 mix tasks (inspect, translate, validate_equivalence, gen.supplemental, supplemental_check)
 
 ## Essential Commands
 
@@ -183,7 +181,6 @@ The library now preserves M1 (language-specific) context information through the
 - **Container nodes** (modules/classes) receive `:module`, `:language`, `:line` metadata
 - **Function_def nodes** receive `:function`, `:arity`, `:visibility`, `:language`, `:line` metadata
 - **Child nodes** do NOT receive context enrichment (prevents tuple bloat)
-- **Runner** extracts context from structural nodes and propagates via `context` map to analyzers
 
 **Helper Functions:**
 ```elixir
@@ -221,15 +218,9 @@ end
     [body_statements...]}]}
 ```
 
-**Integration with Analysis:**
-- `Analyzer.issue/1` helper automatically extracts location metadata from nodes
-- All 20 business logic analyzers benefit from context without modification
-- Runner's `update_contexts/2` propagates structural node context to analyzer `context` map
-- Analyzers access via `context.module_name` and `context.function_name`
-
 ### OpKind Semantic Metadata
 
-The library provides semantic metadata for function calls through the `OpKind` system, enabling analyzers to reason about operations at a higher semantic level than raw syntax.
+The library provides semantic metadata for function calls through the `OpKind` system, enabling downstream tools (e.g., MetaCredo) to reason about operations at a higher semantic level than raw syntax.
 
 **OpKind Structure:**
 An OpKind is a keyword list with the following fields:
@@ -248,38 +239,6 @@ An OpKind is a keyword list with the following fields:
   op_kind: [domain: :db, operation: :retrieve, target: "User", framework: :ecto]
 ], [args...]}
 ```
-
-**Analyzer Usage Pattern (Semantic-First, Heuristic-Fallback):**
-```elixir
-def analyze({:function_call, meta, _args} = node, context) when is_list(meta) do
-  op_kind = Keyword.get(meta, :op_kind)
-  
-  is_db_operation? =
-    case op_kind do
-      # Semantic detection: op_kind metadata present (accurate)
-      op_kind when is_list(op_kind) ->
-        OpKind.db?(op_kind)
-      
-      # Fallback to heuristic detection (may have false positives)
-      nil ->
-        func_name = Keyword.get(meta, :name, "")
-        database_function?(func_name)  # Pattern matching on name
-    end
-  
-  if is_db_operation? do
-    # Issue warning
-  end
-end
-```
-
-**Analyzers Using OpKind:**
-- `BlockingInPlug`: Checks OpKind domain for blocking operations
-- `MissingTelemetryForExternalHttp`: Uses `OpKind.http?()` for HTTP detection
-- `SyncOverAsync`: Identifies blocking operations via OpKind domain
-- `InefficientFilter`: Detects fetch-all operations via OpKind
-- `TOCTOU`: Identifies file check/use operations via OpKind
-- `MissingPreload`: Detects database collection queries
-- `NPlusOneQuery`: Identifies database operations in loops
 
 **Helper Functions:**
 ```elixir
@@ -354,10 +313,8 @@ v0.12.1 - Production Ready. Key capabilities:
 - All 5 language adapters operational: Python, Elixir, Ruby, Erlang, Haskell
 - Full structural support: containers, function definitions, properties
 - Comprehensive Ruby/Rails support: 51/53 files from a real Rails app transform successfully
-- All 9 analysis tools updated for 3-tuple format
-- 20 business logic analyzers with OpKind semantic metadata
-- All 15 mix tasks with full documentation and ruby/haskell support
-- `detect_duplicates` performs real file-based analysis via language adapters
+- 5 mix tasks: inspect, translate, validate_equivalence, gen.supplemental, supplemental_check
+- Analysis moved to companion library MetaCredo
 
 ### Ruby Adapter Capabilities
 
@@ -526,7 +483,5 @@ When adding a new language adapter:
 6. Add extension to `detect_language/1` helpers in all relevant mix tasks
 7. Aim for <100ms performance per 1000 LOC
 
-When building new analysis tools:
-- Work at M2 level - automatically applies to all supported languages
-- Use OpKind metadata for accurate semantic detection
-- All tools are language-agnostic by design
+Analysis tools are provided by the companion library [MetaCredo](https://github.com/Oeditus/metacredo),
+which operates at the M2 level via OpKind semantic metadata.

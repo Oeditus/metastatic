@@ -122,17 +122,8 @@ jobs:
           # AST inspection
           mix metastatic.inspect hello.py
 
-          # Analyze MetaAST metrics
-          mix metastatic.analyze hello.py
-
           # Check semantic equivalence
           mix metastatic.validate_equivalence hello.py hello.ex
-
-          # Purity analysis
-          mix metastatic.purity_check my_file.py
-
-          # Complexity metrics
-          mix metastatic.complexity my_file.ex
           ```
 
           ## What's Changed

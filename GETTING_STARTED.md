@@ -9,26 +9,19 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 - **Git** for version control
 
 ### Current Status
-Metastatic is production-ready with comprehensive analysis capabilities.
+Metastatic is production-ready.
 
-- **Test coverage:** 1764 tests passing (1523 tests + 241 doctests)
 - **Language adapters:** Python, Elixir, Erlang, Ruby, Haskell
-- **Static analyzers:** 9 core analyzers + 32 business logic analyzers
-- **CWE coverage:** 15 CWE Top 25 vulnerabilities detected
+- **Semantic enrichment:** OpKind metadata (DB, HTTP, file, cache, auth, queue, external API)
+- **Mix tasks:** inspect, translate, validate_equivalence, gen.supplemental, supplemental_check
 
 **Current Capabilities:**
 - Parse and transform code across Python, Elixir, Erlang, Ruby, and Haskell
-- Analyze function purity and side effects
-- Measure code complexity (6 comprehensive metric types)
-- Detect dead code and unreachable branches
-- Track unused variables with scope awareness
-- Generate control flow graphs (DOT/D3.js formats)
-- Perform taint analysis for security vulnerabilities
-- Scan for security issues with CWE identifiers (CWE Top 25 coverage)
-- Detect code smells and maintainability issues
-- 32 language-agnostic business logic analyzers
-- Semantic operation detection via OpKind (DB, HTTP, file, cache, auth, queue, external API)
-- 15+ CLI tools for all analysis operations
+- Cross-language translation and semantic equivalence validation
+- Semantic operation detection via OpKind
+- Supplemental modules for library-specific constructs
+
+For static analysis, see [MetaCredo](https://github.com/Oeditus/metacredo).
 
 ### Optional (for extended language support)
 - **Python 3.9+** for Python adapter
@@ -80,33 +73,17 @@ metastatic/
 │       ├── semantic/               # Semantic metadata systems
 │       │   ├── op_kind.ex          # Operation kind metadata (DB, HTTP, file, etc.)
 │       │   └── enricher.ex         # Semantic enrichment for AST nodes
-│       ├── analysis/               # Complete analysis suite
-│       │   ├── purity.ex           # Purity analyzer
-│       │   ├── complexity.ex       # Complexity analyzer (6 metrics)
-│       │   ├── duplication.ex      # Code duplication detection
-│       │   ├── dead_code.ex        # Dead code detection
-│       │   ├── unused_variables.ex # Unused variable analysis
-│       │   ├── control_flow.ex     # CFG generation
-│       │   ├── taint.ex            # Taint analysis
-│       │   ├── security.ex         # Security scanning
-│       │   ├── smells.ex           # Code smell detection
-│       │   └── business_logic/     # 32 language-agnostic analyzers
-│       │       ├── callback_hell.ex
-│       │       ├── sql_injection.ex
-│       │       ├── xss_vulnerability.ex
-│       │       └── ... (32 total)
-│       └── mix/tasks/              # CLI tools (15+ tasks)
+│       └── mix/tasks/              # CLI tools (5 tasks)
 │           ├── metastatic.translate.ex
 │           ├── metastatic.inspect.ex
-│           ├── metastatic.purity_check.ex
-│           ├── metastatic.complexity.ex
-│           └── ... (15+ total)
+│           ├── metastatic.validate_equivalence.ex
+│           ├── metastatic.gen.supplemental.ex
+│           └── metastatic.supplemental_check.ex
 ├── test/
 │   └── metastatic/                 # 1764 tests (1523 + 241 doctests)
 │       ├── ast_test.exs
 │       ├── adapters/               # Python, Elixir, Erlang, Ruby, Haskell
 │       ├── supplemental/           # Supplemental modules
-│       ├── analysis/               # All analyzers
 │       └── mix/tasks/              # CLI tools
 ├── RESEARCH.md                     # Research and architecture
 ├── THEORETICAL_FOUNDATIONS.md      # Formal theory
@@ -599,212 +576,6 @@ erlang_vars = erlang_doc.ast |> normalize_vars()
 
 # Same MetaAST structure!
 assert elixir_vars == erlang_vars
-```
-
-### Using Advanced Analyzers
-
-Metastatic includes nine core static analysis capabilities:
-
-#### Dead Code Detection
-
-```elixir
-alias Metastatic.Analysis.DeadCode
-
-# Detect code after return (3-tuple format)
-ast = {:block, [], [
-  {:early_return, [], [{:literal, [subtype: :integer], 42}]},
-  {:function_call, [name: "print"], [{:literal, [subtype: :string], "hello"}]}  # unreachable!
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = DeadCode.analyze(doc)
-
-result.has_dead_code?  # => true
-result.issues          # => [{:code_after_return, :high, "Code after return statement", ...}]
-
-# CLI usage
-# mix metastatic.dead_code my_file.py
-# mix metastatic.dead_code my_file.ex --format json
-```
-
-#### Unused Variables
-
-```elixir
-alias Metastatic.Analysis.UnusedVariables
-
-# Track variable usage (3-tuple format)
-ast = {:block, [], [
-  {:assignment, [], [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
-  {:assignment, [], [{:variable, [], "y"}, {:literal, [subtype: :integer], 10}]},
-  {:binary_op, [category: :arithmetic, operator: :+], [
-    {:variable, [], "y"},
-    {:literal, [subtype: :integer], 1}
-  ]}
-]}
-doc = Document.new(ast, :elixir)
-{:ok, result} = UnusedVariables.analyze(doc)
-
-result.has_unused?  # => true
-result.unused       # => MapSet.new(["x"])
-result.defined      # => MapSet.new(["x", "y"])
-result.used         # => MapSet.new(["y"])
-
-# CLI usage
-# mix metastatic.unused_vars my_file.ex
-# mix metastatic.unused_vars my_file.py --ignore-underscore
-```
-
-#### Control Flow Graph
-
-```elixir
-alias Metastatic.Analysis.ControlFlow
-
-# Build CFG (3-tuple format)
-ast = {:conditional, [], [
-  {:variable, [], "x"},
-  {:early_return, [], [{:literal, [subtype: :integer], 1}]},
-  {:literal, [subtype: :integer], 2}
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = ControlFlow.analyze(doc)
-
-result.node_count   # => 5
-result.edge_count   # => 4
-result.has_cycles?  # => false
-
-# Export to DOT for Graphviz
-dot_graph = result.to_dot()
-# "digraph CFG {\n  0 [label=\"ENTRY\"];\n  ...
-
-# Export to D3.js JSON
-json_data = result.to_d3_json()
-# %{nodes: [%{id: 0, label: "ENTRY", type: "entry", group: 1}, ...],
-#   links: [%{source: 0, target: 1, label: nil, type: "normal"}, ...]}
-
-# CLI usage
-# mix metastatic.control_flow my_file.py --format dot
-# mix metastatic.control_flow my_file.ex --format d3 --output cfg.json
-```
-
-#### Taint Analysis
-
-```elixir
-alias Metastatic.Analysis.Taint
-
-# Detect taint vulnerabilities (3-tuple format)
-ast = {:function_call, [name: "eval"], [
-  {:function_call, [name: "input"], []}  # Dangerous: eval(input())
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = Taint.analyze(doc)
-
-result.has_vulnerabilities?  # => true
-result.vulnerabilities       # => [{:code_injection, "eval called with untrusted source", :high}]
-
-# CLI usage
-# mix metastatic.taint_check my_file.py
-# mix metastatic.taint_check my_file.ex --format json
-```
-
-#### Security Scanning
-
-```elixir
-alias Metastatic.Analysis.Security
-
-# Detect security issues (3-tuple format)
-ast = {:assignment, [], [{:variable, [], "password"}, {:literal, [subtype: :string], "admin123"}]}
-doc = Document.new(ast, :python)
-{:ok, result} = Security.analyze(doc)
-
-result.has_vulnerabilities?  # => true
-vuln = hd(result.vulnerabilities)
-vuln.type      # => :hardcoded_secret
-vuln.severity  # => :high
-vuln.cwe       # => "CWE-798"
-vuln.location  # => "Variable: password"
-
-# CLI usage
-# mix metastatic.security_scan my_file.py
-# mix metastatic.security_scan my_file.ex --format json
-```
-
-#### Code Smell Detection
-
-```elixir
-alias Metastatic.Analysis.Smells
-
-# Detect code smells (3-tuple format)
-ast = {:block, [], [
-  {:conditional, [], [{:variable, [], "a"}, {:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]},
-  {:conditional, [], [{:variable, [], "b"}, {:literal, [subtype: :integer], 3}, {:literal, [subtype: :integer], 4}]},
-  # ... many more statements creating long function and deep nesting
-]}
-doc = Document.new(ast, :python)
-{:ok, result} = Smells.analyze(doc)
-
-result.has_smells?  # => true (if thresholds exceeded)
-result.smells       # => [:long_function, :deep_nesting] (if detected)
-result.severity     # => :medium or :high
-
-# CLI usage
-# mix metastatic.code_smells my_file.py
-# mix metastatic.code_smells my_file.ex --format detailed
-```
-
-### Business Logic Analyzers (32 analyzers)
-
-The analysis pipeline runs all analyzers in a single AST traversal, propagating
-context from structural nodes to their children:
-
-```mermaid
-graph TD
-    Doc["Document"] --> Runner["Runner.run/2"]
-    Runner --> Traverse["Single-pass AST traversal"]
-    Traverse --> Container["{:container, ...}"]
-    Container -->|"sets context.module_name"| FnDef["{:function_def, ...}"]
-    FnDef -->|"sets context.function_name, arity"| Body["Body nodes"]
-    Body --> A1["Analyzer 1"]
-    Body --> A2["Analyzer 2"]
-    Body --> AN["Analyzer N"]
-    A1 --> Issues["Collected Issues"]
-    A2 --> Issues
-    AN --> Issues
-    Issues --> Report["Report with summary"]
-    style Runner fill:#4a9eff,color:#fff
-    style Issues fill:#e74c3c,color:#fff
-    style Report fill:#2ecc71,color:#fff
-```
-
-Metastatic includes 32 language-agnostic business logic analyzers that detect anti-patterns across all supported languages. These include:
-
-**Security (CWE Top 25 coverage):**
-- SQLInjection (CWE-89), XSSVulnerability (CWE-79), PathTraversal (CWE-22)
-- MissingAuthorization (CWE-862), SSRFVulnerability (CWE-918)
-- SensitiveDataExposure (CWE-200), UnrestrictedFileUpload (CWE-434)
-- MissingAuthentication (CWE-306), MissingCSRFProtection (CWE-352)
-- IncorrectAuthorization (CWE-863), ImproperInputValidation (CWE-20)
-- InsecureDirectObjectReference (CWE-639)
-
-**Anti-patterns:**
-- CallbackHell, MissingErrorHandling, SilentErrorCase, SwallowingException
-- HardcodedValue, NPlusOneQuery, InefficientFilter, UnmanagedTask
-- BlockingInPlug, SyncOverAsync, DirectStructUpdate, MissingPreload
-- InlineJavascript, MissingThrottle, TOCTOU, and more
-
-```elixir
-alias Metastatic.Analysis.Runner
-alias Metastatic.Document
-
-# Run all business logic analyzers
-ast = {:function_call, [name: "execute"], [
-  {:binary_op, [category: :arithmetic, operator: :+], [
-    {:literal, [subtype: :string], "SELECT * FROM users WHERE id = "},
-    {:variable, [], "user_input"}
-  ]}
-]}
-doc = Document.new(ast, :python)
-
-{:ok, issues} = Runner.run(doc)
-# Returns SQLInjection warning about string concatenation in SQL
 ```
 
 ### Adding a New Language Adapter

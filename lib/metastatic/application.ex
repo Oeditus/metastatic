@@ -11,9 +11,7 @@ defmodule Metastatic.Application do
       # Adapter registry for managing language adapters
       Metastatic.Adapter.Registry,
       # Supplemental module registry
-      Metastatic.Supplemental.Registry,
-      # Analyzer registry for managing analysis plugins
-      Metastatic.Analysis.Registry
+      Metastatic.Supplemental.Registry
     ]
 
     # See https://hexdocs.pm/elixir/Supervisor.html
