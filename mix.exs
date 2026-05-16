@@ -168,6 +168,9 @@ defmodule Metastatic.MixProject do
 
   defp groups_for_modules do
     [
+      # Metastatic
+      # Metastatic.Languages
+
       "Core Components": [
         Metastatic.AST,
         Metastatic.Document,
@@ -199,6 +202,7 @@ defmodule Metastatic.MixProject do
         Metastatic.Analysis.BusinessLogic.CallbackHell,
         Metastatic.Analysis.BusinessLogic.DirectStructUpdate,
         Metastatic.Analysis.BusinessLogic.HardcodedValue,
+        Metastatic.Analysis.BusinessLogic.ImperativeStatusHandling,
         Metastatic.Analysis.BusinessLogic.ImproperInputValidation,
         Metastatic.Analysis.BusinessLogic.IncorrectAuthorization,
         Metastatic.Analysis.BusinessLogic.InefficientFilter,
@@ -278,6 +282,9 @@ defmodule Metastatic.MixProject do
       "Language Adapters": [
         Metastatic.Adapter,
         Metastatic.Adapter.Registry,
+        Metastatic.Adapters.Cure,
+        Metastatic.Adapters.Cure.FromMeta,
+        Metastatic.Adapters.Cure.ToMeta,
         Metastatic.Adapters.Elixir,
         Metastatic.Adapters.Elixir.FromMeta,
         Metastatic.Adapters.Elixir.MacroExpander,
