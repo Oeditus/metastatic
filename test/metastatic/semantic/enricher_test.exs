@@ -1,13 +1,15 @@
 defmodule Metastatic.Semantic.EnricherTest do
   use ExUnit.Case, async: true
 
-  alias Metastatic.Semantic.{Domains.Database, Enricher, OpKind, Patterns}
+  alias Metastatic.Semantic.{Callbacks, Domains.Database, Enricher, OpKind, Patterns}
 
-  # Ensure patterns are registered before tests
+  # Ensure patterns and callbacks are registered before tests
   setup_all do
     # Clear and re-register to ensure clean state
     Patterns.clear_all()
     Database.register_all()
+    Callbacks.clear()
+    Callbacks.register_builtins()
     :ok
   end
 
@@ -16,6 +18,22 @@ defmodule Metastatic.Semantic.EnricherTest do
   defp variable(name), do: {:variable, [], name}
   defp literal(subtype, value), do: {:literal, [subtype: subtype], value}
   defp block(statements), do: {:block, [], statements}
+
+  defp function_def(name, params, body \\ [], extra_meta \\ []) do
+    param_nodes = Enum.map(params, fn p -> {:param, [], p} end)
+
+    {:function_def,
+     [name: name, params: param_nodes, visibility: :public, arity: length(params)] ++ extra_meta,
+     body}
+  end
+
+  defp container(type, name, body, extra_meta) do
+    {:container, [container_type: type, name: name] ++ extra_meta, body}
+  end
+
+  defp import_node(source, extra_meta) do
+    {:import, [source: source, import_type: :use] ++ extra_meta, []}
+  end
 
   describe "enrich/2 - Elixir/Ecto patterns" do
     test "enriches Repo.get with target extraction" do
@@ -299,6 +317,207 @@ defmodule Metastatic.Semantic.EnricherTest do
     test "returns false for non-enriched nodes" do
       node = function_call("unknown", [])
       assert not Enricher.enriched?(node)
+    end
+  end
+
+  # ----- callback_for enrichment -----
+
+  describe "enrich_callback/3" do
+    test "annotates perform/1 as Oban.Worker callback" do
+      node = function_def("perform", ["job"])
+      enriched = Enricher.enrich_callback(node, :elixir, ["Oban.Worker"])
+
+      assert Enricher.get_callback_for(enriched) == "Oban.Worker"
+    end
+
+    test "annotates handle_call/3 as GenServer callback" do
+      node = function_def("handle_call", ["msg", "from", "state"])
+      enriched = Enricher.enrich_callback(node, :elixir, ["GenServer"])
+
+      assert Enricher.get_callback_for(enriched) == "GenServer"
+    end
+
+    test "does not annotate when function is not a callback for the behaviour" do
+      node = function_def("run", ["args"])
+      enriched = Enricher.enrich_callback(node, :elixir, ["Oban.Worker"])
+
+      assert Enricher.get_callback_for(enriched) == nil
+    end
+
+    test "does not annotate when behaviours list is empty" do
+      node = function_def("perform", ["job"])
+      enriched = Enricher.enrich_callback(node, :elixir, [])
+
+      assert Enricher.get_callback_for(enriched) == nil
+    end
+
+    test "picks first matching behaviour" do
+      node = function_def("perform", ["job"])
+
+      enriched =
+        Enricher.enrich_callback(node, :elixir, ["GenServer", "Oban.Worker"])
+
+      # GenServer doesn't have perform/1, so Oban.Worker matches
+      assert Enricher.get_callback_for(enriched) == "Oban.Worker"
+    end
+  end
+
+  describe "enrich_tree/2 - callback_for in containers" do
+    test "enriches Oban worker perform/1 inside module with use Oban.Worker" do
+      ast =
+        container(
+          :module,
+          "MyApp.EmailWorker",
+          [
+            import_node("Oban.Worker", language: :elixir),
+            function_def("perform", ["job"])
+          ],
+          language: :elixir
+        )
+
+      enriched = Enricher.enrich_tree(ast, :elixir)
+      {:container, _, [_import, func_def]} = enriched
+
+      assert Enricher.get_callback_for(func_def) == "Oban.Worker"
+    end
+
+    test "enriches GenServer callbacks inside module" do
+      ast =
+        container(
+          :module,
+          "MyApp.Cache",
+          [
+            import_node("GenServer", language: :elixir),
+            function_def("init", ["opts"]),
+            function_def("handle_call", ["msg", "from", "state"]),
+            function_def("helper", ["x"])
+          ],
+          language: :elixir
+        )
+
+      enriched = Enricher.enrich_tree(ast, :elixir)
+      {:container, _, [_import, init_fn, handle_fn, helper_fn]} = enriched
+
+      assert Enricher.get_callback_for(init_fn) == "GenServer"
+      assert Enricher.get_callback_for(handle_fn) == "GenServer"
+      assert Enricher.get_callback_for(helper_fn) == nil
+    end
+
+    test "enriches Ruby ActiveJob worker via parent class" do
+      ast =
+        container(
+          :class,
+          "SendEmailJob",
+          [
+            function_def("perform", ["user_id"])
+          ],
+          language: :ruby,
+          parent: "ActiveJob::Base"
+        )
+
+      enriched = Enricher.enrich_tree(ast, :ruby)
+      {:container, _, [func_def]} = enriched
+
+      assert Enricher.get_callback_for(func_def) == "ActiveJob::Base"
+    end
+
+    test "does not annotate functions when container has no matching behaviour" do
+      ast =
+        container(
+          :module,
+          "MyApp.Utils",
+          [
+            function_def("run", ["args"]),
+            function_def("perform", ["work"])
+          ],
+          language: :elixir
+        )
+
+      enriched = Enricher.enrich_tree(ast, :elixir)
+      {:container, _, [run_fn, perform_fn]} = enriched
+
+      assert Enricher.get_callback_for(run_fn) == nil
+      assert Enricher.get_callback_for(perform_fn) == nil
+    end
+
+    test "does not leak behaviours between sibling containers" do
+      ast =
+        block([
+          container(
+            :module,
+            "MyApp.Worker",
+            [
+              import_node("Oban.Worker", language: :elixir),
+              function_def("perform", ["job"])
+            ],
+            language: :elixir
+          ),
+          container(
+            :module,
+            "MyApp.Utils",
+            [
+              function_def("perform", ["work"])
+            ],
+            language: :elixir
+          )
+        ])
+
+      enriched = Enricher.enrich_tree(ast, :elixir)
+      {:block, _, [worker_container, utils_container]} = enriched
+
+      {:container, _, [_import, worker_perform]} = worker_container
+      {:container, _, [utils_perform]} = utils_container
+
+      assert Enricher.get_callback_for(worker_perform) == "Oban.Worker"
+      assert Enricher.get_callback_for(utils_perform) == nil
+    end
+
+    test "enriches both op_kind and callback_for in the same tree" do
+      ast =
+        container(
+          :module,
+          "MyApp.Worker",
+          [
+            import_node("Oban.Worker", language: :elixir),
+            function_def("perform", ["job"], [
+              function_call("Repo.get", [variable("User"), variable("id")])
+            ])
+          ],
+          language: :elixir
+        )
+
+      enriched = Enricher.enrich_tree(ast, :elixir)
+      {:container, _, [_import, func_def]} = enriched
+
+      # function_def gets callback_for
+      assert Enricher.get_callback_for(func_def) == "Oban.Worker"
+
+      # nested function_call gets op_kind
+      {:function_def, _, [repo_call]} = func_def
+      assert Enricher.get_op_kind(repo_call) != nil
+    end
+  end
+
+  describe "enriched?/1 - callback_for" do
+    test "returns true for nodes with callback_for" do
+      node = {:function_def, [name: "perform", callback_for: "Oban.Worker"], []}
+      assert Enricher.enriched?(node)
+    end
+  end
+
+  describe "get_callback_for/1" do
+    test "returns callback_for value" do
+      node = {:function_def, [name: "perform", callback_for: "Oban.Worker"], []}
+      assert Enricher.get_callback_for(node) == "Oban.Worker"
+    end
+
+    test "returns nil when absent" do
+      node = {:function_def, [name: "run"], []}
+      assert Enricher.get_callback_for(node) == nil
+    end
+
+    test "returns nil for non-tuple nodes" do
+      assert Enricher.get_callback_for(42) == nil
     end
   end
 

@@ -748,6 +748,16 @@ A function or method definition.
 `:arity` (integer), `:guards` (guard expression MetaAST or `nil`),
 `:function`, `:language`, `:line`.
 
+**Enrichment metadata** (added by `Semantic.Enricher` during tree
+enrichment, not by adapters directly):
+
+- `:callback_for` (binary) -- The behaviour or base-class module name
+  whose callback this function implements. Present only when the
+  enclosing `:container` declares a known behaviour (via `:import`
+  children or `:parent` metadata) and the function name/arity matches
+  a registered callback in `Semantic.Callbacks`. Examples:
+  `"Oban.Worker"`, `"GenServer"`, `"ActiveJob::Base"`.
+
 ```elixir
 # def add(x, y), do: x + y
 {:function_def,
@@ -765,6 +775,14 @@ A function or method definition.
    guards: {:binary_op, [category: :comparison, operator: :>],
      [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]}],
   [{:literal, [subtype: :boolean], true}]}
+
+# Oban worker perform/1 (after enrichment)
+{:function_def,
+  [name: "perform",
+   params: [{:param, [], "job"}],
+   visibility: :public, arity: 1,
+   callback_for: "Oban.Worker"],
+  [body_ast]}
 ```
 
 #### `:param`
