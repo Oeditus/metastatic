@@ -204,5 +204,76 @@ defmodule Metastatic.Semantic.CallbacksTest do
       assert {:ok, %{framework: :django, domain: :http}} =
                Callbacks.lookup(:python, "View", "post", 2)
     end
+
+    test "DRF ViewSet actions" do
+      for action <- ~w[list retrieve create update destroy] do
+        assert {:ok, %{framework: :drf, domain: :http}} =
+                 Callbacks.lookup(:python, "ModelViewSet", action, nil)
+      end
+    end
+
+    test "Django Model callbacks" do
+      assert {:ok, %{framework: :django, domain: :db}} =
+               Callbacks.lookup(:python, "Model", "save", nil)
+    end
+
+    test "DRF Serializer callbacks" do
+      assert {:ok, %{framework: :drf}} =
+               Callbacks.lookup(:python, "Serializer", "validate", nil)
+    end
+  end
+
+  describe "auto-discovered OTP behaviours" do
+    test "GenServer callbacks from BEAM introspection" do
+      assert Callbacks.callback?(:elixir, "GenServer", "handle_call", 3)
+      assert Callbacks.callback?(:elixir, "GenServer", "handle_cast", 2)
+      assert Callbacks.callback?(:elixir, "GenServer", "handle_info", 2)
+      assert Callbacks.callback?(:elixir, "GenServer", "handle_continue", 2)
+      assert Callbacks.callback?(:elixir, "GenServer", "init", 1)
+      assert Callbacks.callback?(:elixir, "GenServer", "terminate", 2)
+      assert Callbacks.callback?(:elixir, "GenServer", "code_change", 3)
+    end
+
+    test "DynamicSupervisor discovered via BEAM" do
+      assert Callbacks.callback?(:elixir, "DynamicSupervisor", "init", 1)
+    end
+
+    test "Application stop/1 discovered via BEAM" do
+      assert Callbacks.callback?(:elixir, "Application", "stop", 1)
+    end
+
+    test "Erlang gen_statem callbacks discovered" do
+      assert Callbacks.callback?(:erlang, "gen_statem", "init", 1)
+      assert Callbacks.callback?(:erlang, "gen_statem", "callback_mode", 0)
+    end
+  end
+
+  describe "new Ruby built-in registrations" do
+    test "Comparable" do
+      assert {:ok, %{framework: :ruby}} =
+               Callbacks.lookup(:ruby, "Comparable", "<=>", nil)
+    end
+
+    test "Enumerable" do
+      assert {:ok, %{framework: :ruby}} =
+               Callbacks.lookup(:ruby, "Enumerable", "each", nil)
+    end
+
+    test "ActiveRecord::Callbacks" do
+      for cb <- ~w[before_save after_save before_create after_create before_destroy after_destroy] do
+        assert {:ok, %{framework: :rails, domain: :db}} =
+                 Callbacks.lookup(:ruby, "ActiveRecord::Callbacks", cb, nil)
+      end
+    end
+
+    test "ActiveModel::Validations" do
+      assert {:ok, %{framework: :rails}} =
+               Callbacks.lookup(:ruby, "ActiveModel::Validations", "validate", nil)
+    end
+
+    test "ActiveSupport::Concern" do
+      assert {:ok, %{framework: :rails}} =
+               Callbacks.lookup(:ruby, "ActiveSupport::Concern", "included", nil)
+    end
   end
 end

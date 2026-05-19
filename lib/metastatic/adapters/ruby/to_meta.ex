@@ -315,6 +315,33 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
+  # Module mixins - M2.2s Structural Layer
+  # Ruby `include`, `prepend`, and `extend` are semantically import directives
+  # that bring in module behaviour, not regular method calls.
+
+  def transform(
+        %{"type" => "send", "children" => [nil, mixin_type, %{"type" => "const"} = const_node]} =
+          ast
+      )
+      when mixin_type in [:include, :prepend, :extend, "include", "prepend", "extend"] do
+    with {:ok, const_meta, _} <- transform(const_node) do
+      source_name = extract_constant_name(const_meta)
+
+      import_type =
+        case normalize_op(mixin_type) do
+          :include -> :include
+          :prepend -> :prepend
+          :extend -> :extend
+        end
+
+      {:ok,
+       add_location(
+         {:import, [source: source_name, import_type: import_type, language: :ruby], []},
+         ast
+       ), %{mixin_type: import_type}}
+    end
+  end
+
   # Method Calls - M2.1 Core Layer
 
   # Method call without receiver (local method call)

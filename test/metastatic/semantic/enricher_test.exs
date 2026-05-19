@@ -1,11 +1,12 @@
 defmodule Metastatic.Semantic.EnricherTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Metastatic.Semantic.{Callbacks, Domains.Database, Enricher, OpKind, Patterns}
 
-  # Ensure patterns and callbacks are registered before tests
-  setup_all do
-    # Clear and re-register to ensure clean state
+  # Ensure patterns and callbacks are registered before each test.
+  # Uses `setup` (not `setup_all`) because persistent_term state
+  # may be cleared by other test modules.
+  setup do
     Patterns.clear_all()
     Database.register_all()
     Callbacks.clear()

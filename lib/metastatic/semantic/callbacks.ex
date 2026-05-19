@@ -154,6 +154,11 @@ defmodule Metastatic.Semantic.Callbacks do
 
   Called during application startup. Can also be called manually to
   re-register after `clear/0`.
+
+  OTP and Elixir standard library behaviours are discovered automatically
+  via BEAM introspection (see `Metastatic.Semantic.Callbacks.BeamIntrospector`).
+  Third-party framework callbacks that may not be compiled are registered
+  manually.
   """
   @spec register_builtins() :: :ok
   def register_builtins do
@@ -172,21 +177,18 @@ defmodule Metastatic.Semantic.Callbacks do
   # ----- Elixir Built-ins -----
 
   defp register_elixir_builtins do
+    alias Metastatic.Semantic.Callbacks.BeamIntrospector
+
+    # Auto-discover OTP/stdlib behaviours from BEAM files.
+    # This replaces the previous manual callback lists for GenServer,
+    # Supervisor, Application, Task, etc.
+    BeamIntrospector.register_otp_behaviours()
+
+    # Third-party frameworks -- registered manually since they may not
+    # be compiled in the current environment.
+
     # Oban.Worker
     register(:elixir, "Oban.Worker", "perform", 1, %{framework: :oban, domain: :queue})
-
-    # GenServer
-    for {func, arity} <- [
-          {"init", 1},
-          {"handle_call", 3},
-          {"handle_cast", 2},
-          {"handle_info", 2},
-          {"handle_continue", 2},
-          {"terminate", 2},
-          {"code_change", 3}
-        ] do
-      register(:elixir, "GenServer", func, arity, %{framework: :genserver, domain: nil})
-    end
 
     # Phoenix.LiveView
     for {func, arity} <- [
@@ -209,15 +211,6 @@ defmodule Metastatic.Semantic.Callbacks do
     # Broadway
     register(:elixir, "Broadway", "handle_message", 3, %{framework: :broadway, domain: :queue})
     register(:elixir, "Broadway", "handle_batch", 4, %{framework: :broadway, domain: :queue})
-
-    # Supervisor
-    register(:elixir, "Supervisor", "init", 1, %{framework: :supervisor, domain: nil})
-
-    # Application
-    register(:elixir, "Application", "start", 2, %{framework: :application, domain: nil})
-
-    # Task
-    register(:elixir, "Task", "run", 1, %{framework: :task, domain: nil})
 
     # Ecto.Migration
     register(:elixir, "Ecto.Migration", "change", 0, %{framework: :ecto, domain: :db})
@@ -255,29 +248,54 @@ defmodule Metastatic.Semantic.Callbacks do
         domain: :http
       })
     end
+
+    # Ruby stdlib modules (included via `include`)
+    register(:ruby, "Comparable", "<=>", nil, %{framework: :ruby, domain: nil})
+    register(:ruby, "Enumerable", "each", nil, %{framework: :ruby, domain: nil})
+
+    # ActiveModel::Validations
+    register(:ruby, "ActiveModel::Validations", "validate", nil, %{
+      framework: :rails,
+      domain: nil
+    })
+
+    # ActiveRecord::Callbacks
+    for callback <-
+          ~w[before_validation after_validation before_save after_save before_create after_create before_update after_update before_destroy after_destroy] do
+      register(:ruby, "ActiveRecord::Callbacks", callback, nil, %{
+        framework: :rails,
+        domain: :db
+      })
+    end
+
+    # ActiveSupport::Concern
+    register(:ruby, "ActiveSupport::Concern", "included", nil, %{
+      framework: :rails,
+      domain: nil
+    })
+
+    register(:ruby, "ActiveSupport::Concern", "class_methods", nil, %{
+      framework: :rails,
+      domain: nil
+    })
+
+    # Devise modules
+    for mod <-
+          ~w[DatabaseAuthenticatable Registerable Recoverable Rememberable Validatable Confirmable Lockable Timeoutable Trackable Omniauthable] do
+      register(:ruby, "Devise::#{mod}", "devise", nil, %{framework: :devise, domain: :auth})
+    end
   end
 
   # ----- Python Built-ins -----
 
   defp register_python_builtins do
-    # Celery Task
-    register(:python, "celery.Task", "run", nil, %{framework: :celery, domain: :queue})
+    alias Metastatic.Semantic.Callbacks.PythonResolver
 
-    # RQ Worker
+    # Register all base class callbacks (Django views, Flask, DRF, etc.)
+    PythonResolver.register_base_class_callbacks()
+
+    # RQ Worker (not covered by PythonResolver)
     register(:python, "rq.Worker", "perform_job", nil, %{framework: :rq, domain: :queue})
-
-    # Dramatiq Actor
-    register(:python, "dramatiq.Actor", "perform", nil, %{framework: :dramatiq, domain: :queue})
-
-    # Django views
-    register(:python, "View", "get", nil, %{framework: :django, domain: :http})
-    register(:python, "View", "post", nil, %{framework: :django, domain: :http})
-    register(:python, "View", "put", nil, %{framework: :django, domain: :http})
-    register(:python, "View", "delete", nil, %{framework: :django, domain: :http})
-
-    # Flask
-    register(:python, "MethodView", "get", nil, %{framework: :flask, domain: :http})
-    register(:python, "MethodView", "post", nil, %{framework: :flask, domain: :http})
   end
 end
 

@@ -51,6 +51,7 @@ defmodule Metastatic.Semantic.Enricher do
 
   alias Metastatic.AST
   alias Metastatic.Semantic.{Callbacks, Patterns}
+  alias Metastatic.Semantic.Callbacks.{ElixirResolver, PythonResolver}
 
   @typedoc "Language identifier for pattern matching"
   @type language :: Patterns.language()
@@ -284,8 +285,17 @@ defmodule Metastatic.Semantic.Enricher do
 
   # Post-pass: enrich function_call (op_kind), function_def (callback_for),
   # and reset behaviours when leaving a container.
-  defp post_enrich({:function_def, _meta, _children} = node, acc) do
+  defp post_enrich({:function_def, meta, _children} = node, acc) do
     enriched = enrich_callback(node, acc.language, acc.behaviours)
+
+    # Python: check decorators for framework-implied callbacks
+    enriched =
+      if acc.language == :python and not Keyword.has_key?(elem(enriched, 1), :callback_for) do
+        enrich_from_decorators(enriched, meta)
+      else
+        enriched
+      end
+
     {enrich(enriched, acc.language), acc}
   end
 
@@ -303,6 +313,8 @@ defmodule Metastatic.Semantic.Enricher do
   #   1. :import children with import_type :use or :import whose source
   #      is a known behaviour in the Callbacks registry
   #   2. :parent metadata on the container itself (Ruby/Python inheritance)
+  #   3. Elixir `use` directives resolved dynamically via ElixirResolver
+  #   4. Python `bases:` metadata on class containers
   defp extract_behaviours_from_container(meta, children) when is_list(children) do
     language = Keyword.get(meta, :language)
     known = if language, do: Callbacks.behaviours_for_language(language), else: []
@@ -314,10 +326,16 @@ defmodule Metastatic.Semantic.Enricher do
           source = Keyword.get(import_meta, :source, "")
           import_type = Keyword.get(import_meta, :import_type)
 
-          if import_type in [:use, :import, :require, :include] and source in known do
-            [source]
-          else
-            []
+          cond do
+            import_type in [:use, :import, :require, :include] and source in known ->
+              [source]
+
+            # Dynamic resolution for Elixir `use` directives
+            import_type == :use and language in [:elixir, :erlang] and source != "" ->
+              resolve_elixir_use(source)
+
+            true ->
+              []
           end
 
         _ ->
@@ -328,10 +346,36 @@ defmodule Metastatic.Semantic.Enricher do
     parent = Keyword.get(meta, :parent)
     parent_behaviours = if is_binary(parent) and parent in known, do: [parent], else: []
 
-    Enum.uniq(import_behaviours ++ parent_behaviours)
+    # Python: base classes from `bases:` metadata, resolved via PythonResolver
+    bases = Keyword.get(meta, :bases, [])
+
+    bases_behaviours =
+      if language == :python and is_list(bases) do
+        static_matches = Enum.filter(bases, fn base -> base in known end)
+        resolved_matches = PythonResolver.resolve_base_classes(bases)
+        Enum.uniq(static_matches ++ resolved_matches)
+      else
+        []
+      end
+
+    Enum.uniq(import_behaviours ++ parent_behaviours ++ bases_behaviours)
   end
 
   defp extract_behaviours_from_container(_meta, _children), do: []
+
+  # Resolve `use Module` for Elixir/Erlang to find injected behaviours.
+  # Returns the list of behaviour names that are now known in the registry.
+  defp resolve_elixir_use(source) do
+    resolved = ElixirResolver.resolve_behaviours(source)
+
+    # After resolution, check which of the resolved behaviours are now
+    # registered (the resolver auto-registers discovered callbacks).
+    # Also include the source itself if it became registered.
+    known_after = Callbacks.behaviours_for_language(:elixir)
+
+    all_candidates = Enum.uniq([source | resolved])
+    Enum.filter(all_candidates, fn b -> b in known_after end)
+  end
 
   # Find the first behaviour in the list that declares a callback matching
   # the given function name and arity.
@@ -363,6 +407,24 @@ defmodule Metastatic.Semantic.Enricher do
   end
 
   defp extract_receiver_name(_), do: nil
+
+  # Enrich a Python function_def from its decorators metadata.
+  # When a decorator matches a known pattern, annotates with decorator_callback.
+  defp enrich_from_decorators({:function_def, _meta, _} = node, original_meta) do
+    decorators = Keyword.get(original_meta, :decorators, [])
+
+    if decorators != [] do
+      case PythonResolver.resolve_from_decorators(decorators) do
+        {:ok, spec} ->
+          AST.put_meta(node, :decorator_callback, spec)
+
+        :no_match ->
+          node
+      end
+    else
+      node
+    end
+  end
 
   # Build full method name from receiver and method
   defp build_full_name(nil, method), do: method

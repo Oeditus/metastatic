@@ -60,6 +60,7 @@ defmodule Metastatic.MixProject do
       # Core dependencies
       {:jason, "~> 1.4"},
       {:ex_panda, "~> 0.2"},
+      {:typle, "~> 0.3", optional: true},
 
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
