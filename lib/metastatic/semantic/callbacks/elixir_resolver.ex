@@ -164,7 +164,7 @@ defmodule Metastatic.Semantic.Callbacks.ElixirResolver do
       Macro.prewalk(ast, [], fn
         # @behaviour ModuleName
         {:@, _, [{:behaviour, _, [{:__aliases__, _, parts}]}]} = node, acc ->
-          behaviour_name = parts |> Enum.map(&Atom.to_string/1) |> Enum.join(".")
+          behaviour_name = parts |> Module.concat() |> Atom.to_string()
           {node, [behaviour_name | acc]}
 
         # @behaviour :erlang_module
