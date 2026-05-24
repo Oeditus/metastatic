@@ -130,14 +130,16 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # The actual transformation happens in post_transform.
 
   # Track entering a module
-  defp pre_transform({:defmodule, _meta, [{:__aliases__, _, parts} | _]} = ast, ctx) do
-    module_name = Enum.map_join(parts, ".", &Atom.to_string/1)
+  defp pre_transform({:defmodule, _meta, [{:__aliases__, _, parts} | _]} = ast, ctx)
+       when is_list(parts) do
+    module_name = safe_join_parts(parts)
     {ast, %{ctx | module: module_name}}
   end
 
   # Track entering a protocol definition
-  defp pre_transform({:defprotocol, _meta, [{:__aliases__, _, parts} | _]} = ast, ctx) do
-    protocol_name = Enum.map_join(parts, ".", &Atom.to_string/1)
+  defp pre_transform({:defprotocol, _meta, [{:__aliases__, _, parts} | _]} = ast, ctx)
+       when is_list(parts) do
+    protocol_name = safe_join_parts(parts)
     {ast, %{ctx | module: protocol_name}}
   end
 
@@ -145,8 +147,9 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp pre_transform(
          {:defimpl, _meta, [{:__aliases__, _, parts} | _]} = ast,
          ctx
-       ) do
-    protocol_name = Enum.map_join(parts, ".", &Atom.to_string/1)
+       )
+       when is_list(parts) do
+    protocol_name = safe_join_parts(parts)
     {ast, %{ctx | module: protocol_name}}
   end
 
@@ -178,7 +181,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # {{:., [], [{:foo, [], Elixir}, :bar]}, [no_parens: true], []}
   # {{:., [], [{:__aliases__, [alias: false], [:Map]}, :fetch!]}, [], [{:foo, [], Elixir}, :bar]}
   defp pre_transform({{:., dot_meta, [{_map, _, _}, _key] = args}, meta, []}, ctx) do
-    ast = {{:., dot_meta, [@map, :fetch!]}, Keyword.delete(meta, :no_parens), args}
+    safe_meta = if Keyword.keyword?(meta), do: Keyword.delete(meta, :no_parens), else: meta
+    ast = {{:., dot_meta, [@map, :fetch!]}, safe_meta, args}
 
     {ast, ctx}
   end
@@ -200,14 +204,28 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Handle with expressions in pre_transform to preserve clause structure
   # (especially `<-` operators) before children get transformed.
-  defp pre_transform({:with, _meta, _args} = ast, ctx) do
+  defp pre_transform({:with, _meta, args} = ast, ctx) when is_list(args) do
     {{:__with_marker__, [], nil}, Map.put(ctx, :pending_with, ast)}
   end
 
   # Handle for comprehensions in pre_transform to preserve `<-` generators
   # before children get transformed.
-  defp pre_transform({:for, _meta, _args} = ast, ctx) do
+  defp pre_transform({:for, _meta, args} = ast, ctx) when is_list(args) do
     {{:__for_marker__, [], nil}, Map.put(ctx, :pending_for, ast)}
+  end
+
+  # Handle quote blocks in pre_transform to prevent Macro.traverse from
+  # descending into template AST that contains unquote placeholders,
+  # non-standard __aliases__ forms, and other meta-programming constructs
+  # that are not real code.
+  defp pre_transform({:quote, _meta, args} = ast, ctx) when is_list(args) do
+    {{:__quote_marker__, [], nil}, Map.put(ctx, :pending_quote, ast)}
+  end
+
+  # Handle unquote -- when encountered outside a quote marker (e.g. in
+  # already-traversed code), preserve the original expression.
+  defp pre_transform({:unquote, _meta, args} = ast, ctx) when is_list(args) do
+    {{:__unquote_marker__, [], nil}, Map.put(ctx, :pending_unquote, ast)}
   end
 
   # Handle string interpolation in pre_transform to prevent Macro.traverse from
@@ -225,6 +243,11 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # (e.g. :moduledoc) into a :function_call node before the @ handler sees it.
   defp pre_transform({:@, _meta, [{attr_name, _, _}]} = ast, ctx)
        when is_atom(attr_name) do
+    {{:__attr_marker__, [], nil}, Map.put(ctx, :pending_attr, ast)}
+  end
+
+  # Module attribute with non-atom name (e.g. inside quote blocks in kernel.ex)
+  defp pre_transform({:@, _meta, [_non_atom_attr]} = ast, ctx) do
     {{:__attr_marker__, [], nil}, Map.put(ctx, :pending_attr, ast)}
   end
 
@@ -290,7 +313,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       [
         name: "Map.fetch!",
         original_meta: dot_meta,
-        line: Keyword.get(dot_meta, :line, 1)
+        line: safe_keyword_get(dot_meta, :line, 1)
       ], [{:variable, [], "arg_#{n}"}, {:literal, [subtype: :symbol], key}]}, max(max_arg, n)}
   end
 
@@ -523,6 +546,31 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     end
   end
 
+  # Handle __quote_marker__ - preserve quote body as language_specific node
+  defp post_transform({:__quote_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_quote) do
+      {{:quote, meta, args}, new_ctx} ->
+        node_meta = [language: :elixir, hint: :quote] ++ build_meta(meta)
+        {{:language_specific, node_meta, {:quote, meta, args}}, new_ctx}
+
+      {nil, ctx} ->
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
+  # Handle __unquote_marker__ - preserve unquote as language_specific node
+  defp post_transform({:__unquote_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_unquote) do
+      {{:unquote, meta, [expr]}, new_ctx} ->
+        {:ok, expr_ast, _} = transform(expr)
+        node_meta = [language: :elixir, hint: :unquote] ++ build_meta(meta)
+        {{:language_specific, node_meta, [expr_ast]}, new_ctx}
+
+      {nil, ctx} ->
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
   # Handle __attr_marker__ - retrieve original module attribute from context and transform it
   defp post_transform({:__attr_marker__, [], nil}, ctx) do
     case Map.pop(ctx, :pending_attr) do
@@ -555,6 +603,11 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
           [scope: :module_attribute, attribute_type: :module_attribute] ++ build_meta(meta)
 
         {{:variable, node_meta, var_name}, new_ctx}
+
+      # Non-atom attribute name (e.g. {:{}, ...} inside quote blocks)
+      {{:@, meta, [_non_atom_attr]} = original, new_ctx} ->
+        node_meta = [language: :elixir, hint: :module_attribute] ++ build_meta(meta)
+        {{:language_specific, node_meta, original}, new_ctx}
 
       {nil, ctx} ->
         {{:literal, [subtype: :null], nil}, ctx}
@@ -751,6 +804,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         # Other tuple - treat as key-value pair
         {key, value} ->
           {:pair, [], [ensure_meta_ast(key), ensure_meta_ast(value)]}
+
+        # Non-tuple element (e.g. already-transformed 3-tuple AST node) -- wrap as-is
+        other ->
+          ensure_meta_ast(other)
       end)
 
     node_meta = build_meta(meta)
@@ -844,15 +901,15 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # Module alias - parts may be atoms (raw) or {:literal, _, atom} (transformed)
   defp post_transform({:__aliases__, meta, parts}, ctx) when is_list(parts) do
-    module_name =
-      Enum.map_join(parts, ".", fn
-        {:literal, _, atom} when is_atom(atom) -> Atom.to_string(atom)
-        atom when is_atom(atom) -> Atom.to_string(atom)
-        other -> inspect(other)
-      end)
-
+    module_name = safe_join_parts(parts)
     node_meta = build_meta(meta)
     {{:variable, node_meta, module_name}, ctx}
+  end
+
+  # Module alias with non-list parts (e.g. template variables inside quote blocks)
+  defp post_transform({:__aliases__, meta, non_list_parts}, ctx) do
+    node_meta = [language: :elixir, hint: :aliases_template] ++ build_meta(meta)
+    {{:language_specific, node_meta, non_list_parts}, ctx}
   end
 
   # Remote call: Module.function(args) - raw atom function name
@@ -1190,20 +1247,32 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # original_meta to avoid duplication.
   # Promotes :__original_macro__ to :original_macro at the MetaAST level.
   defp build_meta(elixir_meta) when is_list(elixir_meta) do
-    original_macro = Keyword.get(elixir_meta, :__original_macro__)
-    stripped = Keyword.drop(elixir_meta, [:line, :column, :__original_macro__])
-    base = if stripped == [], do: [], else: [original_meta: stripped]
+    if Keyword.keyword?(elixir_meta) do
+      original_macro = Keyword.get(elixir_meta, :__original_macro__)
+      stripped = Keyword.drop(elixir_meta, [:line, :column, :__original_macro__])
+      base = if stripped == [], do: [], else: [original_meta: stripped]
 
-    base
-    |> maybe_add(:line, Keyword.get(elixir_meta, :line))
-    |> maybe_add(:col, Keyword.get(elixir_meta, :column))
-    |> maybe_add(:original_macro, original_macro)
+      base
+      |> maybe_add(:line, Keyword.get(elixir_meta, :line))
+      |> maybe_add(:col, Keyword.get(elixir_meta, :column))
+      |> maybe_add(:original_macro, original_macro)
+    else
+      # Non-keyword list (e.g. list of atoms inside quote blocks)
+      [original_meta: elixir_meta]
+    end
   end
 
   defp build_meta(_), do: []
 
   defp maybe_add(keyword, _key, nil), do: keyword
   defp maybe_add(keyword, key, value), do: Keyword.put(keyword, key, value)
+
+  # Safe Keyword.get that handles non-keyword lists
+  defp safe_keyword_get(list, key, default) do
+    if is_list(list) and Keyword.keyword?(list),
+      do: Keyword.get(list, key, default),
+      else: default
+  end
 
   # Check if a value is already a MetaAST node
   defp meta_ast_node?({type, meta, _children})
@@ -1396,9 +1465,23 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   defp collapse_clause_group(other), do: [other]
 
+  # Safely join module alias parts, tolerating non-atom elements
+  # that appear inside quote blocks (e.g. template variables, unquote expressions)
+  defp safe_join_parts(parts) when is_list(parts) do
+    Enum.map_join(parts, ".", fn
+      {:literal, _, atom} when is_atom(atom) -> Atom.to_string(atom)
+      atom when is_atom(atom) -> Atom.to_string(atom)
+      other -> inspect(other)
+    end)
+  end
+
   # Extract module name from AST
-  defp extract_module_name({:__aliases__, _, parts}) do
-    Enum.map_join(parts, ".", &Atom.to_string/1)
+  defp extract_module_name({:__aliases__, _, parts}) when is_list(parts) do
+    safe_join_parts(parts)
+  end
+
+  defp extract_module_name({:__aliases__, _, _non_list}) do
+    "unknown"
   end
 
   defp extract_module_name({:variable, _, name}) when is_binary(name), do: name
