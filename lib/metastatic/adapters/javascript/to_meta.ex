@@ -37,7 +37,7 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
   @call_expr ~r/(\w+)(?:\.(\w+))?\s*\(/
 
   @ts_generics ~r/<[^>]*>/
-  @ts_type_annotations ~r/\??:\s*\S+/
+  @ts_type_annotations ~r/\??:\s*[^,)]+/
 
   # Keywords that look like function calls but aren't
   @control_keywords ~w(if for while switch catch return function constructor)
