@@ -184,6 +184,7 @@ defmodule Metastatic.Validator do
 
   # Extended layer types (M2.2 + M2.2s)
   @extended_types [
+    # M2.2: Extended (most languages)
     :loop,
     :lambda,
     :collection_op,
@@ -192,13 +193,24 @@ defmodule Metastatic.Validator do
     :exception_handling,
     :async_operation,
     :yield,
+    :comprehension,
+    :generator,
+    :filter,
+    :pipe,
+    :pin,
+    :assert_type,
     # M2.2s: Structural/Organizational layer
     :container,
     :function_def,
+    :param,
     :attribute_access,
     :augmented_assignment,
     :property,
-    :decorator
+    :import,
+    :type_annotation,
+    :decorator,
+    :record_update,
+    :child_spec
   ]
 
   # Native layer types (M2.3)

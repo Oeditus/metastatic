@@ -1558,7 +1558,7 @@ defmodule Metastatic.AST do
       false
   """
   @spec leaf?(meta_ast()) :: boolean()
-  def leaf?({type, _meta, _children}) when type in [:literal, :variable], do: true
+  def leaf?({type, _meta, _children}) when type in [:literal, :variable, :comment], do: true
   def leaf?(_), do: false
 
   @doc """
@@ -2035,6 +2035,153 @@ defmodule Metastatic.AST do
     {:comment, meta, text}
   end
 
+  @doc "Builds a `:unary_op` node."
+  @spec unary_op(atom(), atom(), meta_ast(), keyword()) :: meta_ast()
+  def unary_op(category, operator, operand, extra_meta \\ []) do
+    {:unary_op, [category: category, operator: operator] ++ extra_meta, [operand]}
+  end
+
+  @doc "Builds a `:list` node."
+  @spec list_node([meta_ast()], keyword()) :: meta_ast()
+  def list_node(elements, meta \\ []) when is_list(elements) do
+    {:list, meta, elements}
+  end
+
+  @doc "Builds a `:tuple` node."
+  @spec tuple_node([meta_ast()], keyword()) :: meta_ast()
+  def tuple_node(elements, meta \\ []) when is_list(elements) do
+    {:tuple, meta, elements}
+  end
+
+  @doc "Builds a `:conditional` node."
+  @spec conditional(atom(), meta_ast(), [meta_ast()], keyword()) :: meta_ast()
+  def conditional(kind, condition, branches, extra_meta \\ [])
+      when is_atom(kind) and is_list(branches) do
+    {:conditional, [kind: kind] ++ extra_meta, [condition | branches]}
+  end
+
+  @doc "Builds an `:assignment` node."
+  @spec assignment(meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def assignment(target, value, meta \\ []) do
+    {:assignment, meta, [target, value]}
+  end
+
+  @doc "Builds an `:early_return` node."
+  @spec early_return(meta_ast() | nil, keyword()) :: meta_ast()
+  def early_return(value \\ nil, meta \\ []) do
+    {:early_return, meta, if(value, do: [value], else: [])}
+  end
+
+  @doc "Builds a `:loop` node."
+  @spec loop_node(atom(), meta_ast() | nil, [meta_ast()], keyword()) :: meta_ast()
+  def loop_node(kind, condition, body, extra_meta \\ [])
+      when is_atom(kind) and is_list(body) do
+    children = if condition, do: [condition | body], else: body
+    {:loop, [kind: kind] ++ extra_meta, children}
+  end
+
+  @doc "Builds a `:lambda` node."
+  @spec lambda([meta_ast()], [meta_ast()], keyword()) :: meta_ast()
+  def lambda(params, body, meta \\ []) when is_list(params) and is_list(body) do
+    {:lambda, meta, params ++ body}
+  end
+
+  @doc "Builds a `:collection_op` node."
+  @spec collection_op(atom(), meta_ast(), [meta_ast()], keyword()) :: meta_ast()
+  def collection_op(operation, collection, args, extra_meta \\ [])
+      when is_atom(operation) and is_list(args) do
+    {:collection_op, [operation: operation] ++ extra_meta, [collection | args]}
+  end
+
+  @doc "Builds a `:pattern_match` node."
+  @spec pattern_match(meta_ast(), [meta_ast()], keyword()) :: meta_ast()
+  def pattern_match(subject, arms, meta \\ []) when is_list(arms) do
+    {:pattern_match, meta, [subject | arms]}
+  end
+
+  @doc "Builds a `:match_arm` node."
+  @spec match_arm(meta_ast(), meta_ast() | nil, [meta_ast()], keyword()) :: meta_ast()
+  def match_arm(pattern, guard, body, extra_meta \\ []) when is_list(body) do
+    children = if guard, do: [pattern, guard | body], else: [pattern | body]
+    {:match_arm, [has_guard: not is_nil(guard)] ++ extra_meta, children}
+  end
+
+  @doc "Builds an `:exception_handling` node."
+  @spec exception_handling(atom(), [meta_ast()], keyword()) :: meta_ast()
+  def exception_handling(kind, clauses, extra_meta \\ [])
+      when is_atom(kind) and is_list(clauses) do
+    {:exception_handling, [kind: kind] ++ extra_meta, clauses}
+  end
+
+  @doc "Builds an `:async_operation` node."
+  @spec async_operation(atom(), [meta_ast()], keyword()) :: meta_ast()
+  def async_operation(kind, children, extra_meta \\ [])
+      when is_atom(kind) and is_list(children) do
+    {:async_operation, [kind: kind] ++ extra_meta, children}
+  end
+
+  @doc "Builds a `:param` node."
+  @spec param_node(String.t(), keyword()) :: meta_ast()
+  def param_node(name, extra_meta \\ []) when is_binary(name) do
+    {:param, [name: name] ++ extra_meta, name}
+  end
+
+  @doc "Builds an `:attribute_access` node."
+  @spec attribute_access(meta_ast(), String.t(), keyword()) :: meta_ast()
+  def attribute_access(object, attribute, extra_meta \\ []) when is_binary(attribute) do
+    {:attribute_access, [attribute: attribute] ++ extra_meta, [object]}
+  end
+
+  @doc "Builds an `:augmented_assignment` node."
+  @spec augmented_assignment(atom(), meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def augmented_assignment(operator, target, value, extra_meta \\ []) when is_atom(operator) do
+    {:augmented_assignment, [operator: operator] ++ extra_meta, [target, value]}
+  end
+
+  @doc "Builds a `:property` node."
+  @spec property_node(String.t(), meta_ast() | nil, keyword()) :: meta_ast()
+  def property_node(name, value \\ nil, extra_meta \\ []) when is_binary(name) do
+    children = if value, do: [value], else: []
+    {:property, [name: name] ++ extra_meta, children}
+  end
+
+  @doc "Builds an `:import` node."
+  @spec import_node(String.t(), atom(), keyword()) :: meta_ast()
+  def import_node(source, import_type, extra_meta \\ [])
+      when is_binary(source) and is_atom(import_type) do
+    {:import, [source: source, import_type: import_type] ++ extra_meta, []}
+  end
+
+  @doc "Builds a `:record_update` node."
+  @spec record_update(meta_ast(), [meta_ast()], keyword()) :: meta_ast()
+  def record_update(record, updates, meta \\ []) when is_list(updates) do
+    {:record_update, meta, [record | updates]}
+  end
+
+  @doc "Builds a `:child_spec` node."
+  @spec child_spec_node(meta_ast(), keyword()) :: meta_ast()
+  def child_spec_node(spec, extra_meta \\ []) do
+    {:child_spec, extra_meta, [spec]}
+  end
+
+  @doc "Builds a `:language_specific` node."
+  @spec language_specific(atom(), term(), keyword()) :: meta_ast()
+  def language_specific(language, value, extra_meta \\ []) when is_atom(language) do
+    {:language_specific, [language: language] ++ extra_meta, value}
+  end
+
+  @doc "Builds a `:pin` node."
+  @spec pin_node(meta_ast(), keyword()) :: meta_ast()
+  def pin_node(expression, meta \\ []) do
+    {:pin, meta, [expression]}
+  end
+
+  @doc "Builds an `:assert_type` node."
+  @spec assert_type(atom(), meta_ast(), meta_ast(), keyword()) :: meta_ast()
+  def assert_type(kind, expression, type_expr, extra_meta \\ []) when is_atom(kind) do
+    {:assert_type, [kind: kind] ++ extra_meta, [expression, type_expr]}
+  end
+
   # ----- Enumerable Walkers -----
 
   @doc """
@@ -2073,8 +2220,22 @@ defmodule Metastatic.AST do
   """
   @spec postwalker(meta_ast()) :: Enumerable.t()
   def postwalker(ast) do
-    {_ast, nodes} = postwalk(ast, [], fn node, acc -> {node, [node | acc]} end)
-    Enum.reverse(nodes)
+    Stream.resource(
+      fn -> [{ast, false}] end,
+      fn
+        [] ->
+          {:halt, []}
+
+        [{node, true} | rest] ->
+          {[node], rest}
+
+        [{node, false} | rest] ->
+          children = child_nodes(node)
+          expanded = Enum.map(children, &{&1, false}) ++ [{node, true}]
+          {[], expanded ++ rest}
+      end,
+      fn _ -> :ok end
+    )
   end
 
   # Extracts child MetaAST nodes from a node (skips leaf values).
