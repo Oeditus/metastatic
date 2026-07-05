@@ -360,7 +360,7 @@ defmodule Metastatic.Semantic.Enricher do
 
     bases_behaviours =
       if language == :python and is_list(bases) do
-        static_matches = Enum.filter(bases, fn base -> base in known end)
+        static_matches = Enum.filter(bases, fn base -> Enum.member?(known, base) end)
         resolved_matches = PythonResolver.resolve_base_classes(bases)
         Enum.uniq(static_matches ++ resolved_matches)
       else
@@ -383,7 +383,7 @@ defmodule Metastatic.Semantic.Enricher do
     known_after = Callbacks.behaviours_for_language(:elixir)
 
     all_candidates = Enum.uniq([source | resolved])
-    Enum.filter(all_candidates, fn b -> b in known_after end)
+    Enum.filter(all_candidates, fn b -> Enum.member?(known_after, b) end)
   end
 
   # Find the first behaviour in the list that declares a callback matching

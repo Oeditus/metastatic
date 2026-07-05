@@ -78,7 +78,7 @@ defmodule Metastatic.Supplemental.CompatibilityMatrix do
   """
   @spec supported?(construct(), language()) :: boolean()
   def supported?(construct, language) do
-    construct in Registry.available_constructs(language)
+    Enum.member?(Registry.available_constructs(language), construct)
   end
 
   @doc """

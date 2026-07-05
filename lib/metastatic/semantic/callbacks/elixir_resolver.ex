@@ -181,7 +181,7 @@ defmodule Metastatic.Semantic.Callbacks.ElixirResolver do
   # Register a discovered behaviour and its callbacks
   defp register_discovered_behaviour(behaviour_name) do
     # Only register if not already known
-    if behaviour_name not in Callbacks.behaviours_for_language(:elixir) do
+    if not Enum.member?(Callbacks.behaviours_for_language(:elixir), behaviour_name) do
       case safe_to_module(behaviour_name) do
         {:ok, module} ->
           BeamIntrospector.discover_and_register(module,

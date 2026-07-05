@@ -1329,8 +1329,6 @@ defmodule Metastatic.AST do
     end)
   end
 
-  defp valid_params?(_), do: false
-
   # Validate literal values match their subtype
   defp valid_literal_value?(:integer, value), do: is_integer(value)
   defp valid_literal_value?(:float, value), do: is_float(value)

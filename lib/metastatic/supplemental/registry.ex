@@ -350,7 +350,7 @@ defmodule Metastatic.Supplemental.Registry do
     Enum.each(auto_register, fn module ->
       info = module.info()
 
-      unless info.name in disabled do
+      unless Enum.member?(disabled, info.name) do
         case register(module) do
           :ok ->
             Logger.info("Auto-registered supplemental: #{inspect(module)}")

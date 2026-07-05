@@ -86,18 +86,21 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
       end)
 
     # Build a top-level container that wraps everything (the "file module")
-    children = Enum.reverse(state.imports) ++ Enum.reverse(state.functions) ++ Enum.reverse(state.calls)
+    children =
+      Enum.reverse(state.imports) ++ Enum.reverse(state.functions) ++ Enum.reverse(state.calls)
 
     file_module =
-      {:container,
-       [name: state.current_container || "file", container_type: :module, line: 1],
+      {:container, [name: state.current_container || "file", container_type: :module, line: 1],
        children}
 
     # If there are class containers, return them alongside the file module
     case state.containers do
-      [] -> file_module
-      containers -> {:container, [name: "file", container_type: :module, line: 1],
-                     [file_module | Enum.reverse(containers)]}
+      [] ->
+        file_module
+
+      containers ->
+        {:container, [name: "file", container_type: :module, line: 1],
+         [file_module | Enum.reverse(containers)]}
     end
   end
 
@@ -138,8 +141,7 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
     case Regex.run(@class_decl, line) do
       [_, class_name] ->
         node =
-          {:container,
-           [name: class_name, container_type: :class, line: state.line_num], []}
+          {:container, [name: class_name, container_type: :class, line: state.line_num], []}
 
         state
         |> Map.update!(:containers, &[node | &1])

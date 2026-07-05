@@ -733,5 +733,4 @@ defmodule Metastatic.Semantic.OpKind do
   defp valid_operation?(:queue, op), do: op in @queue_operations
   defp valid_operation?(:file, op), do: op in @file_operations
   defp valid_operation?(:external_api, op), do: op in @external_api_operations
-  defp valid_operation?(_, _), do: false
 end
