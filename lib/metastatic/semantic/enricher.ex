@@ -59,7 +59,8 @@ defmodule Metastatic.Semantic.Enricher do
   @typedoc "Traversal accumulator carrying container context"
   @type enricher_acc :: %{
           language: language(),
-          behaviours: [String.t()]
+          behaviours: [String.t()],
+          behaviour_stack: [[String.t()]]
         }
 
   # ----- Public API -----
@@ -189,7 +190,7 @@ defmodule Metastatic.Semantic.Enricher do
   """
   @spec enrich_tree(AST.meta_ast(), language()) :: AST.meta_ast()
   def enrich_tree(ast, language) do
-    initial_acc = %{language: language, behaviours: []}
+    initial_acc = %{language: language, behaviours: [], behaviour_stack: []}
 
     {enriched, _acc} =
       AST.traverse(
@@ -278,7 +279,9 @@ defmodule Metastatic.Semantic.Enricher do
   # children (import nodes) and metadata (parent class).
   defp pre_enrich({:container, meta, children} = node, acc) when is_list(meta) do
     behaviours = extract_behaviours_from_container(meta, children)
-    {node, %{acc | behaviours: behaviours}}
+    # Push current behaviours onto stack before entering nested container
+    stack = [acc.behaviours | acc.behaviour_stack]
+    {node, %{acc | behaviours: behaviours, behaviour_stack: stack}}
   end
 
   defp pre_enrich(node, acc), do: {node, acc}
@@ -300,8 +303,14 @@ defmodule Metastatic.Semantic.Enricher do
   end
 
   defp post_enrich({:container, _meta, _children} = node, acc) do
-    # Reset behaviours when leaving the container scope
-    {enrich(node, acc.language), %{acc | behaviours: []}}
+    # Pop behaviours from stack (restore parent container's context)
+    {prev_behaviours, stack} =
+      case acc.behaviour_stack do
+        [top | rest] -> {top, rest}
+        [] -> {[], []}
+      end
+
+    {enrich(node, acc.language), %{acc | behaviours: prev_behaviours, behaviour_stack: stack}}
   end
 
   defp post_enrich(node, acc) do
@@ -351,7 +360,7 @@ defmodule Metastatic.Semantic.Enricher do
 
     bases_behaviours =
       if language == :python and is_list(bases) do
-        static_matches = Enum.filter(bases, fn base -> base in known end)
+        static_matches = Enum.filter(bases, fn base -> Enum.member?(known, base) end)
         resolved_matches = PythonResolver.resolve_base_classes(bases)
         Enum.uniq(static_matches ++ resolved_matches)
       else
@@ -374,7 +383,7 @@ defmodule Metastatic.Semantic.Enricher do
     known_after = Callbacks.behaviours_for_language(:elixir)
 
     all_candidates = Enum.uniq([source | resolved])
-    Enum.filter(all_candidates, fn b -> b in known_after end)
+    Enum.filter(all_candidates, fn b -> Enum.member?(known_after, b) end)
   end
 
   # Find the first behaviour in the list that declares a callback matching

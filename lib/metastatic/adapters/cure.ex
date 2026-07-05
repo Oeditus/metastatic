@@ -22,12 +22,14 @@ defmodule Metastatic.Adapters.Cure do
   @dialyzer {:nowarn_function, abstract: 3}
   def abstract(source, language \\ :cure, opts \\ [])
 
+  # credo:disable-for-lines:12
   def abstract(source, _language, opts) when is_binary(source) and is_list(opts) do
     # The `{:ok, ...}` branch is only reachable when the Cure compiler
-    # is linked in at runtime; `with` sidesteps the Elixir type system
-    # complaining about the (compile-time only) fallback arm in
-    # `ToMeta.from_source/2`.
-    with {:ok, ast, metadata} <- ToMeta.from_source(source, opts) do
+    # is linked in at runtime. Using apply/3 prevents the Elixir type
+    # system from statically resolving the return type of from_source/2
+    # and emitting a "pattern will never match" warning for the fallback
+    # clause compiled when the Cure compiler is absent.
+    with {:ok, ast, metadata} <- apply(ToMeta, :from_source, [source, opts]) do
       {:ok, Document.new(ast, :cure, metadata, source)}
     end
   end

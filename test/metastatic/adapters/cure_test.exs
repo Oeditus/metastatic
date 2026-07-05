@@ -73,7 +73,11 @@ defmodule Metastatic.Adapters.CureTest do
       from_source = Function.capture(ToMeta, :from_source, 1)
       result = from_source.("42")
 
-      if ToMeta.available?() do
+      # credo:disable-for-lines:10
+      # apply/3 prevents the type analyser from statically resolving
+      # available?/0's return type (false when Cure is not linked) and
+      # flagging the happy-path branch as unreachable.
+      if apply(ToMeta, :available?, []) do
         assert {:ok, ast, %{language: :cure}} = result
         assert AST.conforms?(ast)
       else
