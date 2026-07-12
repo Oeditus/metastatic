@@ -11,6 +11,7 @@ import GHC.Generics
 import Language.Haskell.Exts
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
+import System.Environment (getArgs)
 
 -- | Response wrapper for JSON output
 data Response = Response
@@ -26,7 +27,10 @@ instance Aeson.ToJSON Response where
 -- | Parse Haskell source and output JSON AST
 main :: IO ()
 main = do
-  source <- TIO.getContents
+  args <- getArgs
+  source <- case args of
+    (path:_) -> TIO.readFile path
+    []       -> TIO.getContents
   let sourceStr = T.unpack source
   -- Try parsing as module first, then as declaration, then as expression
   case parseModule sourceStr of

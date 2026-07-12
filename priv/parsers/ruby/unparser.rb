@@ -56,9 +56,13 @@ module Metastatic
   end
 end
 
-# CLI interface: read JSON from STDIN, write source to STDOUT
+# CLI interface: read JSON from file (if passed) or STDIN, write source to STDOUT
 if __FILE__ == $PROGRAM_NAME
-  ast_json = $stdin.read
+  if ARGV[0] && File.exist?(ARGV[0])
+    ast_json = File.read(ARGV[0])
+  else
+    ast_json = $stdin.read
+  end
   result = Metastatic::RubyUnparser.unparse(ast_json)
   
   if result[:status] == 'ok'

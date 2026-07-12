@@ -73,19 +73,21 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
 
     # Check if script exists
     if File.exists?(script_full_path) do
-      # Use printf to pipe input to bundle exec ruby
-      # This avoids stdin: option issues with System.cmd
-      command =
-        "cd #{shell_escape(script_dir)} && printf '%s' #{shell_escape(input)} | bundle exec ruby #{Path.basename(script_full_path)} 2>&1"
+      temp_path = Path.join(System.tmp_dir!(), "metastatic_rb_#{System.unique_integer([:positive, :monotonic])}.txt")
+      File.write!(temp_path, input)
 
-      case System.cmd("sh", ["-c", command]) do
-        {output, 0} ->
-          # Filter out parser version warnings from output
-          clean_output = filter_warnings(output)
-          {:ok, clean_output}
+      try do
+        case System.cmd("bundle", ["exec", "ruby", Path.basename(script_full_path), temp_path], cd: script_dir, stderr_to_stdout: true) do
+          {output, 0} ->
+            # Filter out parser version warnings from output
+            clean_output = filter_warnings(output)
+            {:ok, clean_output}
 
-        {error_output, exit_code} ->
-          {:error, "Exit code #{exit_code}: #{error_output}"}
+          {error_output, exit_code} ->
+            {:error, "Exit code #{exit_code}: #{error_output}"}
+        end
+      after
+        File.rm(temp_path)
       end
     else
       {:error, "Ruby script not found: #{script_full_path}"}
@@ -105,12 +107,6 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
 
   defp format_error(error) do
     "Parse error: #{inspect(error)}"
-  end
-
-  defp shell_escape(string) do
-    # Escape single quotes for shell
-    escaped = String.replace(string, "'", "'\\''")
-    "'#{escaped}'"
   end
 
   defp filter_warnings(output) do

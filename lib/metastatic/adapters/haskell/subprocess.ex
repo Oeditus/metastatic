@@ -20,15 +20,19 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    parser_command =
-      "cd #{@parser_dir} && printf %s \"#{escape_source(source)}\" | stack exec parser"
+    temp_path = Path.join(System.tmp_dir!(), "metastatic_hs_#{System.unique_integer([:positive, :monotonic])}.txt")
+    File.write!(temp_path, source)
 
-    case System.cmd("sh", ["-c", parser_command], stderr_to_stdout: true) do
-      {output, 0} ->
-        handle_parser_output(output)
+    try do
+      case System.cmd("stack", ["exec", "parser", "--", temp_path], cd: @parser_dir, stderr_to_stdout: true) do
+        {output, 0} ->
+          handle_parser_output(output)
 
-      {error_output, _exit_code} ->
-        {:error, "Haskell parser failed: #{inspect(error_output)}"}
+        {error_output, _exit_code} ->
+          {:error, "Haskell parser failed: #{inspect(error_output)}"}
+      end
+    after
+      File.rm(temp_path)
     end
   end
 
@@ -47,14 +51,5 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
       {:error, _} = error ->
         {:error, "Failed to decode parser output: #{inspect(error)}"}
     end
-  end
-
-  # Escape source for shell command
-  defp escape_source(source) do
-    source
-    |> String.replace("\\", "\\\\")
-    |> String.replace("\"", "\\\"")
-    |> String.replace("$", "\\$")
-    |> String.replace("`", "\\`")
   end
 end

@@ -81,17 +81,19 @@ defmodule Metastatic.Adapters.Python.Subprocess do
 
     # Check if script exists
     if File.exists?(script_full_path) do
-      # Use printf to pipe input to python3
-      # This avoids stdin: option which doesn't exist in System.cmd
-      case System.cmd("sh", [
-             "-c",
-             "printf '%s' #{shell_escape(input)} | python3 #{script_full_path}"
-           ]) do
-        {output, 0} ->
-          {:ok, output}
+      temp_path = Path.join(System.tmp_dir!(), "metastatic_py_#{System.unique_integer([:positive, :monotonic])}.txt")
+      File.write!(temp_path, input)
 
-        {error_output, exit_code} ->
-          {:error, "Exit code #{exit_code}: #{error_output}"}
+      try do
+        case System.cmd("python3", [script_full_path, temp_path], stderr_to_stdout: true) do
+          {output, 0} ->
+            {:ok, output}
+
+          {error_output, exit_code} ->
+            {:error, "Exit code #{exit_code}: #{error_output}"}
+        end
+      after
+        File.rm(temp_path)
       end
     else
       {:error, "Python script not found: #{script_full_path}"}
@@ -115,11 +117,5 @@ defmodule Metastatic.Adapters.Python.Subprocess do
 
   defp format_error(error) do
     inspect(error)
-  end
-
-  defp shell_escape(string) do
-    # Escape single quotes for shell
-    escaped = String.replace(string, "'", "'\\''")
-    "'#{escaped}'"
   end
 end

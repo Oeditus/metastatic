@@ -98,11 +98,17 @@ defmodule Metastatic.CLI.Translator do
   def translate_directory(source_dir, from_lang, to_lang, output_dir) do
     with {:ok, files} <- list_source_files(source_dir, from_lang) do
       results =
-        Enum.map(files, fn source_path ->
-          relative_path = Path.relative_to(source_path, source_dir)
-          output_path = Path.join(output_dir, change_extension(relative_path, to_lang))
-          translate(source_path, from_lang, to_lang, output_path)
-        end)
+        files
+        |> Task.async_stream(
+          fn source_path ->
+            relative_path = Path.relative_to(source_path, source_dir)
+            output_path = Path.join(output_dir, change_extension(relative_path, to_lang))
+            translate(source_path, from_lang, to_lang, output_path)
+          end,
+          max_concurrency: System.schedulers_online(),
+          timeout: :infinity
+        )
+        |> Enum.map(fn {:ok, res} -> res end)
 
       errors = Enum.filter(results, &match?({:error, _}, &1))
 

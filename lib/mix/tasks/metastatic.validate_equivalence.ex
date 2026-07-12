@@ -67,7 +67,8 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
   @switches [
     lang1: :string,
     lang2: :string,
-    verbose: :boolean
+    verbose: :boolean,
+    alpha: :boolean
   ]
 
   @impl Mix.Task
@@ -96,7 +97,8 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
       options = [
         lang1: lang1,
         lang2: lang2,
-        verbose: Keyword.get(opts, :verbose, false)
+        verbose: Keyword.get(opts, :verbose, false),
+        alpha: Keyword.get(opts, :alpha, false)
       ]
 
       {:ok, file1, file2, options}
@@ -157,9 +159,88 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
 
   @location_keys ~w[line end_line col end_col column end_column original_meta]a
 
-  @spec ast_equivalent?(term(), term()) :: boolean()
-  defp ast_equivalent?(ast1, ast2) do
-    strip_locations(ast1) == strip_locations(ast2)
+  @spec ast_equivalent?(term(), term(), keyword()) :: boolean()
+  defp ast_equivalent?(ast1, ast2, options) do
+    stripped1 = strip_locations(ast1)
+    stripped2 = strip_locations(ast2)
+
+    if Keyword.get(options, :alpha, false) do
+      canonicalize_variables(stripped1) == canonicalize_variables(stripped2)
+    else
+      stripped1 == stripped2
+    end
+  end
+
+  defp canonicalize_variables(ast) do
+    {new_ast, _acc} = canonicalize_vars(ast, %{})
+    new_ast
+  end
+
+  defp canonicalize_vars(list, acc) when is_list(list) do
+    Enum.map_reduce(list, acc, &canonicalize_vars/2)
+  end
+
+  defp canonicalize_vars({:variable, meta, name}, acc) when is_binary(name) do
+    {canonical_name, new_acc} = get_or_create_var(name, acc)
+    {{:variable, meta, canonical_name}, new_acc}
+  end
+
+  defp canonicalize_vars({:param, meta, name}, acc) when is_binary(name) do
+    {canonical_name, new_acc} = get_or_create_var(name, acc)
+    {{:param, meta, canonical_name}, new_acc}
+  end
+
+  defp canonicalize_vars({:function_def, meta, body}, acc) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
+    {new_params, acc2} = canonicalize_vars(params, acc)
+    {new_body, acc3} = canonicalize_vars(body, acc2)
+    new_meta = Keyword.put(meta, :params, new_params)
+    {{:function_def, new_meta, new_body}, acc3}
+  end
+
+  defp canonicalize_vars({:lambda, meta, body}, acc) when is_list(meta) do
+    params = Keyword.get(meta, :params, [])
+    {new_params, acc2} = canonicalize_vars(params, acc)
+    {new_body, acc3} = canonicalize_vars(body, acc2)
+    new_meta = Keyword.put(meta, :params, new_params)
+    {{:lambda, new_meta, new_body}, acc3}
+  end
+
+  defp canonicalize_vars({type, meta, children}, acc) when is_atom(type) and is_list(meta) do
+    {new_children, new_acc} = canonicalize_vars(children, acc)
+    {{type, meta, new_children}, new_acc}
+  end
+
+  defp canonicalize_vars(map, acc) when is_map(map) do
+    {list, acc_o} =
+      Enum.map_reduce(map, acc, fn {k, v}, acc_i ->
+        {new_v, acc_o} = canonicalize_vars(v, acc_i)
+        {{k, new_v}, acc_o}
+      end)
+    {Map.new(list), acc_o}
+  end
+
+  defp canonicalize_vars(tuple, acc) when is_tuple(tuple) do
+    {list, acc_o} =
+      tuple
+      |> Tuple.to_list()
+      |> canonicalize_vars(acc)
+    {List.to_tuple(list), acc_o}
+  end
+
+  defp canonicalize_vars(other, acc) do
+    {other, acc}
+  end
+
+  defp get_or_create_var(name, acc) do
+    case Map.fetch(acc, name) do
+      {:ok, canonical} ->
+        {canonical, acc}
+
+      :error ->
+        canonical = "v_#{map_size(acc)}"
+        {canonical, Map.put(acc, name, canonical)}
+    end
   end
 
   # Strip location metadata from AST nodes for comparison
@@ -216,7 +297,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
          {:ok, source2} <- CLI.read_file(file2),
          {:ok, doc1} <- Builder.from_source(source1, lang1),
          {:ok, doc2} <- Builder.from_source(source2, lang2) do
-      if ast_equivalent?(doc1.ast, doc2.ast) do
+      if ast_equivalent?(doc1.ast, doc2.ast, options) do
         Mix.shell().info(CLI.format_success("Semantically equivalent"))
 
         if verbose do

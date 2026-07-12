@@ -332,6 +332,25 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalenceTest do
       File.rm(py_file)
       File.rm(ex_file)
     end
+
+    test "considers files with different variable names semantically equivalent in --alpha mode" do
+      py_file = Path.join(@tmp_dir, "var1_#{:rand.uniform(10000)}.py")
+      ex_file = Path.join(@tmp_dir, "var2_#{:rand.uniform(10000)}.ex")
+      File.write!(py_file, "x + y")
+      File.write!(ex_file, "a + b")
+
+      args = [py_file, ex_file, "--alpha"]
+
+      output =
+        capture_io(fn ->
+          catch_exit(ValidateEquivalence.run(args))
+        end)
+
+      assert output =~ "Semantically equivalent"
+
+      File.rm(py_file)
+      File.rm(ex_file)
+    end
   end
 
   describe "complex expressions" do
