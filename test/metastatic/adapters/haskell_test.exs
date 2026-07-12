@@ -417,25 +417,31 @@ defmodule Metastatic.Adapters.HaskellTest do
     test "parses and transforms integer literal" do
       {:ok, ast} = Haskell.parse("42")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:literal, [subtype: :integer], 42} = meta_ast
+      assert {:literal, meta, 42} = meta_ast
+      assert Keyword.get(meta, :subtype) == :integer
     end
 
     test "parses and transforms arithmetic" do
       {:ok, ast} = Haskell.parse("5 + 3")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:binary_op, [category: :arithmetic, operator: :+], _children} = meta_ast
+      assert {:binary_op, meta, _children} = meta_ast
+      assert Keyword.get(meta, :category) == :arithmetic
+      assert Keyword.get(meta, :operator) == :+
     end
 
     test "parses and transforms function application" do
       {:ok, ast} = Haskell.parse("f x")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:function_call, [name: "f"], _args} = meta_ast
+      assert {:function_call, meta, _args} = meta_ast
+      assert Keyword.get(meta, :name) == "f"
     end
 
     test "parses and transforms lambda" do
       {:ok, ast} = Haskell.parse("\\x -> x + 1")
       assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
-      assert {:lambda, [params: [{:param, [], "x"}], captures: []], _body} = meta_ast
+      assert {:lambda, meta, _body} = meta_ast
+      assert Keyword.get(meta, :params) == [{:param, [], "x"}]
+      assert Keyword.get(meta, :captures) == []
     end
   end
 
