@@ -73,11 +73,19 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
 
     # Check if script exists
     if File.exists?(script_full_path) do
-      temp_path = Path.join(System.tmp_dir!(), "metastatic_rb_#{System.unique_integer([:positive, :monotonic])}.txt")
+      temp_path =
+        Path.join(
+          System.tmp_dir!(),
+          "metastatic_rb_#{System.unique_integer([:positive, :monotonic])}.txt"
+        )
+
       File.write!(temp_path, input)
 
       try do
-        case System.cmd("bundle", ["exec", "ruby", Path.basename(script_full_path), temp_path], cd: script_dir, stderr_to_stdout: true) do
+        case System.cmd("bundle", ["exec", "ruby", Path.basename(script_full_path), temp_path],
+               cd: script_dir,
+               stderr_to_stdout: true
+             ) do
           {output, 0} ->
             # Filter out parser version warnings from output
             clean_output = filter_warnings(output)

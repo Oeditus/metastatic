@@ -20,11 +20,19 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    temp_path = Path.join(System.tmp_dir!(), "metastatic_hs_#{System.unique_integer([:positive, :monotonic])}.txt")
+    temp_path =
+      Path.join(
+        System.tmp_dir!(),
+        "metastatic_hs_#{System.unique_integer([:positive, :monotonic])}.txt"
+      )
+
     File.write!(temp_path, source)
 
     try do
-      case System.cmd("stack", ["exec", "parser", "--", temp_path], cd: @parser_dir, stderr_to_stdout: true) do
+      case System.cmd("stack", ["exec", "parser", "--", temp_path],
+             cd: @parser_dir,
+             stderr_to_stdout: true
+           ) do
         {output, 0} ->
           handle_parser_output(output)
 

@@ -217,6 +217,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
         {new_v, acc_o} = canonicalize_vars(v, acc_i)
         {{k, new_v}, acc_o}
       end)
+
     {Map.new(list), acc_o}
   end
 
@@ -225,6 +226,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
       tuple
       |> Tuple.to_list()
       |> canonicalize_vars(acc)
+
     {List.to_tuple(list), acc_o}
   end
 

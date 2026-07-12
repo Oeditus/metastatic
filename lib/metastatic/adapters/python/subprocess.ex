@@ -81,7 +81,12 @@ defmodule Metastatic.Adapters.Python.Subprocess do
 
     # Check if script exists
     if File.exists?(script_full_path) do
-      temp_path = Path.join(System.tmp_dir!(), "metastatic_py_#{System.unique_integer([:positive, :monotonic])}.txt")
+      temp_path =
+        Path.join(
+          System.tmp_dir!(),
+          "metastatic_py_#{System.unique_integer([:positive, :monotonic])}.txt"
+        )
+
       File.write!(temp_path, input)
 
       try do
