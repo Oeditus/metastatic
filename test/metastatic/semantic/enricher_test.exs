@@ -1,7 +1,19 @@
 defmodule Metastatic.Semantic.EnricherTest do
   use ExUnit.Case, async: false
 
-  alias Metastatic.Semantic.{Callbacks, Domains.Database, Enricher, OpKind, Patterns}
+  alias Metastatic.Semantic.{
+    Callbacks,
+    Domains.Auth,
+    Domains.Cache,
+    Domains.Database,
+    Domains.ExternalApi,
+    Domains.File,
+    Domains.Http,
+    Domains.Queue,
+    Enricher,
+    OpKind,
+    Patterns
+  }
 
   # Ensure patterns and callbacks are registered before each test.
   # Uses `setup` (not `setup_all`) because persistent_term state
@@ -9,6 +21,12 @@ defmodule Metastatic.Semantic.EnricherTest do
   setup do
     Patterns.clear_all()
     Database.register_all()
+    Auth.register_all()
+    Http.register_all()
+    Cache.register_all()
+    Queue.register_all()
+    File.register_all()
+    ExternalApi.register_all()
     Callbacks.clear()
     Callbacks.register_builtins()
     :ok
@@ -556,6 +574,31 @@ defmodule Metastatic.Semantic.EnricherTest do
       assert OpKind.write?(domain: :db, operation: :update)
       assert OpKind.write?(domain: :db, operation: :delete)
       assert not OpKind.write?(domain: :db, operation: :retrieve)
+    end
+  end
+
+  describe "enrich/2 - Multi-domain patterns" do
+    test "enriches Guardian.Plug.sign_in (auth)" do
+      node = function_call("Guardian.Plug.sign_in", [variable("conn"), variable("user")])
+      enriched = Enricher.enrich(node, :elixir)
+
+      op_kind = Keyword.get(elem(enriched, 1), :op_kind)
+      assert op_kind != nil
+      assert Keyword.get(op_kind, :domain) == :auth
+      assert Keyword.get(op_kind, :operation) == :login
+      assert Keyword.get(op_kind, :framework) == :guardian
+    end
+
+    test "enriches HTTPoison.get (http)" do
+      node = function_call("HTTPoison.get", [literal(:string, "https://example.com")])
+      enriched = Enricher.enrich(node, :elixir)
+
+      op_kind = Keyword.get(elem(enriched, 1), :op_kind)
+      assert op_kind != nil
+      assert Keyword.get(op_kind, :domain) == :http
+      assert Keyword.get(op_kind, :operation) == :get
+      assert Keyword.get(op_kind, :framework) == :httpoison
+      assert Keyword.get(op_kind, :target) == "https://example.com"
     end
   end
 end

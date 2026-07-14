@@ -7,6 +7,8 @@ defmodule Metastatic.Application do
 
   @impl true
   def start(_type, _args) do
+    Metastatic.Cache.init()
+
     children = [
       # Adapter registry for managing language adapters
       Metastatic.Adapter.Registry,

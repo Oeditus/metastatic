@@ -334,10 +334,18 @@ defmodule Metastatic.Adapter do
   """
   @spec abstract(module(), source, atom()) :: {:ok, Document.t()} | {:error, term()}
   def abstract(adapter, source, language) do
-    with {:ok, native_ast} <- adapter.parse(source),
-         {:ok, meta_ast, metadata} <- adapter.to_meta(native_ast) do
-      doc = Document.new(meta_ast, language, metadata, source)
-      {:ok, doc}
+    case Metastatic.Cache.get(adapter, source) do
+      {:ok, meta_ast, metadata} ->
+        doc = Document.new(meta_ast, language, metadata, source)
+        {:ok, doc}
+
+      {:error, :not_found} ->
+        with {:ok, native_ast} <- adapter.parse(source),
+             {:ok, meta_ast, metadata} <- adapter.to_meta(native_ast) do
+          Metastatic.Cache.put(adapter, source, meta_ast, metadata)
+          doc = Document.new(meta_ast, language, metadata, source)
+          {:ok, doc}
+        end
     end
   end
 

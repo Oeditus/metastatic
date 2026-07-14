@@ -11,15 +11,20 @@ defmodule Metastatic.Benchmarks.ASTBench do
     IO.puts("\n=== MetaAST Core Operations Benchmarks ===\n")
 
     # Sample ASTs of varying complexity
-    simple_ast = {:literal, :integer, 42}
+    simple_ast = {:literal, [subtype: :integer], 42}
 
     medium_ast =
-      {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}}
+      {:binary_op, [category: :arithmetic, operator: :+],
+       [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
 
     complex_ast =
-      {:binary_op, :arithmetic, :+,
-       {:binary_op, :arithmetic, :*, {:variable, "x"}, {:literal, :integer, 2}},
-       {:binary_op, :arithmetic, :/, {:variable, "y"}, {:literal, :integer, 3}}}
+      {:binary_op, [category: :arithmetic, operator: :+],
+       [
+         {:binary_op, [category: :arithmetic, operator: :*],
+          [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]},
+         {:binary_op, [category: :arithmetic, operator: :/],
+          [{:variable, [], "y"}, {:literal, [subtype: :integer], 3}]}
+       ]}
 
     deep_ast = build_deep_ast(10)
 
@@ -53,7 +58,7 @@ defmodule Metastatic.Benchmarks.ASTBench do
 
     Enum.each(results, fn {name, time_us, ops_per_sec} ->
       IO.puts(
-        "| #{String.pad_trailing(name, 35)} | #{:io_lib.format("~8.2f", [time_us])} | #{:io_lib.format("~10.0f", [ops_per_sec])} |"
+        "| #{String.pad_trailing(name, 35)} | #{:io_lib.format("~8.2f", [time_us])} | #{:io_lib.format("~10w", [round(ops_per_sec)])} |"
       )
     end)
 
@@ -65,10 +70,11 @@ defmodule Metastatic.Benchmarks.ASTBench do
   end
 
   # Build a deeply nested AST for stress testing
-  defp build_deep_ast(0), do: {:literal, :integer, 1}
+  defp build_deep_ast(0), do: {:literal, [subtype: :integer], 1}
 
   defp build_deep_ast(depth) do
-    {:binary_op, :arithmetic, :+, build_deep_ast(depth - 1), {:literal, :integer, depth}}
+    {:binary_op, [category: :arithmetic, operator: :+],
+     [build_deep_ast(depth - 1), {:literal, [subtype: :integer], depth}]}
   end
 end
 

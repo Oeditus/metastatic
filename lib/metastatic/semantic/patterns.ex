@@ -137,8 +137,12 @@ defmodule Metastatic.Semantic.Patterns do
 
   # Get all patterns applicable to a language (from all domains)
   defp get_patterns_for_language(language) do
-    # Currently only :db domain
-    get_patterns(:db, language) ++ get_patterns(:db, :all)
+    domains = [:db, :http, :auth, :cache, :queue, :file, :external_api]
+
+    Enum.flat_map(domains, fn domain ->
+      (get_patterns(domain, language) ++ get_patterns(domain, :all))
+      |> Enum.map(fn {pattern, spec} -> {pattern, Map.put(spec, :domain, domain)} end)
+    end)
   end
 
   # Check if function name matches a pattern
@@ -175,8 +179,9 @@ defmodule Metastatic.Semantic.Patterns do
   # Build OpKind from pattern spec and arguments
   defp build_op_kind(spec, args, receiver) do
     target = extract_target(spec.extract_target, args, receiver)
+    domain = Map.get(spec, :domain, :db)
 
-    OpKind.new(:db, spec.operation,
+    OpKind.new(domain, spec.operation,
       target: target,
       framework: spec[:framework],
       async: spec[:async] || false

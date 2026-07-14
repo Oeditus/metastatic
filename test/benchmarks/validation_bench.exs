@@ -11,10 +11,13 @@ defmodule Metastatic.Benchmarks.ValidationBench do
     IO.puts("\n=== MetaAST Validation Benchmarks ===\n")
 
     # Sample documents
-    simple_doc = create_doc({:literal, :integer, 42})
+    simple_doc = create_doc({:literal, [subtype: :integer], 42})
 
     medium_doc =
-      create_doc({:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}})
+      create_doc(
+        {:binary_op, [category: :arithmetic, operator: :+],
+         [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]}
+      )
 
     complex_doc = create_doc(build_complex_ast())
     deep_doc = create_doc(build_deep_ast(15))
@@ -62,7 +65,7 @@ defmodule Metastatic.Benchmarks.ValidationBench do
 
     Enum.each(results, fn {name, time_us, ops_per_sec} ->
       IO.puts(
-        "| #{String.pad_trailing(name, 35)} | #{:io_lib.format("~8.2f", [time_us])} | #{:io_lib.format("~10.0f", [ops_per_sec])} |"
+        "| #{String.pad_trailing(name, 35)} | #{:io_lib.format("~8.2f", [time_us])} | #{:io_lib.format("~10w", [round(ops_per_sec)])} |"
       )
     end)
 
@@ -83,18 +86,25 @@ defmodule Metastatic.Benchmarks.ValidationBench do
   end
 
   defp build_complex_ast do
-    {:conditional, {:binary_op, :comparison, :>, {:variable, "x"}, {:literal, :integer, 10}},
-     {:block,
-      [
-        {:binary_op, :arithmetic, :+, {:variable, "y"}, {:literal, :integer, 1}},
-        {:function_call, {:variable, "print"}, [{:variable, "y"}]}
-      ]}, {:block, [{:early_return, {:literal, :integer, 0}}]}}
+    {:conditional, [],
+     [
+       {:binary_op, [category: :comparison, operator: :>],
+        [{:variable, [], "x"}, {:literal, [subtype: :integer], 10}]},
+       {:block, [],
+        [
+          {:binary_op, [category: :arithmetic, operator: :+],
+           [{:variable, [], "y"}, {:literal, [subtype: :integer], 1}]},
+          {:function_call, [name: "print"], [{:variable, [], "y"}]}
+        ]},
+       {:block, [], [{:early_return, [], [{:literal, [subtype: :integer], 0}]}]}
+     ]}
   end
 
-  defp build_deep_ast(0), do: {:literal, :integer, 1}
+  defp build_deep_ast(0), do: {:literal, [subtype: :integer], 1}
 
   defp build_deep_ast(depth) do
-    {:binary_op, :arithmetic, :+, build_deep_ast(depth - 1), {:literal, :integer, depth}}
+    {:binary_op, [category: :arithmetic, operator: :+],
+     [build_deep_ast(depth - 1), {:literal, [subtype: :integer], depth}]}
   end
 end
 
