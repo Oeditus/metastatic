@@ -99,25 +99,26 @@ defmodule Metastatic.Adapters.Erlang do
 
   @impl true
   def parse(source) when is_binary(source) do
-    # Erlang parsing pipeline:
-    # 1. Tokenize with :erl_scan
-    # 2. Parse expressions with :erl_parse
-    charlist = String.to_charlist(source)
+    if Code.ensure_loaded?(:erl_scan) and Code.ensure_loaded?(:erl_parse) do
+      charlist = String.to_charlist(source)
 
-    with {:ok, tokens, _} <- :erl_scan.string(charlist),
-         {:ok, exprs} <- :erl_parse.parse_exprs(tokens) do
-      # For single expression, return it directly
-      # For multiple expressions, return as list
-      case exprs do
-        [single] -> {:ok, single}
-        multiple -> {:ok, {:block, multiple}}
+      with {:ok, tokens, _} <- :erl_scan.string(charlist),
+           {:ok, exprs} <- :erl_parse.parse_exprs(tokens) do
+        # For single expression, return it directly
+        # For multiple expressions, return as list
+        case exprs do
+          [single] -> {:ok, single}
+          multiple -> {:ok, {:block, multiple}}
+        end
+      else
+        {:error, {_line, _module, reason}, _} ->
+          {:error, "Syntax error: #{inspect(reason)}"}
+
+        {:error, {_line, _module, reason}} ->
+          {:error, "Parse error: #{inspect(reason)}"}
       end
     else
-      {:error, {_line, _module, reason}, _} ->
-        {:error, "Syntax error: #{inspect(reason)}"}
-
-      {:error, {_line, _module, reason}} ->
-        {:error, "Parse error: #{inspect(reason)}"}
+      {:error, "Erlang parser unavailable"}
     end
   end
 

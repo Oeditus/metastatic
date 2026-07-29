@@ -21,21 +21,27 @@ defmodule Metastatic.Adapters.Python.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
-    case run_python_script(@parser_path, source) do
-      {:ok, result} ->
-        case Jason.decode(result) do
-          {:ok, %{"ok" => true, "ast" => ast}} ->
-            {:ok, ast}
+    script_full_path = Path.join(File.cwd!(), @parser_path)
 
-          {:ok, %{"ok" => false, "error" => error}} ->
-            {:error, format_error(error)}
+    if File.exists?(script_full_path) and System.find_executable("python3") != nil do
+      case run_python_script(@parser_path, source) do
+        {:ok, result} ->
+          case Jason.decode(result) do
+            {:ok, %{"ok" => true, "ast" => ast}} ->
+              {:ok, ast}
 
-          {:error, reason} ->
-            {:error, "JSON decode failed: #{inspect(reason)}"}
-        end
+            {:ok, %{"ok" => false, "error" => error}} ->
+              {:error, format_error(error)}
 
-      {:error, reason} ->
-        {:error, "Python process failed: #{inspect(reason)}"}
+            {:error, reason} ->
+              {:error, "JSON decode failed: #{inspect(reason)}"}
+          end
+
+        {:error, reason} ->
+          {:error, "Python process failed: #{inspect(reason)}"}
+      end
+    else
+      {:error, "Python parser unavailable"}
     end
   end
 

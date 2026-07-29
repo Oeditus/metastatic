@@ -21,24 +21,30 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
-    case run_ruby_script(@parser_path, source) do
-      {:ok, result} ->
-        case Jason.decode(result) do
-          {:ok, %{"status" => "ok", "ast" => nil}} ->
-            {:error, "Parse error: syntax error"}
+    script_full_path = Path.join(File.cwd!(), @parser_path)
 
-          {:ok, %{"status" => "ok", "ast" => ast}} ->
-            {:ok, ast}
+    if File.exists?(script_full_path) and System.find_executable("bundle") != nil do
+      case run_ruby_script(@parser_path, source) do
+        {:ok, result} ->
+          case Jason.decode(result) do
+            {:ok, %{"status" => "ok", "ast" => nil}} ->
+              {:error, "Parse error: syntax error"}
 
-          {:ok, %{"status" => "error", "error" => error}} ->
-            {:error, format_error(error)}
+            {:ok, %{"status" => "ok", "ast" => ast}} ->
+              {:ok, ast}
 
-          {:error, reason} ->
-            {:error, "JSON decode failed: #{inspect(reason)}"}
-        end
+            {:ok, %{"status" => "error", "error" => error}} ->
+              {:error, format_error(error)}
 
-      {:error, reason} ->
-        {:error, "Ruby process failed: #{inspect(reason)}"}
+            {:error, reason} ->
+              {:error, "JSON decode failed: #{inspect(reason)}"}
+          end
+
+        {:error, reason} ->
+          {:error, "Ruby process failed: #{inspect(reason)}"}
+      end
+    else
+      {:error, "Ruby parser unavailable"}
     end
   end
 

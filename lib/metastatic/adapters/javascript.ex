@@ -43,7 +43,11 @@ defmodule Metastatic.Adapters.JavaScript do
   """
   @impl true
   def parse(source) when is_binary(source) do
-    ToMeta.parse(source)
+    if Code.ensure_loaded?(ToMeta) do
+      ToMeta.parse(source)
+    else
+      {:error, "JavaScript parser unavailable"}
+    end
   end
 
   @doc """
