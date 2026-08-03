@@ -123,13 +123,13 @@ defmodule Metastatic.CacheTest do
   test "ETS capacity eviction resets cache when max capacity reached" do
     # Artificially insert max capacity entries to trigger flush
     for i <- 1..2_001 do
-      Metastatic.Cache.ETS.put(ElixirAdapter, "source_#{i}", {:node, [], []}, %{})
+      Cache.ETS.put(ElixirAdapter, "source_#{i}", {:node, [], []}, %{})
     end
 
     # After capacity flush, old entry from first batch should be deleted
-    assert Metastatic.Cache.ETS.get(ElixirAdapter, "source_1") == {:error, :not_found}
+    assert Cache.ETS.get(ElixirAdapter, "source_1") == {:error, :not_found}
     # Newest entry remains inserted after flush
-    assert Metastatic.Cache.ETS.get(ElixirAdapter, "source_2001") == {:ok, {:node, [], []}, %{}}
+    assert Cache.ETS.get(ElixirAdapter, "source_2001") == {:ok, {:node, [], []}, %{}}
   end
 
   test "DLLB backend returns :not_found / :ok gracefully when Dllb is disabled" do
