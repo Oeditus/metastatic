@@ -62,7 +62,7 @@ defmodule Metastatic.MixProject do
       {:jason, "~> 1.4"},
       {:ex_panda, "~> 0.2"},
       {:typle, "~> 0.3", optional: true},
-      {:dllb, "~> 0.1", optional: true},
+      {:dllb, "~> 0.1", optional: true, only: [:test]},
 
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
