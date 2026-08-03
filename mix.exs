@@ -2,7 +2,7 @@ defmodule Metastatic.MixProject do
   use Mix.Project
 
   @app :metastatic
-  @version "0.26.1"
+  @version "0.27.0"
   @source_url "https://github.com/Oeditus/metastatic"
 
   def project do
@@ -62,7 +62,7 @@ defmodule Metastatic.MixProject do
       {:jason, "~> 1.4"},
       {:ex_panda, "~> 0.2"},
       {:typle, "~> 0.3", optional: true},
-      {:dllb, "~> 0.1", optional: true, runtime: false},
+      {:dllb, "~> 0.1", optional: true},
 
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
