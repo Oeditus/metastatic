@@ -62,6 +62,7 @@ defmodule Metastatic.MixProject do
       {:jason, "~> 1.4"},
       {:ex_panda, "~> 0.2"},
       {:typle, "~> 0.3", optional: true},
+      {:dllb, "~> 0.1", optional: true, runtime: false},
 
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
@@ -160,7 +161,10 @@ defmodule Metastatic.MixProject do
         Metastatic.AST,
         Metastatic.Document,
         Metastatic.Builder,
-        Metastatic.Validator
+        Metastatic.Validator,
+        Metastatic.Cache,
+        Metastatic.Cache.ETS,
+        Metastatic.Cache.DLLB
       ],
       CLI: [
         Metastatic.CLI,

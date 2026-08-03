@@ -1,41 +1,70 @@
 defmodule Metastatic.Cache do
   @moduledoc """
-  AST Caching layer for Metastatic.
+  AST Caching behaviour and dispatcher for Metastatic.
 
   Caches the results of parsing and abstracting source code to MetaAST (M2).
-  Uses a public ETS table for high-performance memory cache.
+  Supports multiple backends (ETS, DLLB), configured via `:metastatic, :cache`.
+
+  Default backend is `:ets`.
   """
 
-  @table :metastatic_ast_cache
+  @callback init() :: :ok
+  @callback get(adapter :: module(), source :: String.t()) ::
+              {:ok, term(), map()} | {:error, :not_found}
+  @callback put(adapter :: module(), source :: String.t(), meta_ast :: term(), metadata :: map()) ::
+              :ok
+  @callback clear() :: :ok
 
   @doc """
-  Initialize the cache ETS table.
+  Return the configured cache implementation module.
+
+  Options for `:metastatic, :cache` are:
+  - `:ets` (default) -> `Metastatic.Cache.ETS`
+  - `:dllb` -> `Metastatic.Cache.DLLB`
+  - A module implementing `Metastatic.Cache`
+  """
+  @spec impl() :: module()
+  def impl do
+    case Application.get_env(:metastatic, :cache, :ets) do
+      :ets ->
+        Metastatic.Cache.ETS
+
+      :dllb ->
+        Metastatic.Cache.DLLB
+
+      Metastatic.Cache.ETS ->
+        Metastatic.Cache.ETS
+
+      Metastatic.Cache.DLLB ->
+        Metastatic.Cache.DLLB
+
+      Metastatic.Cache.Dllb ->
+        Metastatic.Cache.DLLB
+
+      mod when is_atom(mod) ->
+        mod
+
+      other ->
+        raise ArgumentError,
+              "Invalid cache configuration: #{inspect(other)}. Expected :ets or :dllb"
+    end
+  end
+
+  @doc """
+  Initialize the active cache backend.
   Called automatically during application startup.
   """
   @spec init() :: :ok
   def init do
-    if :ets.info(@table) == :undefined do
-      :ets.new(@table, [:set, :public, :named_table, read_concurrency: true])
-    end
-
-    :ok
+    impl().init()
   end
 
   @doc """
   Get cached abstraction result (MetaAST + Metadata) for a source code string and language.
-
-  Returns `{:ok, meta_ast, metadata}` if found, or `{:error, :not_found}`.
   """
   @spec get(module(), String.t()) :: {:ok, term(), map()} | {:error, :not_found}
   def get(adapter, source) do
-    # Ensure table exists
-    init()
-    hash = :erlang.md5(source)
-
-    case :ets.lookup(@table, {adapter, hash}) do
-      [{_, meta_ast, metadata}] -> {:ok, meta_ast, metadata}
-      [] -> {:error, :not_found}
-    end
+    impl().get(adapter, source)
   end
 
   @doc """
@@ -43,22 +72,14 @@ defmodule Metastatic.Cache do
   """
   @spec put(module(), String.t(), term(), map()) :: :ok
   def put(adapter, source, meta_ast, metadata) do
-    # Ensure table exists
-    init()
-    hash = :erlang.md5(source)
-    :ets.insert(@table, {{adapter, hash}, meta_ast, metadata})
-    :ok
+    impl().put(adapter, source, meta_ast, metadata)
   end
 
   @doc """
-  Clear all cached entries.
+  Clear all cached entries from the active cache backend.
   """
   @spec clear() :: :ok
   def clear do
-    if :ets.info(@table) != :undefined do
-      :ets.delete_all_objects(@table)
-    end
-
-    :ok
+    impl().clear()
   end
 end

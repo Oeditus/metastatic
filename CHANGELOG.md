@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Refactored -- Cache Behaviour & Backend Pluggability
+- **`Metastatic.Cache` Behaviour** -- replaced inline `if_dllb_available` checkers in `Metastatic.Cache` with a pluggable behaviour (`init/0`, `get/2`, `put/4`, `clear/0`) and facade dispatcher.
+- **Cache Backends** -- added `Metastatic.Cache.ETS` (default ETS memory cache) and `Metastatic.Cache.DLLB` (`Dllb` database cache).
+- **Configuration & Dependencies** -- added optional `:dllb` dependency (`runtime: false`) and introduced `:metastatic, :cache` config option accepting `:ets` (default) or `:dllb`.
+
 ### Added -- Cure v0.20.0 catch-up
 - **`:bin_segment` (M2.1 Core)** -- new node type for a single element of
   a bitstring literal / pattern (`<<value::type-size(n)-unit(u)-sign-endian>>`).
