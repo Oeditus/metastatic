@@ -25,12 +25,19 @@ defmodule Metastatic.Cache do
   """
   @spec impl() :: module()
   def impl do
-    case Application.get_env(:metastatic, :cache, :ets) do
+    case Application.get_env(:metastatic, :cache, :auto) do
       :ets ->
         Metastatic.Cache.ETS
 
       :dllb ->
         Metastatic.Cache.DLLB
+
+      :auto ->
+        if dllb_available?() do
+          Metastatic.Cache.DLLB
+        else
+          Metastatic.Cache.ETS
+        end
 
       Metastatic.Cache.ETS ->
         Metastatic.Cache.ETS
@@ -46,8 +53,19 @@ defmodule Metastatic.Cache do
 
       other ->
         raise ArgumentError,
-              "Invalid cache configuration: #{inspect(other)}. Expected :ets or :dllb"
+              "Invalid cache configuration: #{inspect(other)}. Expected :ets, :dllb, or :auto"
     end
+  end
+
+  # credo:disable-for-lines:8
+  defp dllb_available? do
+    Application.get_env(:dllb, :enabled, false) &&
+      Code.ensure_loaded?(Dllb) &&
+      match?({:ok, _}, apply(Dllb, :query, ["SELECT 1"]))
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
   end
 
   @doc """

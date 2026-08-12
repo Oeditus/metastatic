@@ -735,6 +735,9 @@ defmodule Metastatic.AST do
     # Destructure again in case pre modified the node
     {type, meta, children} = ast
 
+    # Traverse meta values containing nodes/keyword structures
+    {meta, acc} = traverse_meta(meta, acc, pre, post)
+
     # Traverse children based on node type
     {new_children, acc} = traverse_children(type, children, acc, pre, post)
 
@@ -750,6 +753,49 @@ defmodule Metastatic.AST do
     {other, acc} = pre.(other, acc)
     post.(other, acc)
   end
+
+  # Traverse keyword metadata values for subterm nodes
+  defp traverse_meta(meta, acc, pre, post) when is_list(meta) do
+    if Keyword.keyword?(meta) do
+      Enum.map_reduce(meta, acc, fn {key, val}, acc ->
+        {new_val, acc} = traverse_meta_val(val, acc, pre, post)
+        {{key, new_val}, acc}
+      end)
+    else
+      {meta, acc}
+    end
+  end
+
+  defp traverse_meta(meta, acc, _pre, _post), do: {meta, acc}
+
+  defp traverse_meta_val({type, meta, _} = node, acc, pre, post)
+       when is_atom(type) and is_list(meta) and tuple_size(node) == 3 do
+    do_traverse(node, acc, pre, post)
+  end
+
+  defp traverse_meta_val(list, acc, pre, post) when is_list(list) do
+    cond do
+      Keyword.keyword?(list) ->
+        Enum.map_reduce(list, acc, fn {k, v}, acc ->
+          {new_v, acc} = traverse_meta_val(v, acc, pre, post)
+          {{k, new_v}, acc}
+        end)
+
+      Enum.any?(list, &hides_meta_node?/1) ->
+        Enum.map_reduce(list, acc, fn item, acc ->
+          traverse_meta_val(item, acc, pre, post)
+        end)
+
+      true ->
+        {list, acc}
+    end
+  end
+
+  defp traverse_meta_val(other, acc, _pre, _post), do: {other, acc}
+
+  defp hides_meta_node?({type, meta, _}) when is_atom(type) and is_list(meta), do: true
+  defp hides_meta_node?(list) when is_list(list), do: Enum.any?(list, &hides_meta_node?/1)
+  defp hides_meta_node?(_), do: false
 
   # Traverse children based on node type
   # :literal nodes with a bin_segment list payload (Cure v0.20.0+) are

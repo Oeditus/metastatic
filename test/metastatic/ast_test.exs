@@ -877,4 +877,32 @@ defmodule Metastatic.ASTTest do
       assert count == 1
     end
   end
+
+  describe "meta-slot subterm traversal" do
+    test "traverse descends subterms stored in meta values" do
+      param_type = {:variable, [line: 1], "Int"}
+      param = {:param, [type: param_type], "x"}
+      return_type = {:variable, [line: 1], "Bool"}
+      body = {:literal, [subtype: :boolean], true}
+
+      func =
+        {:function_def,
+         [
+           name: "is_valid",
+           params: [param],
+           return_type: return_type
+         ], [body]}
+
+      {_, tags} =
+        AST.prewalk(func, [], fn
+          {tag, meta, _} = node, acc when is_atom(tag) and is_list(meta) ->
+            {node, [tag | acc]}
+
+          other, acc ->
+            {other, acc}
+        end)
+
+      assert Enum.reverse(tags) == [:function_def, :param, :variable, :variable, :literal]
+    end
+  end
 end

@@ -148,12 +148,23 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
   end
 
   def normalize({:function_def, meta, body}) when is_list(body) do
-    meta = meta |> to_keyword_list() |> normalize_params_meta()
+    meta =
+      meta
+      |> to_keyword_list()
+      |> normalize_params_meta()
+      |> normalize_meta_value(:return_type, &normalize/1)
+      |> normalize_meta_value(:for_type, &normalize/1)
+
     {:function_def, meta, Enum.map(body, &normalize/1)}
   end
 
   def normalize({:lambda, meta, body}) when is_list(body) do
-    meta = meta |> to_keyword_list() |> normalize_params_meta()
+    meta =
+      meta
+      |> to_keyword_list()
+      |> normalize_params_meta()
+      |> normalize_meta_value(:return_type, &normalize/1)
+
     {:lambda, meta, Enum.map(body, &normalize/1)}
   end
 
@@ -172,10 +183,27 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
   end
 
   def normalize({type, meta, children}) when is_atom(type) and is_list(children) do
-    {type, to_keyword_list(meta), Enum.map(children, &normalize/1)}
+    meta =
+      meta
+      |> to_keyword_list()
+      |> normalize_meta_value(:type, &normalize/1)
+      |> normalize_meta_value(:return_type, &normalize/1)
+      |> normalize_meta_value(:pattern, &normalize/1)
+      |> normalize_meta_value(:guard, &normalize/1)
+      |> normalize_meta_value(:for_type, &normalize/1)
+
+    {type, meta, Enum.map(children, &normalize/1)}
   end
 
   def normalize({type, meta, value}) when is_atom(type) and is_list(meta) do
+    meta =
+      meta
+      |> normalize_meta_value(:type, &normalize/1)
+      |> normalize_meta_value(:return_type, &normalize/1)
+      |> normalize_meta_value(:pattern, &normalize/1)
+      |> normalize_meta_value(:guard, &normalize/1)
+      |> normalize_meta_value(:for_type, &normalize/1)
+
     {type, meta, value}
   end
 
