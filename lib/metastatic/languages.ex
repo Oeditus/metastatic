@@ -32,7 +32,9 @@ defmodule Metastatic.Languages do
     elixir: Metastatic.Adapters.Elixir,
     erlang: Metastatic.Adapters.Erlang,
     ruby: Metastatic.Adapters.Ruby,
-    haskell: Metastatic.Adapters.Haskell
+    haskell: Metastatic.Adapters.Haskell,
+    javascript: Metastatic.Adapters.JavaScript,
+    typescript: Metastatic.Adapters.TypeScript
   }
 
   # ── Derived at compile time ─────────────────────────────────────────

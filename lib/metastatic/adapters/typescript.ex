@@ -1,9 +1,9 @@
-defmodule Metastatic.Adapters.JavaScript do
+defmodule Metastatic.Adapters.TypeScript do
   @moduledoc """
-  JavaScript language adapter for MetaAST transformations.
+  TypeScript language adapter for MetaAST transformations.
 
-  Bridges between JavaScript AST (M1 via Babel) and MetaAST (M2), enabling cross-language
-  code analysis, transformation, and round-trip code generation for JS/ES6+/JSX source code.
+  Bridges between TypeScript AST (M1 via Babel TS) and MetaAST (M2), preserving
+  type annotations in metadata while enabling cross-language code analysis.
   """
 
   @behaviour Metastatic.Adapter
@@ -17,10 +17,10 @@ defmodule Metastatic.Adapters.JavaScript do
   end
 
   @impl true
-  def to_meta(js_ast) do
-    case ToMeta.transform(js_ast) do
+  def to_meta(ts_ast) do
+    case ToMeta.transform(ts_ast) do
       {:ok, meta_ast, metadata} ->
-        enriched_ast = Enricher.enrich_tree(meta_ast, :javascript)
+        enriched_ast = Enricher.enrich_tree(meta_ast, :typescript)
         {:ok, enriched_ast, metadata}
 
       error ->
@@ -34,12 +34,12 @@ defmodule Metastatic.Adapters.JavaScript do
   end
 
   @impl true
-  def unparse(js_ast) do
-    Subprocess.unparse(js_ast)
+  def unparse(ts_ast) do
+    Subprocess.unparse(ts_ast)
   end
 
   @impl true
   def file_extensions do
-    [".js", ".mjs", ".cjs", ".jsx"]
+    [".ts", ".tsx"]
   end
 end

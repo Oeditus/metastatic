@@ -27,3 +27,6 @@ metastatic-*.tar
 /.elixir-tools/
 /.elixir_ls/
 /.erl.history/
+
+# JavaScript parser node_modules
+/priv/parsers/javascript/node_modules/
