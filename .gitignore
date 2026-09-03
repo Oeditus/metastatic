@@ -30,3 +30,4 @@ metastatic-*.tar
 
 # JavaScript parser node_modules
 /priv/parsers/javascript/node_modules/
+/priv/parsers/march/_build/

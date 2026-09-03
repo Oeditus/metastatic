@@ -36,6 +36,15 @@ jobs:
           bundler-cache: true
           working-directory: priv/parsers/ruby
 
+      - name: Set up OCaml
+        uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: 5.x
+
+      - name: Build March OCaml parser
+        run: opam exec -- dune build
+        working-directory: priv/parsers/march
+
       - name: Restore dependencies cache
         uses: actions/cache@v4
         with:

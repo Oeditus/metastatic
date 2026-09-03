@@ -34,7 +34,8 @@ defmodule Metastatic.Languages do
     ruby: Metastatic.Adapters.Ruby,
     haskell: Metastatic.Adapters.Haskell,
     javascript: Metastatic.Adapters.JavaScript,
-    typescript: Metastatic.Adapters.TypeScript
+    typescript: Metastatic.Adapters.TypeScript,
+    march: Metastatic.Adapters.March
   }
 
   # ── Derived at compile time ─────────────────────────────────────────
