@@ -52,30 +52,27 @@ defmodule Metastatic do
       true
   """
 
-  alias Metastatic.{AST, Builder, Document}
+  alias Metastatic.{AST, Builder, Document, Languages}
 
-  @type language :: :elixir | :erlang | :ruby | :haskell | :python
+  @type language :: atom()
   @type meta_ast :: AST.meta_ast()
 
-  @languages ~w|elixir erlang ruby haskell python|a
+  @doc "Returns all supported language atoms."
+  def languages, do: Languages.supported_languages()
 
-  @doc false
-  def languages, do: @languages
+  @doc "Checks if a language atom is supported."
+  def supported?(lang), do: Languages.supported?(lang)
 
-  @doc false
-  def supported?(lang) when lang in @languages, do: true
-  def supported?(_), do: false
+  @doc "Gets the adapter for a supported language."
+  def adapter_for_language(language) do
+    case Languages.get_adapter(language) do
+      {:ok, adapter} ->
+        {:ok, adapter}
 
-  @doc false
-  def adapter_for_language(language)
-
-  for lang <- @languages do
-    mod = Module.concat([Metastatic.Adapters, lang |> Atom.to_string() |> Macro.camelize()])
-    def adapter_for_language(unquote(lang)), do: {:ok, unquote(mod)}
+      {:error, _} ->
+        {:error, {:unsupported_language, "No adapter found for language: #{inspect(language)}"}}
+    end
   end
-
-  def adapter_for_language(lang),
-    do: {:error, {:unsupported_language, "No adapter found for language: #{inspect(lang)}"}}
 
   @doc """
   Convert source code to MetaAST.

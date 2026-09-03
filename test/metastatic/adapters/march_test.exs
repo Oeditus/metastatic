@@ -123,10 +123,11 @@ defmodule Metastatic.Adapters.MarchTest do
       assert AST.conforms?(meta_ast)
 
       assert {:container, _meta, children} = meta_ast
+
       assert Enum.any?(children, fn
-        {:import, meta, []} -> Keyword.get(meta, :import_type) == :needs
-        _ -> false
-      end)
+               {:import, meta, []} -> Keyword.get(meta, :import_type) == :needs
+               _ -> false
+             end)
     end
   end
 

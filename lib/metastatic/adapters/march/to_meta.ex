@@ -228,8 +228,12 @@ defmodule Metastatic.Adapters.March.ToMeta do
 
   defp add_location({tag, meta, children}, node) when is_list(meta) and is_map(node) do
     loc_meta = []
-    loc_meta = if line = Map.get(node, "lineno"), do: Keyword.put(loc_meta, :line, line), else: loc_meta
-    loc_meta = if col = Map.get(node, "col_offset"), do: Keyword.put(loc_meta, :col, col), else: loc_meta
+
+    loc_meta =
+      if line = Map.get(node, "lineno"), do: Keyword.put(loc_meta, :line, line), else: loc_meta
+
+    loc_meta =
+      if col = Map.get(node, "col_offset"), do: Keyword.put(loc_meta, :col, col), else: loc_meta
 
     {tag, loc_meta ++ meta, children}
   end

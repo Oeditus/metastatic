@@ -1,10 +1,30 @@
 defmodule Metastatic.Adapters.CureTest do
   use ExUnit.Case, async: true
 
+  alias Metastatic.Adapters.Cure
   alias Metastatic.Adapters.Cure.{FromMeta, ToMeta}
+  alias Metastatic.Adapters.Cure.Subprocess, as: CureSubProcess
   alias Metastatic.AST
+  alias Metastatic.Languages
 
   doctest Metastatic.Adapters.Cure.ToMeta
+
+  describe "Cure adapter integration" do
+    test "cure adapter is registered in Languages module" do
+      assert {:ok, Cure} == Languages.get_adapter(:cure)
+      assert :cure in Languages.supported_languages()
+    end
+
+    test "detects .cure file extension" do
+      assert {:ok, :cure} == Languages.detect_language("app.cure")
+      assert {:ok, :cure} == Languages.detect_language("lib/math/calculator.cure")
+    end
+
+    test "implements Metastatic.Adapter behaviour" do
+      assert Metastatic.Adapter.valid_adapter?(Cure)
+      assert Cure.file_extensions() == [".cure"]
+    end
+  end
 
   describe "Cure.ToMeta.normalize/1" do
     test "pass-through for bare literals" do
@@ -62,27 +82,22 @@ defmodule Metastatic.Adapters.CureTest do
       assert AST.conforms?(normalised)
     end
 
-    test "from_source returns :cure_not_available when compiler is not linked" do
-      # In the metastatic test suite Cure.Compiler.{Lexer,Parser} are
-      # not present; `available?/0` tells us that up front so the
-      # assertion is unambiguous in either environment. We route the
-      # call through a rebound function reference to hide it from
-      # Elixir's inline type analyser -- otherwise the happy-path
-      # branch would be flagged as unreachable in environments where
-      # Cure is not linked.
-      from_source = Function.capture(ToMeta, :from_source, 1)
-      result = from_source.("42")
+    test "from_source parses Cure source code when compiler is available" do
+      result = Cure.parse("let x = 42")
 
-      # credo:disable-for-lines:10
-      # apply/3 prevents the type analyser from statically resolving
-      # available?/0's return type (false when Cure is not linked) and
-      # flagging the happy-path branch as unreachable.
-      if apply(ToMeta, :available?, []) do
-        assert {:ok, ast, %{language: :cure}} = result
-        assert AST.conforms?(ast)
+      if ToMeta.available?() do
+        assert {:ok, ast} = result
+        assert {:ok, meta_ast, metadata} = Cure.to_meta(ast)
+        assert AST.conforms?(meta_ast)
+        assert metadata.language == :cure
       else
         assert result == {:error, :cure_not_available}
       end
+    end
+
+    test "subprocesses fallback returns unavailable error when no binary or CLI is present" do
+      assert CureSubProcess.parse("let x = 1") ==
+               {:error, "Cure subprocess parser unavailable"}
     end
   end
 
@@ -132,6 +147,19 @@ defmodule Metastatic.Adapters.CureTest do
 
     test "default comment_kind is :line" do
       assert FromMeta.to_source({:comment, [], "plain"}) == "# plain"
+    end
+  end
+
+  describe "Cure AST Reification & Round-Trip" do
+    test "reifies MetaAST back to Cure source" do
+      meta_ast =
+        {:function_def, [name: "add", params: [{:param, [], "a"}, {:param, [], "b"}]],
+         [
+           {:binary_op, [operator: :+], [{:variable, [], "a"}, {:variable, [], "b"}]}
+         ]}
+
+      assert {:ok, source} = Cure.unparse(meta_ast)
+      assert String.contains?(source, "fn add(a, b) = a + b")
     end
   end
 end

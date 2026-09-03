@@ -38,7 +38,7 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
   canonical).
   """
 
-  alias Cure.Compiler.{Lexer, Parser}
+  alias Metastatic.Adapters.Cure.Subprocess, as: CureSubProcess
   alias Metastatic.AST
 
   @typedoc "Opaque Cure source code."
@@ -51,16 +51,97 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
   @type metadata :: map()
 
   @doc """
-  Return `true` if the Cure compiler is linked in at runtime.
-
-  When `false`, `from_source/2` always returns
-  `{:error, :cure_not_available}` and callers should skip the Cure
-  source path (or depend on the Cure compiler explicitly).
+  Return `true` if the Cure compiler is available at runtime.
   """
   @spec available?() :: boolean()
-  case {Code.ensure_compiled(Lexer), Code.ensure_compiled(Parser)} do
-    {{:module, _}, {:module, _}} -> def available?, do: true
-    _ -> def available?, do: false
+  def available? do
+    ensure_cure_compiler() == :ok
+  end
+
+  @doc """
+  Ensure Cure compiler modules are loaded into the VM.
+  Attempts dynamic discovery of Cure ebin directories or escript/executable
+  if Cure is not already loaded.
+  """
+  @spec ensure_cure_compiler() :: :ok | {:error, :cure_not_available}
+  def ensure_cure_compiler do
+    cond do
+      cure_loaded?() ->
+        :ok
+
+      try_load_ebin_paths() ->
+        :ok
+
+      try_load_from_cure_executable() ->
+        :ok
+
+      true ->
+        {:error, :cure_not_available}
+    end
+  end
+
+  defp cure_loaded? do
+    :code.is_loaded(Cure.Compiler.Lexer) != false or
+      (match?({:module, _}, Code.ensure_compiled(Cure.Compiler.Lexer)) and
+         match?({:module, _}, Code.ensure_compiled(Cure.Compiler.Parser)))
+  end
+
+  defp try_load_ebin_paths do
+    possible_paths =
+      [
+        Path.join(File.cwd!(), "_build/#{Mix.env()}/lib/cure/ebin"),
+        Path.join(File.cwd!(), "deps/cure/ebin"),
+        Path.expand("../../Cure/cure/_build/#{Mix.env()}/lib/cure/ebin", File.cwd!()),
+        Path.expand("../../Cure/cure/_build/dev/lib/cure/ebin", File.cwd!())
+      ] ++
+        Path.wildcard(Path.join(File.cwd!(), "_build/*/lib/cure/ebin")) ++
+        Path.wildcard(Path.expand("../../Cure/cure/_build/*/lib/*/ebin", File.cwd!()))
+
+    Enum.each(possible_paths, fn path ->
+      if File.dir?(path) do
+        Code.append_path(path)
+      end
+    end)
+
+    cure_loaded?()
+  end
+
+  defp try_load_from_cure_executable do
+    cure_bin = System.find_executable("cure") || "../../Cure/cure/cure"
+
+    if File.exists?(cure_bin) do
+      try do
+        case :escript.extract(String.to_charlist(cure_bin), []) do
+          {:ok, sections} ->
+            case Keyword.get(sections, :archive) do
+              nil ->
+                false
+
+              zip_bin ->
+                {:ok, files} = :zip.extract(zip_bin, [:memory])
+
+                for {filename, data} <- files do
+                  fname = to_string(filename)
+
+                  if String.ends_with?(fname, ".beam") and
+                       (String.contains?(fname, "Cure") or String.contains?(fname, "cure")) do
+                    mod_name = fname |> Path.basename(".beam") |> String.to_atom()
+                    :code.load_binary(mod_name, String.to_charlist(fname), data)
+                  end
+                end
+
+                cure_loaded?()
+            end
+
+          _ ->
+            false
+        end
+      rescue
+        _ -> false
+      end
+    else
+      false
+    end
   end
 
   # --- Source -> MetaAST -------------------------------------------------
@@ -79,27 +160,32 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
   """
   @spec from_source(source(), keyword()) ::
           {:ok, meta_ast(), metadata()} | {:error, term()}
-  def from_source(source, opts \\ [])
+  def from_source(source, opts \\ []) when is_binary(source) and is_list(opts) do
+    if available?() do
+      preserve_comments? = Keyword.get(opts, :preserve_comments, false)
 
-  case {Code.ensure_compiled(Lexer), Code.ensure_compiled(Parser)} do
-    {{:module, _}, {:module, _}} ->
-      def from_source(source, opts) when is_binary(source) and is_list(opts) do
-        preserve_comments? = Keyword.get(opts, :preserve_comments, false)
-
-        with {:ok, tokens} <-
-               Lexer.tokenize(source,
-                 emit_events: false,
-                 preserve_comments: preserve_comments?
-               ),
-             {:ok, ast} <- Parser.parse(tokens, emit_events: false) do
+      # credo:disable-for-lines:13
+      with {:ok, tokens} <-
+             apply(Cure.Compiler.Lexer, :tokenize, [
+               source,
+               [emit_events: false, preserve_comments: preserve_comments?]
+             ]),
+           {:ok, ast} <-
+             apply(Cure.Compiler.Parser, :parse, [
+               tokens,
+               [emit_events: false]
+             ]) do
+        {:ok, normalize(ast), %{language: :cure}}
+      end
+    else
+      case CureSubProcess.parse(source) do
+        {:ok, ast} ->
           {:ok, normalize(ast), %{language: :cure}}
-        end
-      end
 
-    _ ->
-      def from_source(source, _opts) when is_binary(source) do
-        {:error, :cure_not_available}
+        {:error, _reason} ->
+          {:error, :cure_not_available}
       end
+    end
   end
 
   # --- AST -> MetaAST ----------------------------------------------------

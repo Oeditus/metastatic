@@ -12,9 +12,7 @@ defmodule Metastatic.Adapters.March.FromMeta do
   def transform(meta_ast, metadata \\ %{})
 
   def transform(nodes, metadata) when is_list(nodes) do
-    with {:ok, transformed} <- transform_list(nodes, metadata) do
-      {:ok, transformed}
-    end
+    transform_list(nodes, metadata)
   end
 
   def transform({:block, _meta, statements}, metadata) do

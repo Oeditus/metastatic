@@ -4,32 +4,50 @@ defmodule Metastatic.Adapters.Cure do
 
   Transforms Cure source code to/from MetaAST representation using
   Cure's lexer and parser pipeline.
-
-  ## Usage
-
-      {:ok, doc} = Metastatic.Adapter.abstract(Metastatic.Adapters.Cure, source, :cure)
-      {:ok, source} = Metastatic.Adapter.reify(Metastatic.Adapters.Cure, doc)
   """
 
-  # NOTE: Does not declare @behaviour Metastatic.Adapter because the Cure
-  # compiler modules live in a separate Mix project and are not available
-  # at Metastatic compile time. The adapter is used at runtime only.
+  @behaviour Metastatic.Adapter
 
   alias Metastatic.{Adapters.Cure.FromMeta, Adapters.Cure.ToMeta, Document}
+  alias Metastatic.Semantic.Enricher
+
+  @impl true
+  def parse(source) when is_binary(source) do
+    case ToMeta.from_source(source) do
+      {:ok, ast, _meta} -> {:ok, ast}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def to_meta(cure_ast) do
+    meta_ast = ToMeta.from_ast(cure_ast)
+    enriched_ast = Enricher.enrich_tree(meta_ast, :cure)
+    {:ok, enriched_ast, %{language: :cure}}
+  end
+
+  @impl true
+  def from_meta(meta_ast, metadata \\ %{}) do
+    _ = metadata
+    {:ok, meta_ast}
+  end
+
+  @impl true
+  def unparse(cure_ast) do
+    {:ok, FromMeta.to_source(cure_ast)}
+  end
+
+  @impl true
+  def file_extensions do
+    [".cure"]
+  end
 
   @doc "Parse Cure source code into a MetaAST Document."
   @spec abstract(String.t(), atom(), keyword()) :: {:ok, Document.t()} | {:error, term()}
-  @dialyzer {:nowarn_function, abstract: 3}
   def abstract(source, language \\ :cure, opts \\ [])
 
-  # credo:disable-for-lines:12
   def abstract(source, _language, opts) when is_binary(source) and is_list(opts) do
-    # The `{:ok, ...}` branch is only reachable when the Cure compiler
-    # is linked in at runtime. Using apply/3 prevents the Elixir type
-    # system from statically resolving the return type of from_source/2
-    # and emitting a "pattern will never match" warning for the fallback
-    # clause compiled when the Cure compiler is absent.
-    with {:ok, ast, metadata} <- apply(ToMeta, :from_source, [source, opts]) do
+    with {:ok, ast, metadata} <- ToMeta.from_source(source, opts) do
       {:ok, Document.new(ast, :cure, metadata, source)}
     end
   end
@@ -43,10 +61,13 @@ defmodule Metastatic.Adapters.Cure do
 
   def reify(_), do: {:error, "Not a Cure document"}
 
-  @dialyzer {:nowarn_function, round_trip: 1}
   @doc "Round-trip: parse source to MetaAST, then back to source."
   @spec round_trip(String.t()) :: {:ok, String.t()} | {:error, term()}
   def round_trip(source) do
-    with {:ok, doc} <- abstract(source, :cure), do: reify(doc)
+    with {:ok, ast} <- parse(source),
+         {:ok, meta_ast, metadata} <- to_meta(ast),
+         {:ok, ast2} <- from_meta(meta_ast, metadata) do
+      unparse(ast2)
+    end
   end
 end

@@ -15,8 +15,8 @@ defmodule Mix.Tasks.Metastatic.Translate do
 
   ## Options
 
-  - `--from LANG` - Source language (python, elixir, erlang, ruby, haskell)
-  - `--to LANG` - Target language (python, elixir, erlang, ruby, haskell)
+  - `--from LANG` - Source language (cure, elixir, erlang, haskell, javascript, march, python, ruby, typescript)
+  - `--to LANG` - Target language (cure, elixir, erlang, haskell, javascript, march, python, ruby, typescript)
   - `--output PATH` - Output file or directory (optional for single files)
 
   ## Examples
