@@ -13,7 +13,7 @@ defmodule Metastatic.Adapters.Cure do
 
   @impl true
   def parse(source) when is_binary(source) do
-    case ToMeta.from_source(source) do
+    case ToMeta.from_source(source, preserve_comments: true) do
       {:ok, ast, _meta} -> {:ok, ast}
       {:error, reason} -> {:error, reason}
     end
