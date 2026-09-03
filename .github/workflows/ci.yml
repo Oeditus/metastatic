@@ -40,6 +40,10 @@ jobs:
         uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: 5.x
+          dune-cache: true
+
+      - name: Install Dune
+        run: opam install -y dune
 
       - name: Build March OCaml parser
         run: opam exec -- dune build

@@ -11,17 +11,17 @@ Welcome to Metastatic! This guide will help you get up and running with the deve
 ### Current Status
 Metastatic is production-ready.
 
-- **Language adapters:** Python, Elixir, Erlang, Ruby, Haskell
+- **Language adapters:** Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, TypeScript
 - **Semantic enrichment:** OpKind metadata (DB, HTTP, file, cache, auth, queue, external API)
 - **Mix tasks:** inspect, translate, validate_equivalence, gen.supplemental, supplemental_check
 
 **Current Capabilities:**
-- Parse and transform code across Python, Elixir, Erlang, Ruby, and Haskell
+- Parse and transform code across Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, and TypeScript
 - Cross-language translation and semantic equivalence validation
 - Semantic operation detection via OpKind
 - Supplemental modules for library-specific constructs
 
-For static analysis, see [MetaCredo](https://github.com/Oeditus/metacredo).
+For static analysis and linting, see [MetaCredo](https://github.com/Oeditus/metacredo), an Elixir library that analyzes whatever source code `metastatic` understands.
 
 ### Optional (for extended language support)
 - **Python 3.9+** for Python adapter
@@ -60,12 +60,16 @@ metastatic/
 │       ├── builder.ex              # High-level API
 │       ├── adapter.ex              # Adapter behaviour
 │       ├── validator.ex            # Conformance validation
-│       ├── adapters/               # 5 language adapters
-│       │   ├── python/             # Full Python support
+│       ├── adapters/               # 9 language adapters
+│       │   ├── cure/               # Cure support (in-process + subprocess fallback)
 │       │   ├── elixir/             # Full Elixir support
 │       │   ├── erlang/             # Full Erlang support
+│       │   ├── haskell/            # Full Haskell support
+│       │   ├── javascript/         # Full JavaScript support
+│       │   ├── march/              # March support (OCaml Dune parser bridge)
+│       │   ├── python/             # Full Python support
 │       │   ├── ruby/               # Full Ruby support
-│       │   └── haskell/            # Full Haskell support
+│       │   └── typescript/         # Full TypeScript support
 │       ├── supplemental/           # Cross-language construct support
 │       │   ├── registry.ex         # Supplemental module registry
 │       │   ├── transformer.ex      # Transformation helper

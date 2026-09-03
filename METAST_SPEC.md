@@ -12,9 +12,7 @@ representations are called Abstract Syntax Trees (ASTs). A MetaAST is a
 *universal* AST—a single, language-independent format that captures the
 semantic essence of code regardless of which language it was written in.
 
-This lets you build a tool *once* (say, a complexity analyzer or a mutation
-tester) and run it on Python, Elixir, Ruby, Erlang, and Haskell code without
-modification.
+This lets you build a tool *once* (such as the [MetaCredo](https://github.com/Oeditus/metacredo) cross-language static analysis and linting library) and run it on Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, and TypeScript code without modification.
 
 ### The Analogy
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added & Fixed -- Subprocess Fallback & Comprehensive Language Support
+- **`Metastatic.Adapters.Cure.Subprocess`** -- added CLI / Subprocess fallback parser module for the Cure language adapter, enabling Cure source code parsing via external `cure` CLI binaries when in-process compiler modules (`Cure.Compiler.Lexer` / `Parser`) are unavailable.
+- **Language Delegation in `Metastatic`** -- updated `Metastatic.languages/0`, `Metastatic.supported?/1`, and `Metastatic.adapter_for_language/1` to delegate directly to `Metastatic.Languages` single source of truth, properly exposing all 9 supported languages (`:cure`, `:elixir`, `:erlang`, `:haskell`, `:javascript`, `:march`, `:python`, `:ruby`, `:typescript`).
+- **MetaCredo Cross-Language Integration Docs** -- documented the companion Elixir static analysis and linting library `MetaCredo`, highlighting its ability to analyze and lint any source code understood by `Metastatic`.
+- **Documentation Audit** -- comprehensive updates across `README.md`, `GETTING_STARTED.md`, `METAST_SPEC.md`, and module docs covering March and Cure language adapters.
+
 ### Refactored -- Cache Behaviour & Backend Pluggability
 - **`Metastatic.Cache` Behaviour** -- replaced inline `if_dllb_available` checkers in `Metastatic.Cache` with a pluggable behaviour (`init/0`, `get/2`, `put/4`, `clear/0`) and facade dispatcher.
 - **Cache Backends** -- added `Metastatic.Cache.ETS` (default ETS memory cache) and `Metastatic.Cache.DLLB` (`Dllb` database cache).
