@@ -11,16 +11,16 @@ defmodule Metastatic.Adapters.Cure.Subprocess do
   @doc """
   Parse Cure source code to AST using external subprocess binary or `cure` CLI executable.
   """
-  @spec parse(String.t()) :: {:ok, term()} | {:error, String.t()}
-  def parse(source) when is_binary(source) do
-    bin_full_path = Path.join(File.cwd!(), @parser_bin)
-    cure_cli = System.find_executable("cure")
+  @spec parse(String.t(), keyword()) :: {:ok, term()} | {:error, String.t()}
+  def parse(source, opts \\ []) when is_binary(source) and is_list(opts) do
+    bin_full_path = Keyword.get(opts, :parser_bin, Path.join(File.cwd!(), @parser_bin))
+    cure_cli = Keyword.get_lazy(opts, :cure_cli, fn -> System.find_executable("cure") end)
 
     cond do
-      File.exists?(bin_full_path) ->
+      bin_full_path != nil and File.exists?(bin_full_path) ->
         run_binary(bin_full_path, source)
 
-      cure_cli != nil ->
+      cure_cli != nil and File.exists?(cure_cli) ->
         run_cure_cli(cure_cli, source)
 
       true ->
@@ -31,18 +31,18 @@ defmodule Metastatic.Adapters.Cure.Subprocess do
   @doc """
   Unparse Cure AST back to source code using external subprocess binary or `cure` CLI executable.
   """
-  @spec unparse(term()) :: {:ok, String.t()} | {:error, String.t()}
-  def unparse(ast) do
+  @spec unparse(term(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def unparse(ast, opts \\ []) when is_list(opts) do
     case Jason.encode(ast) do
       {:ok, json} ->
-        bin_full_path = Path.join(File.cwd!(), @parser_bin)
-        cure_cli = System.find_executable("cure")
+        bin_full_path = Keyword.get(opts, :parser_bin, Path.join(File.cwd!(), @parser_bin))
+        cure_cli = Keyword.get_lazy(opts, :cure_cli, fn -> System.find_executable("cure") end)
 
         cond do
-          File.exists?(bin_full_path) ->
+          bin_full_path != nil and File.exists?(bin_full_path) ->
             run_binary_unparse(bin_full_path, json)
 
-          cure_cli != nil ->
+          cure_cli != nil and File.exists?(cure_cli) ->
             run_cure_cli_unparse(cure_cli, json)
 
           true ->

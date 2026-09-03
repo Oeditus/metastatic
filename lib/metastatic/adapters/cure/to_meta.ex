@@ -122,11 +122,18 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
 
                 for {filename, data} <- files do
                   fname = to_string(filename)
+                  mod_str = Path.basename(fname, ".beam")
 
                   if String.ends_with?(fname, ".beam") and
-                       (String.contains?(fname, "Cure") or String.contains?(fname, "cure")) do
-                    mod_name = fname |> Path.basename(".beam") |> String.to_atom()
-                    :code.load_binary(mod_name, String.to_charlist(fname), data)
+                       (String.starts_with?(mod_str, "Elixir.Cure") or
+                          String.starts_with?(mod_str, "Cure")) and
+                       not String.starts_with?(mod_str, "Elixir.Metastatic") and
+                       not String.starts_with?(mod_str, "Metastatic") do
+                    mod_name = String.to_atom(mod_str)
+
+                    unless :code.is_loaded(mod_name) != false do
+                      :code.load_binary(mod_name, String.to_charlist(fname), data)
+                    end
                   end
                 end
 
@@ -178,7 +185,7 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
         {:ok, normalize(ast), %{language: :cure}}
       end
     else
-      case CureSubProcess.parse(source) do
+      case CureSubProcess.parse(source, opts) do
         {:ok, ast} ->
           {:ok, normalize(ast), %{language: :cure}}
 

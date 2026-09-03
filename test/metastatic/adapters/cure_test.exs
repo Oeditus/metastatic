@@ -85,7 +85,7 @@ defmodule Metastatic.Adapters.CureTest do
     test "from_source parses Cure source code when compiler is available" do
       result = Cure.parse("let x = 42")
 
-      if ToMeta.available?() do
+      if ToMeta.available?() or match?({:ok, _}, result) do
         assert {:ok, ast} = result
         assert {:ok, meta_ast, metadata} = Cure.to_meta(ast)
         assert AST.conforms?(meta_ast)
@@ -96,8 +96,26 @@ defmodule Metastatic.Adapters.CureTest do
     end
 
     test "subprocesses fallback returns unavailable error when no binary or CLI is present" do
-      assert CureSubProcess.parse("let x = 1") ==
+      assert CureSubProcess.parse("let x = 1", cure_cli: nil, parser_bin: "nonexistent") ==
                {:error, "Cure subprocess parser unavailable"}
+    end
+  end
+
+  describe "Cure availability modes (cure-as-escript-only vs no-cure-whatsoever)" do
+    test "no-cure-whatsoever mode returns unavailable error" do
+      assert CureSubProcess.parse("let x = 1", cure_cli: nil, parser_bin: "nonexistent") ==
+               {:error, "Cure subprocess parser unavailable"}
+
+      if not ToMeta.available?() do
+        assert ToMeta.from_source("let x = 1", cure_cli: nil, parser_bin: "nonexistent") ==
+                 {:error, :cure_not_available}
+      end
+    end
+
+    test "cure-as-escript-only preserves adapter integrity and callbacks" do
+      assert Metastatic.Adapter.valid_adapter?(Cure)
+      assert function_exported?(Cure, :unparse, 1)
+      assert Cure.file_extensions() == [".cure"]
     end
   end
 
