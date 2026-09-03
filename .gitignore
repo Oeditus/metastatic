@@ -28,6 +28,9 @@ metastatic-*.tar
 /.elixir_ls/
 /.erl.history/
 
+/.dsh/
+/.ragex/
+
 # JavaScript parser node_modules
 /priv/parsers/javascript/node_modules/
 /priv/parsers/march/_build/
