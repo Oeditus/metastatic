@@ -8,7 +8,7 @@ defmodule Metastatic.Adapters.English do
   alias Metastatic.NL.Adapters.English, as: NLAdapter
 
   @impl true
-  def parse(source), do: NLAdapter.parse(source)
+  def parse(source, opts \\ []), do: NLAdapter.parse(source, opts)
 
   @impl true
   def to_meta(cst), do: NLAdapter.to_meta(cst)

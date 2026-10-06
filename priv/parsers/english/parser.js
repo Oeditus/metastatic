@@ -72,13 +72,25 @@ function parseEnglish(source) {
 
 function main() {
   let source = '';
-  if (process.argv.length > 2 && fs.existsSync(process.argv[2])) {
-    source = fs.readFileSync(process.argv[2], 'utf-8');
+  let inputFile = null;
+  let treeSitterBin = process.env.TREE_SITTER_BIN || 'tree-sitter';
+
+  for (let i = 2; i < process.argv.length; i++) {
+    if (process.argv[i] === '--tree-sitter-bin' && process.argv[i + 1]) {
+      treeSitterBin = process.argv[i + 1];
+      i++;
+    } else if (!inputFile && fs.existsSync(process.argv[i])) {
+      inputFile = process.argv[i];
+    }
+  }
+
+  if (inputFile) {
+    source = fs.readFileSync(inputFile, 'utf-8');
   } else {
     source = fs.readFileSync(0, 'utf-8');
   }
 
-  const result = parseEnglish(source);
+  const result = parseEnglish(source, treeSitterBin);
   process.stdout.write(JSON.stringify(result));
 }
 

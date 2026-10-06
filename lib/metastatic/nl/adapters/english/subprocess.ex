@@ -2,17 +2,134 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
   @moduledoc """
   Subprocess manager and parser bridge for English text and prose.
 
-  Executes the Tree-sitter / JavaScript English parser script when available,
-  or falls back seamlessly to the native Elixir tokenizer.
+  Executes the Tree-sitter parser when available, or prints a warning and falls
+  back seamlessly to the pure Elixir rule-based tokenizer/parser.
+
+  ## Configuration
+
+  The `tree-sitter` executable can be configured in `config/config.exs`:
+
+      config :metastatic,
+        tree_sitter_bin: "/path/to/tree-sitter"
+
+  Or under the `:nl` namespace:
+
+      config :metastatic, :nl,
+        tree_sitter_bin: "tree-sitter"
+
+  Or via the `TREE_SITTER_BIN` environment variable.
   """
+
+  require Logger
 
   @parser_script "priv/parsers/english/parser.js"
 
   @doc """
-  Parses English source text to CST map representation (M1).
+  Returns the configured tree-sitter executable name or path.
   """
-  @spec parse(String.t()) :: {:ok, map()} | {:error, term()}
-  def parse(source) when is_binary(source) do
+  @spec tree_sitter_bin(keyword()) :: String.t()
+  def tree_sitter_bin(opts \\ []) do
+    Keyword.get_lazy(opts, :tree_sitter_bin, fn ->
+      Application.get_env(:metastatic, :tree_sitter_bin) ||
+        (Application.get_env(:metastatic, :nl, []) |> Keyword.get(:tree_sitter_bin)) ||
+        System.get_env("TREE_SITTER_BIN") ||
+        "tree-sitter"
+    end)
+  end
+
+  @doc """
+  Checks if the configured tree-sitter executable is available and functional.
+  """
+  @spec tree_sitter_available?(keyword()) :: boolean()
+  def tree_sitter_available?(opts \\ []) do
+    bin = tree_sitter_bin(opts)
+
+    case resolve_executable(bin) do
+      nil ->
+        false
+
+      executable ->
+        try do
+          case System.cmd(executable, ["--version"], stderr_to_stdout: true) do
+            {output, 0} ->
+              String.contains?(output, "tree-sitter")
+
+            _ ->
+              false
+          end
+        rescue
+          _ -> false
+        end
+    end
+  end
+
+  defp resolve_executable(bin) when is_binary(bin) do
+    cond do
+      File.exists?(bin) and not File.dir?(bin) -> bin
+      true -> System.find_executable(bin)
+    end
+  end
+
+  defp resolve_executable(_), do: nil
+
+  @doc """
+  Parses English source text to CST map representation (M1).
+
+  If `tree-sitter` is available, runs the tree-sitter pipeline.
+  Otherwise, logs/prints a warning and falls back to the pure Elixir
+  rule-based tokenizer/parser.
+  """
+  @spec parse(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def parse(source, opts \\ []) when is_binary(source) and is_list(opts) do
+    bin = tree_sitter_bin(opts)
+
+    if tree_sitter_available?(opts) do
+      case run_tree_sitter_parser(source, bin) do
+        {:ok, ast} ->
+          {:ok, ast}
+
+        {:error, _reason} ->
+          warn_fallback(bin, opts)
+          fallback_parse(source)
+      end
+    else
+      warn_fallback(bin, opts)
+      fallback_parse(source)
+    end
+  end
+
+  defp warn_fallback(bin, opts) do
+    warn_mode = Keyword.get(opts, :warn, :once)
+
+    should_warn =
+      case warn_mode do
+        false ->
+          false
+
+        true ->
+          true
+
+        :once ->
+          key = {__MODULE__, :warned_fallback, bin}
+
+          case :persistent_term.get(key, false) do
+            true ->
+              false
+
+            false ->
+              :persistent_term.put(key, true)
+              true
+          end
+      end
+
+    if should_warn do
+      msg = "[Metastatic.NL] tree-sitter is not available (configured: '#{bin}'). Falling back to Pure Elixir rule-based tokenizer/parser."
+      Logger.warning(msg)
+      IO.warn(msg, [])
+    end
+  end
+
+  defp run_tree_sitter_parser(source, bin) do
     script_full_path = Path.join(File.cwd!(), @parser_script)
 
     if File.exists?(script_full_path) and System.find_executable("node") != nil do
@@ -25,33 +142,35 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
       File.write!(temp_path, source)
 
       try do
-        case System.cmd("node", [script_full_path, temp_path], stderr_to_stdout: true) do
+        case System.cmd("node", [script_full_path, temp_path, "--tree-sitter-bin", bin],
+               env: [{"TREE_SITTER_BIN", bin}],
+               stderr_to_stdout: true
+             ) do
           {output, 0} ->
             case Jason.decode(output) do
               {:ok, %{"ok" => true, "ast" => ast}} ->
                 {:ok, ast}
 
               _ ->
-                fallback_parse(source)
+                {:error, :json_decode_failed}
             end
 
-          _ ->
-            fallback_parse(source)
+          {error_out, exit_code} ->
+            {:error, {:exit_code, exit_code, error_out}}
         end
       after
         File.rm(temp_path)
       end
     else
-      fallback_parse(source)
+      {:error, :script_unavailable}
     end
   rescue
-    _ ->
-      fallback_parse(source)
+    e -> {:error, e}
   end
 
   @doc """
-  In-process fallback parser when node is not available.
-  Splits paragraphs, sentences, and words/punctuation.
+  Pure Elixir rule-based tokenizer/parser.
+  Splits paragraphs, sentences, and words/punctuation without external tools.
   """
   @spec fallback_parse(String.t()) :: {:ok, map()}
   def fallback_parse(source) do

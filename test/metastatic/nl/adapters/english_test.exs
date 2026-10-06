@@ -62,4 +62,34 @@ defmodule Metastatic.NL.Adapters.EnglishTest do
       assert unparsed =~ "Documentation must be clear."
     end
   end
+
+  describe "tree-sitter configuration and fallback" do
+    import ExUnit.CaptureIO
+    alias Metastatic.NL.Adapters.English.Subprocess
+
+    test "tree_sitter_bin retrieves configuration from opts and config" do
+      # From opts
+      assert Subprocess.tree_sitter_bin(tree_sitter_bin: "/custom/tree-sitter") == "/custom/tree-sitter"
+
+      # From application environment
+      original = Application.get_env(:metastatic, :tree_sitter_bin)
+      try do
+        Application.put_env(:metastatic, :tree_sitter_bin, "/opt/bin/tree-sitter")
+        assert Subprocess.tree_sitter_bin() == "/opt/bin/tree-sitter"
+      after
+        if original, do: Application.put_env(:metastatic, :tree_sitter_bin, original), else: Application.delete_env(:metastatic, :tree_sitter_bin)
+      end
+    end
+
+    test "prints warning and falls back to pure Elixir rule-based tokenizer/parser when unavailable" do
+      output =
+        capture_io(:stderr, fn ->
+          assert {:ok, cst} = English.parse("Simple sentence.", tree_sitter_bin: "nonexistent-ts-bin-123", warn: true)
+          assert %{"type" => "document", "children" => _} = cst
+        end)
+
+      assert output =~ "tree-sitter is not available"
+      assert output =~ "Falling back to Pure Elixir rule-based tokenizer/parser"
+    end
+  end
 end

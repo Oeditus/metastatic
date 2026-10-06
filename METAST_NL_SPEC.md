@@ -204,3 +204,38 @@ mix metastatic.lint.prose docs/
 - **`AvoidWeaselWords`**: Flags words like *"clearly"*, *"obviously"*, *"probably"*, *"perhaps"*.
 - **`SentenceLength`**: Flags sentences with more than 25 words.
 - **`TerminologyConsistency`**: Enforces modern, inclusive vocabulary (*"allowlist"* instead of *"whitelist"*, *"replica"* instead of *"slave"*).
+
+---
+
+## Parser Configuration & Fallback Engine
+
+NL-MetaAST integrates with `tree-sitter` for CST extraction while providing seamless fallback to a pure Elixir rule-based tokenizer and parser.
+
+### Configuring the `tree-sitter` Executable
+
+In your application's `config/config.exs`:
+
+```elixir
+import Config
+
+config :metastatic,
+  tree_sitter_bin: System.get_env("TREE_SITTER_BIN") || "tree-sitter"
+```
+
+Or under the `:nl` namespace:
+
+```elixir
+config :metastatic, :nl,
+  tree_sitter_bin: "/path/to/custom/tree-sitter"
+```
+
+### Automatic Fallback & Warnings
+
+If `tree-sitter` is unavailable or non-functional, the adapter logs and prints a warning:
+
+```
+warning: [Metastatic.NL] tree-sitter is not available (configured: 'tree-sitter'). Falling back to Pure Elixir rule-based tokenizer/parser.
+```
+
+And automatically activates the **Pure Elixir rule-based tokenizer/parser** without raising errors, ensuring zero external setup requirements in continuous integration or minimal environments.
+

@@ -11,8 +11,8 @@ defmodule Metastatic.NL.Adapters.English do
   alias Metastatic.NL.Adapters.English.{FromMeta, Subprocess, ToMeta}
 
   @impl true
-  def parse(source) when is_binary(source) do
-    Subprocess.parse(source)
+  def parse(source, opts \\ []) when is_binary(source) do
+    Subprocess.parse(source, opts)
   end
 
   @impl true
