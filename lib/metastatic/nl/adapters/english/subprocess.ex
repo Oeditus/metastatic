@@ -82,12 +82,12 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
   end
 
   defp tokenize_sentence(sentence) do
-    regex = ~r/([A-Za-z0-9]+(?:'[A-Za-z]+)?|[-–—]|[:;,.!?(){}[\]"“”'’])/
+    regex = ~r/([A-Za-z0-9]+(?:'[A-Za-z]+)?|[-–—]|[:;,.!?(){}[\]"“”'’])/u
 
     Regex.scan(regex, sentence, return: :index)
     |> Enum.map(fn [{start, len} | _] ->
-      raw = String.slice(sentence, start, len)
-      is_punct = Regex.match?(~r/^[:;,.!?(){}[\]"“”'’\-–—]$/, raw)
+      raw = binary_part(sentence, start, len)
+      is_punct = Regex.match?(~r/^[:;,.!?(){}[\]"“”'’\-–—]$/u, raw)
 
       %{
         "type" => if(is_punct, do: "punctuation", else: "word"),

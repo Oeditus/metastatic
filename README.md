@@ -25,10 +25,12 @@ Parse once, use everywhere. A universal meta-model for program syntax that enabl
 
 **What Metastatic Provides:**
 - MetaAST meta-model (M2 level) with three layers
-- Language adapters (Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, TypeScript)
+- Natural Language MetaAST (NL-MetaAST) for prose and documentation analysis (see [METAST_NL_SPEC.md](METAST_NL_SPEC.md))
+- Language adapters (Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, TypeScript; English and Spanish for prose)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
-- Semantic enrichment (OpKind metadata)
+- Semantic enrichment (OpKind metadata for code; voice, hedging, and readability for prose)
+- Prose linting CLI (`mix metastatic.lint.prose`)
 
 **What Metastatic Does NOT Provide:**
 - Static analysis (see [MetaCredo](https://github.com/Oeditus/metacredo), an Elixir library that performs cross-language static analysis and linting on whatever sources `metastatic` understands)
