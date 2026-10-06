@@ -12,6 +12,14 @@ defmodule Metastatic.NL.Adapters.English.Tokenizer do
   @auxiliaries ~w(be am is are was were been being have has had having do does did can could may might must shall should will would)
   @common_adverbs ~w(not very always never often usually sometimes already still also just only perhaps probably possibly clearly obviously actually certainly definitely really quite rather)
 
+  @past_participles ~w(
+    written done built taken read sent given found run made known seen gone broken
+    chosen driven fallen frozen grown hidden ridden risen shaken spoken stolen
+    thrown worn begun drank drunk sung swam won lost understood held brought
+    caught taught thought fought bought felt kept left met meant paid said sold
+    told sent spent lent eaten beaten bitten blown forgotten proven
+  )
+
   @doc """
   Determines the Universal POS tag for an English word token.
   """
@@ -34,6 +42,9 @@ defmodule Metastatic.NL.Adapters.English.Tokenizer do
 
       downcased in @auxiliaries ->
         :auxiliary
+
+      downcased in @past_participles ->
+        :verb
 
       downcased in @common_adverbs or (String.ends_with?(downcased, "ly") and String.length(downcased) > 3) ->
         :adverb

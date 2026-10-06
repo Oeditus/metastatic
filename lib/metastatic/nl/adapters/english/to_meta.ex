@@ -8,6 +8,8 @@ defmodule Metastatic.NL.Adapters.English.ToMeta do
   alias Metastatic.NL.AST
   alias Metastatic.NL.Adapters.English.Tokenizer
 
+  alias Metastatic.NL.Semantic.Enricher
+
   @doc """
   Transforms M1 CST map representation into M2 NL-MetaAST.
   """
@@ -15,15 +17,18 @@ defmodule Metastatic.NL.Adapters.English.ToMeta do
   def transform(%{"type" => "document", "children" => paragraphs}) do
     para_nodes = Enum.map(paragraphs, &transform_paragraph/1)
     doc_node = AST.document(para_nodes, language: :en, format: :prose)
-    {:ok, doc_node, %{language: :en}}
+    enriched = Enricher.enrich(doc_node)
+    {:ok, enriched, %{language: :en}}
   end
 
   def transform(%{"type" => "paragraph"} = para) do
-    {:ok, transform_paragraph(para), %{language: :en}}
+    enriched = Enricher.enrich(transform_paragraph(para))
+    {:ok, enriched, %{language: :en}}
   end
 
   def transform(%{"type" => "sentence"} = sent) do
-    {:ok, transform_sentence(sent), %{language: :en}}
+    enriched = Enricher.enrich(transform_sentence(sent))
+    {:ok, enriched, %{language: :en}}
   end
 
   defp transform_paragraph(%{"children" => sentences}) do
