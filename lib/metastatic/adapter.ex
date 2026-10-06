@@ -386,6 +386,8 @@ defmodule Metastatic.Adapter do
   """
   @spec valid_adapter?(module()) :: boolean()
   def valid_adapter?(adapter) do
+    Code.ensure_loaded(adapter)
+
     required_callbacks = [
       {:parse, 1},
       {:to_meta, 1},
