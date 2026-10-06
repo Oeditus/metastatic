@@ -35,7 +35,8 @@ defmodule Metastatic.NL.Lint.Rules.AvoidWeaselWords do
                   line: Keyword.get(meta, :line),
                   col: Keyword.get(meta, :col),
                   severity: :warning,
-                  suggestion: "Remove '#{val}' or replace with concrete facts or quantitative data."
+                  suggestion:
+                    "Remove '#{val}' or replace with concrete facts or quantitative data."
                 )
 
               {token, [issue | acc]}

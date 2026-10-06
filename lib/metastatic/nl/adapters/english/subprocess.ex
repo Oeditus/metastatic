@@ -31,7 +31,7 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
   def tree_sitter_bin(opts \\ []) do
     Keyword.get_lazy(opts, :tree_sitter_bin, fn ->
       Application.get_env(:metastatic, :tree_sitter_bin) ||
-        (Application.get_env(:metastatic, :nl, []) |> Keyword.get(:tree_sitter_bin)) ||
+        Application.get_env(:metastatic, :nl, []) |> Keyword.get(:tree_sitter_bin) ||
         System.get_env("TREE_SITTER_BIN") ||
         "tree-sitter"
     end)
@@ -64,13 +64,12 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
   end
 
   defp resolve_executable(bin) when is_binary(bin) do
-    cond do
-      File.exists?(bin) and not File.dir?(bin) -> bin
-      true -> System.find_executable(bin)
+    if File.exists?(bin) and not File.dir?(bin) do
+      bin
+    else
+      System.find_executable(bin)
     end
   end
-
-  defp resolve_executable(_), do: nil
 
   @doc """
   Parses English source text to CST map representation (M1).
@@ -123,7 +122,9 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
       end
 
     if should_warn do
-      msg = "[Metastatic.NL] tree-sitter is not available (configured: '#{bin}'). Falling back to Pure Elixir rule-based tokenizer/parser."
+      msg =
+        "[Metastatic.NL] tree-sitter is not available (configured: '#{bin}'). Falling back to Pure Elixir rule-based tokenizer/parser."
+
       Logger.warning(msg)
       IO.warn(msg, [])
     end

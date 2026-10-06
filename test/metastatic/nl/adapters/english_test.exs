@@ -1,8 +1,8 @@
 defmodule Metastatic.NL.Adapters.EnglishTest do
   use ExUnit.Case, async: true
+  alias Metastatic.Adapter
   alias Metastatic.NL.Adapters.English
   alias Metastatic.NL.AST
-  alias Metastatic.Adapter
 
   describe "adapter behaviour conformance" do
     test "implements Metastatic.Adapter behaviour" do
@@ -69,22 +69,31 @@ defmodule Metastatic.NL.Adapters.EnglishTest do
 
     test "tree_sitter_bin retrieves configuration from opts and config" do
       # From opts
-      assert Subprocess.tree_sitter_bin(tree_sitter_bin: "/custom/tree-sitter") == "/custom/tree-sitter"
+      assert Subprocess.tree_sitter_bin(tree_sitter_bin: "/custom/tree-sitter") ==
+               "/custom/tree-sitter"
 
       # From application environment
       original = Application.get_env(:metastatic, :tree_sitter_bin)
+
       try do
         Application.put_env(:metastatic, :tree_sitter_bin, "/opt/bin/tree-sitter")
         assert Subprocess.tree_sitter_bin() == "/opt/bin/tree-sitter"
       after
-        if original, do: Application.put_env(:metastatic, :tree_sitter_bin, original), else: Application.delete_env(:metastatic, :tree_sitter_bin)
+        if original,
+          do: Application.put_env(:metastatic, :tree_sitter_bin, original),
+          else: Application.delete_env(:metastatic, :tree_sitter_bin)
       end
     end
 
     test "prints warning and falls back to pure Elixir rule-based tokenizer/parser when unavailable" do
       output =
         capture_io(:stderr, fn ->
-          assert {:ok, cst} = English.parse("Simple sentence.", tree_sitter_bin: "nonexistent-ts-bin-123", warn: true)
+          assert {:ok, cst} =
+                   English.parse("Simple sentence.",
+                     tree_sitter_bin: "nonexistent-ts-bin-123",
+                     warn: true
+                   )
+
           assert %{"type" => "document", "children" => _} = cst
         end)
 

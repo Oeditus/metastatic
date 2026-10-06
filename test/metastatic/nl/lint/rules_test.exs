@@ -1,6 +1,7 @@
 defmodule Metastatic.NL.Lint.RulesTest do
   use ExUnit.Case, async: true
   alias Metastatic.NL.Lint.Runner
+
   alias Metastatic.NL.Lint.Rules.{
     AvoidPassiveVoice,
     AvoidWeaselWords,

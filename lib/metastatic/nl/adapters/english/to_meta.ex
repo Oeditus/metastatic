@@ -5,9 +5,8 @@ defmodule Metastatic.NL.Adapters.English.ToMeta do
   Performs lexical tagging, phrase chunking, and clause structuring.
   """
 
-  alias Metastatic.NL.AST
   alias Metastatic.NL.Adapters.English.Tokenizer
-
+  alias Metastatic.NL.AST
   alias Metastatic.NL.Semantic.Enricher
 
   @doc """
@@ -152,7 +151,14 @@ defmodule Metastatic.NL.Adapters.English.ToMeta do
     {np_items, rest} =
       Enum.split_while(nodes, fn
         {:token, meta, _} ->
-          Keyword.get(meta, :pos) in [:determiner, :adjective, :noun, :proper_noun, :pronoun, :numeral]
+          Keyword.get(meta, :pos) in [
+            :determiner,
+            :adjective,
+            :noun,
+            :proper_noun,
+            :pronoun,
+            :numeral
+          ]
 
         _ ->
           false

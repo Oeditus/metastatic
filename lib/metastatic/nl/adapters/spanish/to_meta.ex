@@ -3,8 +3,8 @@ defmodule Metastatic.NL.Adapters.Spanish.ToMeta do
   Transforms Spanish CST / tokens to NL-MetaAST (M2).
   """
 
-  alias Metastatic.NL.AST
   alias Metastatic.NL.Adapters.Spanish.Tokenizer
+  alias Metastatic.NL.AST
 
   @ser_forms ~w(es son fue fueron era eran sido sea)
 
@@ -184,10 +184,19 @@ defmodule Metastatic.NL.Adapters.Spanish.ToMeta do
 
               type == :noun_phrase and state == :before_verb ->
                 sem_role = if is_passive, do: :patient, else: :agent
-                {AST.phrase(:noun_phrase, children, Keyword.merge(meta, [role: :subject, sem_role: sem_role])), state}
+
+                {AST.phrase(
+                   :noun_phrase,
+                   children,
+                   Keyword.merge(meta, role: :subject, sem_role: sem_role)
+                 ), state}
 
               type == :noun_phrase and state == :after_verb ->
-                {AST.phrase(:noun_phrase, children, Keyword.merge(meta, [role: :object, sem_role: :patient])), state}
+                {AST.phrase(
+                   :noun_phrase,
+                   children,
+                   Keyword.merge(meta, role: :object, sem_role: :patient)
+                 ), state}
 
               type == :prep_phrase and Keyword.get(meta, :role) == :agent_by_phrase and is_passive ->
                 {AST.phrase(:prep_phrase, children, Keyword.put(meta, :sem_role, :agent)), state}
@@ -223,7 +232,8 @@ defmodule Metastatic.NL.Adapters.Spanish.ToMeta do
         words
         |> Enum.chunk_every(2, 1, :discard)
         |> Enum.any?(fn [w1, w2] ->
-          w1 in @ser_forms and (Tokenizer.is_regular_participle?(w2) or w2 in ["escrito", "hecho", "dicho", "visto"])
+          w1 in @ser_forms and
+            (Tokenizer.regular_participle?(w2) or w2 in ["escrito", "hecho", "dicho", "visto"])
         end)
 
       _ ->

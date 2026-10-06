@@ -6,6 +6,7 @@ defmodule Metastatic.NL.Lint.Runner do
   """
 
   alias Metastatic.NL.Adapters.English
+
   alias Metastatic.NL.Lint.Rules.{
     AvoidPassiveVoice,
     AvoidWeaselWords,
@@ -41,7 +42,8 @@ defmodule Metastatic.NL.Lint.Runner do
   @doc """
   Convenience function: parses raw text/prose, enriches it, and runs linter rules.
   """
-  @spec lint_source(String.t(), keyword()) :: {:ok, [Metastatic.NL.Lint.Issue.t()]} | {:error, term()}
+  @spec lint_source(String.t(), keyword()) ::
+          {:ok, [Metastatic.NL.Lint.Issue.t()]} | {:error, term()}
   def lint_source(text, opts \\ []) when is_binary(text) do
     with {:ok, cst} <- English.parse(text),
          {:ok, meta_ast, _} <- English.to_meta(cst) do

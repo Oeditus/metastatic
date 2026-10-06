@@ -58,7 +58,9 @@ defmodule Mix.Tasks.Metastatic.Lint.Prose do
         end)
 
       if total_issues > 0 do
-        Mix.shell().error("\nFound #{total_issues} issue(s) across #{length(target_files)} file(s).")
+        Mix.shell().error(
+          "\nFound #{total_issues} issue(s) across #{length(target_files)} file(s)."
+        )
       else
         Mix.shell().info("\nAll #{length(target_files)} file(s) passed prose linting cleanly!")
       end
@@ -96,10 +98,6 @@ defmodule Mix.Tasks.Metastatic.Lint.Prose do
             end)
 
             length(issues)
-
-          {:error, reason} ->
-            Mix.shell().error("Error parsing #{file}: #{inspect(reason)}")
-            0
         end
 
       {:error, reason} ->

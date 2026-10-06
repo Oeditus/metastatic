@@ -57,14 +57,26 @@ defmodule Metastatic.NL.Adapters.Spanish.Tokenizer do
       down in @auxiliaries ->
         :auxiliary
 
-      down in @participles or is_regular_participle?(down) ->
+      down in @participles or regular_participle?(down) ->
         :verb
 
       String.ends_with?(down, "mente") ->
         :adverb
 
       # Verb inflections
-      String.ends_with?(down, ["ar", "er", "ir", "ando", "iendo", "aron", "ieron", "ará", "arán", "ó", "ió"]) ->
+      String.ends_with?(down, [
+        "ar",
+        "er",
+        "ir",
+        "ando",
+        "iendo",
+        "aron",
+        "ieron",
+        "ará",
+        "arán",
+        "ó",
+        "ió"
+      ]) ->
         :verb
 
       # Heuristic adjective endings
@@ -96,7 +108,7 @@ defmodule Metastatic.NL.Adapters.Spanish.Tokenizer do
           down in ["escrito", "escrita", "escritos", "escritas"] -> "escribir"
           down in ["hecho", "hecha", "hechos", "hechas"] -> "hacer"
           down in ["ejecutada", "ejecutado", "ejecutadas", "ejecutados"] -> "ejecutar"
-          is_regular_participle?(down) -> lemmatize_participle(down)
+          regular_participle?(down) -> lemmatize_participle(down)
           true -> down
         end
 
@@ -117,7 +129,7 @@ defmodule Metastatic.NL.Adapters.Spanish.Tokenizer do
     end
   end
 
-  def is_regular_participle?(word) do
+  def regular_participle?(word) do
     String.ends_with?(word, ["ado", "ada", "ados", "adas", "ido", "ida", "idos", "idas"]) and
       String.length(word) > 4
   end

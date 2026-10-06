@@ -129,7 +129,9 @@ defmodule Metastatic.NL.Semantic.Enricher do
         words =
           vp_children
           |> Enum.filter(&match?({:token, _, _}, &1))
-          |> Enum.map(fn {:token, m, val} -> {String.downcase(val || ""), Keyword.get(m, :pos)} end)
+          |> Enum.map(fn {:token, m, val} ->
+            {String.downcase(val || ""), Keyword.get(m, :pos)}
+          end)
 
         if has_passive_construction?(words) do
           :passive

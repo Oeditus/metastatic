@@ -1,10 +1,10 @@
 defmodule Metastatic.NL.Adapters.SpanishTest do
   use ExUnit.Case, async: true
+  alias Metastatic.Adapter
   alias Metastatic.NL.Adapters.Spanish
   alias Metastatic.NL.AST
   alias Metastatic.NL.Lint.Rules.AvoidPassiveVoice
   alias Metastatic.NL.Lint.Runner
-  alias Metastatic.Adapter
 
   describe "adapter behaviour conformance" do
     test "implements Metastatic.Adapter behaviour" do

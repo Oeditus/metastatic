@@ -53,20 +53,15 @@ defmodule Metastatic.NL.Adapters.English.FromMeta do
   """
   @spec to_source(AST.nl_node() | map()) :: String.t()
   def to_source(%{"type" => "document", "children" => paras}) do
-    paras
-    |> Enum.map(fn %{"children" => sents} ->
+    Enum.map_join(paras, "\n\n", fn %{"children" => sents} ->
       Enum.map_join(sents, " ", & &1["text"])
     end)
-    |> Enum.join("\n\n")
   end
 
   def to_source({:document, _meta, paragraphs}) do
-    paragraphs
-    |> Enum.map(fn {:paragraph, _meta, sentences} ->
-      sentences
-      |> Enum.map_join(" ", &AST.text/1)
+    Enum.map_join(paragraphs, "\n\n", fn {:paragraph, _meta, sentences} ->
+      Enum.map_join(sentences, " ", &AST.text/1)
     end)
-    |> Enum.join("\n\n")
   end
 
   def to_source(node) do

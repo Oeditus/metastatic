@@ -238,7 +238,8 @@ defmodule Metastatic.NL.AST do
 
   Identical in contract to `Metastatic.AST.traverse/4`.
   """
-  @spec traverse(nl_node(), acc, (nl_node(), acc -> {nl_node(), acc}), (nl_node(), acc -> {nl_node(), acc})) ::
+  @spec traverse(nl_node(), acc, (nl_node(), acc -> {nl_node(), acc}), (nl_node(), acc ->
+                                                                          {nl_node(), acc})) ::
           {nl_node(), acc}
         when acc: term()
   def traverse(node, acc, pre, post)
@@ -444,11 +445,7 @@ defmodule Metastatic.NL.AST do
   @spec conforms?(term()) :: boolean()
   def conforms?({type, meta, children})
       when type in @all_types and is_list(meta) do
-    is_keyword = Keyword.keyword?(meta)
-
-    if not is_keyword do
-      false
-    else
+    if Keyword.keyword?(meta) do
       case type do
         :token ->
           is_binary(children) or is_nil(children)
@@ -468,6 +465,8 @@ defmodule Metastatic.NL.AST do
         _ ->
           false
       end
+    else
+      false
     end
   end
 

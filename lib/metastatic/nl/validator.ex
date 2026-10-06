@@ -22,9 +22,7 @@ defmodule Metastatic.NL.Validator do
     mode = Keyword.get(opts, :mode, :standard)
     max_depth = Keyword.get(opts, :max_depth, 50)
 
-    if not AST.conforms?(node) do
-      {:error, :invalid_structure}
-    else
+    if AST.conforms?(node) do
       metrics = analyze(node, 1)
 
       cond do
@@ -37,6 +35,8 @@ defmodule Metastatic.NL.Validator do
         true ->
           {:ok, metrics}
       end
+    else
+      {:error, :invalid_structure}
     end
   end
 
@@ -52,13 +52,22 @@ defmodule Metastatic.NL.Validator do
       end
 
     total_nodes = 1 + Enum.sum(Enum.map(child_metrics, & &1.total_nodes))
-    native_count = (if is_native, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.native_nodes))
-    extended_count = (if is_extended, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.extended_nodes))
+
+    native_count =
+      if(is_native, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.native_nodes))
+
+    extended_count =
+      if(is_extended, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.extended_nodes))
+
     sub_max_depth = Enum.reduce(child_metrics, current_depth, fn m, acc -> max(m.depth, acc) end)
 
-    sentences = (if type == :sentence, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.sentences))
-    clauses = (if type == :clause, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.clauses))
-    tokens = (if type == :token, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.tokens))
+    sentences =
+      if(type == :sentence, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.sentences))
+
+    clauses =
+      if(type == :clause, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.clauses))
+
+    tokens = if(type == :token, do: 1, else: 0) + Enum.sum(Enum.map(child_metrics, & &1.tokens))
 
     level =
       cond do

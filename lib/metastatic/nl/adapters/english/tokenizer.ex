@@ -46,14 +46,16 @@ defmodule Metastatic.NL.Adapters.English.Tokenizer do
       downcased in @past_participles ->
         :verb
 
-      downcased in @common_adverbs or (String.ends_with?(downcased, "ly") and String.length(downcased) > 3) ->
+      downcased in @common_adverbs or
+          (String.ends_with?(downcased, "ly") and String.length(downcased) > 3) ->
         :adverb
 
       Regex.match?(~r/^\d+(\.\d+)?$/, downcased) ->
         :numeral
 
       # Capitalized mid-sentence or known proper nouns
-      Regex.match?(~r/^[A-Z][a-z]+$/, word) and not (downcased in @determiners or downcased in @pronouns) ->
+      Regex.match?(~r/^[A-Z][a-z]+$/, word) and
+          not (downcased in @determiners or downcased in @pronouns) ->
         :proper_noun
 
       # Morphological verb heuristics
@@ -69,13 +71,13 @@ defmodule Metastatic.NL.Adapters.English.Tokenizer do
       # Morphological adjective heuristics
       String.ends_with?(downcased, "able") or String.ends_with?(downcased, "ible") or
         String.ends_with?(downcased, "ous") or String.ends_with?(downcased, "ful") or
-          String.ends_with?(downcased, "less") or String.ends_with?(downcased, "ive") ->
+        String.ends_with?(downcased, "less") or String.ends_with?(downcased, "ive") ->
         :adjective
 
       # Morphological noun heuristics
       String.ends_with?(downcased, "tion") or String.ends_with?(downcased, "sion") or
         String.ends_with?(downcased, "ment") or String.ends_with?(downcased, "ness") or
-          String.ends_with?(downcased, "ity") or String.ends_with?(downcased, "er") or
+        String.ends_with?(downcased, "ity") or String.ends_with?(downcased, "er") or
           String.ends_with?(downcased, "or") ->
         :noun
 
@@ -94,28 +96,76 @@ defmodule Metastatic.NL.Adapters.English.Tokenizer do
     case pos do
       :verb ->
         cond do
-          down in ["is", "am", "are", "was", "were", "been", "being"] -> "be"
-          down in ["has", "had", "having"] -> "have"
-          down in ["does", "did", "doing"] -> "do"
-          String.ends_with?(down, "ies") -> String.slice(down, 0, String.length(down) - 3) <> "y"
-          String.ends_with?(down, "es") and String.ends_with?(String.slice(down, 0, String.length(down) - 2), ["s", "sh", "ch", "x", "z"]) -> String.slice(down, 0, String.length(down) - 2)
-          String.ends_with?(down, "s") and not String.ends_with?(down, "ss") -> String.slice(down, 0, String.length(down) - 1)
-          String.ends_with?(down, "ing") -> lemmatize_ing(down)
-          String.ends_with?(down, "ed") -> lemmatize_ed(down)
-          true -> down
+          down in ["is", "am", "are", "was", "were", "been", "being"] ->
+            "be"
+
+          down in ["has", "had", "having"] ->
+            "have"
+
+          down in ["does", "did", "doing"] ->
+            "do"
+
+          String.ends_with?(down, "ies") ->
+            String.slice(down, 0, String.length(down) - 3) <> "y"
+
+          String.ends_with?(down, "es") and
+              String.ends_with?(String.slice(down, 0, String.length(down) - 2), [
+                "s",
+                "sh",
+                "ch",
+                "x",
+                "z"
+              ]) ->
+            String.slice(down, 0, String.length(down) - 2)
+
+          String.ends_with?(down, "s") and not String.ends_with?(down, "ss") ->
+            String.slice(down, 0, String.length(down) - 1)
+
+          String.ends_with?(down, "ing") ->
+            lemmatize_ing(down)
+
+          String.ends_with?(down, "ed") ->
+            lemmatize_ed(down)
+
+          true ->
+            down
         end
 
       :noun ->
         cond do
-          down in ["children"] -> "child"
-          down in ["people"] -> "person"
-          down in ["data"] -> "datum"
-          down in ["criteria"] -> "criterion"
-          String.ends_with?(down, "ies") -> String.slice(down, 0, String.length(down) - 3) <> "y"
-          String.ends_with?(down, "ves") -> String.slice(down, 0, String.length(down) - 3) <> "f"
-          String.ends_with?(down, "es") and String.ends_with?(String.slice(down, 0, String.length(down) - 2), ["s", "sh", "ch", "x", "z"]) -> String.slice(down, 0, String.length(down) - 2)
-          String.ends_with?(down, "s") and not String.ends_with?(down, "ss") -> String.slice(down, 0, String.length(down) - 1)
-          true -> down
+          down in ["children"] ->
+            "child"
+
+          down in ["people"] ->
+            "person"
+
+          down in ["data"] ->
+            "datum"
+
+          down in ["criteria"] ->
+            "criterion"
+
+          String.ends_with?(down, "ies") ->
+            String.slice(down, 0, String.length(down) - 3) <> "y"
+
+          String.ends_with?(down, "ves") ->
+            String.slice(down, 0, String.length(down) - 3) <> "f"
+
+          String.ends_with?(down, "es") and
+              String.ends_with?(String.slice(down, 0, String.length(down) - 2), [
+                "s",
+                "sh",
+                "ch",
+                "x",
+                "z"
+              ]) ->
+            String.slice(down, 0, String.length(down) - 2)
+
+          String.ends_with?(down, "s") and not String.ends_with?(down, "ss") ->
+            String.slice(down, 0, String.length(down) - 1)
+
+          true ->
+            down
         end
 
       _ ->
@@ -126,22 +176,25 @@ defmodule Metastatic.NL.Adapters.English.Tokenizer do
   defp lemmatize_ing(word) do
     len = String.length(word)
     base = String.slice(word, 0, len - 3)
-    cond do
-      String.ends_with?(base, ["bb", "dd", "gg", "mm", "nn", "pp", "rr", "tt"]) ->
-        String.slice(base, 0, String.length(base) - 1)
-      true ->
-        base
+
+    if String.ends_with?(base, ["bb", "dd", "gg", "mm", "nn", "pp", "rr", "tt"]) do
+      String.slice(base, 0, String.length(base) - 1)
+    else
+      base
     end
   end
 
   defp lemmatize_ed(word) do
     len = String.length(word)
     base = String.slice(word, 0, len - 2)
+
     cond do
       String.ends_with?(base, ["bb", "dd", "gg", "mm", "nn", "pp", "rr", "tt"]) ->
         String.slice(base, 0, String.length(base) - 1)
+
       String.ends_with?(base, "i") ->
         String.slice(base, 0, String.length(base) - 1) <> "y"
+
       true ->
         base
     end

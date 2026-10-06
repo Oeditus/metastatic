@@ -1,7 +1,7 @@
 defmodule Metastatic.NL.Semantic.ReadabilityTest do
   use ExUnit.Case, async: true
-  alias Metastatic.NL.Semantic.Readability
   alias Metastatic.NL.Adapters.English
+  alias Metastatic.NL.Semantic.Readability
 
   describe "syllable counting" do
     test "correctly estimates syllables for common words" do

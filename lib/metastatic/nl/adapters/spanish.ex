@@ -5,8 +5,8 @@ defmodule Metastatic.NL.Adapters.Spanish do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.NL.AST
   alias Metastatic.NL.Adapters.Spanish.ToMeta
+  alias Metastatic.NL.AST
 
   @impl true
   def parse(source) when is_binary(source) do
