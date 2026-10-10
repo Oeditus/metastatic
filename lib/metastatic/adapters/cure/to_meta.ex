@@ -119,24 +119,7 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
 
               zip_bin ->
                 {:ok, files} = :zip.extract(zip_bin, [:memory])
-
-                for {filename, data} <- files do
-                  fname = to_string(filename)
-                  mod_str = Path.basename(fname, ".beam")
-
-                  if String.ends_with?(fname, ".beam") and
-                       (String.starts_with?(mod_str, "Elixir.Cure") or
-                          String.starts_with?(mod_str, "Cure")) and
-                       not String.starts_with?(mod_str, "Elixir.Metastatic") and
-                       not String.starts_with?(mod_str, "Metastatic") do
-                    mod_name = String.to_atom(mod_str)
-
-                    unless :code.is_loaded(mod_name) != false do
-                      :code.load_binary(mod_name, String.to_charlist(fname), data)
-                    end
-                  end
-                end
-
+                load_beams(files)
                 cure_loaded?()
             end
 
@@ -149,6 +132,64 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
     else
       false
     end
+  end
+
+  @doc """
+  Load Cure's own beams from `{filename, binary}` entries, in the shape
+  returned by `:zip.extract/2` with `:memory` (typically the archive of the
+  `cure` escript).
+
+  Only modules named `Cure.*` / `Elixir.Cure.*` are considered, and a module
+  is loaded only when none of that name is already loaded or reachable on the
+  code path.
+
+  The escript embeds Cure's dependencies as well, including a possibly older
+  copy of Metastatic. Loading those over the host's modules (for example
+  `Metastatic.Adapters.Cure`) would silently downgrade this library at
+  runtime, so they are never loaded.
+
+  Returns the list of modules that were actually loaded.
+
+  ## Examples
+
+      iex> Metastatic.Adapters.Cure.ToMeta.load_beams([
+      ...>   {~c"cure/ebin/Elixir.Metastatic.Adapters.Cure.beam", "not a beam"},
+      ...>   {~c"cure/priv/std/option.cure", "mod Option"}
+      ...> ])
+      []
+  """
+  @spec load_beams([{charlist() | String.t(), binary()}]) :: [module()]
+  def load_beams(files) when is_list(files) do
+    Enum.flat_map(files, fn {filename, data} ->
+      fname = to_string(filename)
+      mod_str = Path.basename(fname, ".beam")
+
+      if cure_beam?(fname, mod_str), do: load_beam(mod_str, fname, data), else: []
+    end)
+  end
+
+  defp cure_beam?(fname, mod_str) do
+    String.ends_with?(fname, ".beam") and
+      (String.starts_with?(mod_str, "Elixir.Cure") or String.starts_with?(mod_str, "Cure")) and
+      not (String.starts_with?(mod_str, "Elixir.Metastatic") or
+             String.starts_with?(mod_str, "Metastatic"))
+  end
+
+  defp load_beam(mod_str, fname, data) do
+    mod_name = String.to_atom(mod_str)
+
+    if module_available?(mod_name) do
+      []
+    else
+      case :code.load_binary(mod_name, String.to_charlist(fname), data) do
+        {:module, ^mod_name} -> [mod_name]
+        _ -> []
+      end
+    end
+  end
+
+  defp module_available?(module) do
+    :code.is_loaded(module) != false or :code.which(module) != :non_existing
   end
 
   # --- Source -> MetaAST -------------------------------------------------

@@ -119,6 +119,54 @@ defmodule Metastatic.Adapters.CureTest do
     end
   end
 
+  describe "Cure.ToMeta.load_beams/1" do
+    test "never loads Metastatic modules embedded in the cure escript" do
+      before = Cure.module_info(:md5)
+
+      assert [] =
+               ToMeta.load_beams([
+                 {~c"cure/ebin/Elixir.Metastatic.Adapters.Cure.beam", "not a beam"},
+                 {~c"metastatic/ebin/Elixir.Metastatic.Adapters.Cure.ToMeta.beam", "not a beam"}
+               ])
+
+      assert Cure.module_info(:md5) == before
+      assert function_exported?(Cure, :parse, 1)
+    end
+
+    test "loads a Cure module once and never replaces it afterwards" do
+      compile_unloaded = fn version ->
+        [{mod, binary}] =
+          Code.compile_string(
+            "defmodule Cure.LoadBeamsProbe do\n  def version, do: #{version}\nend"
+          )
+
+        :code.purge(mod)
+        :code.delete(mod)
+        :code.purge(mod)
+        {mod, binary}
+      end
+
+      {mod, v1} = compile_unloaded.(1)
+      {^mod, v2} = compile_unloaded.(2)
+
+      on_exit(fn ->
+        :code.purge(mod)
+        :code.delete(mod)
+        :code.purge(mod)
+      end)
+
+      assert [^mod] = ToMeta.load_beams([{~c"cure/ebin/#{mod}.beam", v1}])
+      assert mod.version() == 1
+
+      assert [] = ToMeta.load_beams([{~c"cure/ebin/#{mod}.beam", v2}])
+      assert mod.version() == 1
+    end
+
+    test "ignores entries that are not beam files" do
+      assert [] = ToMeta.load_beams([{~c"cure/priv/std/option.cure", "mod Option"}])
+    end
+  end
+
   describe "Cure.FromMeta bin_segment / bytes rendering" do
     test "empty bytes literal renders as <<>>" do
       assert FromMeta.to_source({:literal, [subtype: :bytes], []}) == "<<>>"

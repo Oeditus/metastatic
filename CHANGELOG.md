@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed -- Cure escript loading no longer downgrades Metastatic
+- **`Metastatic.Adapters.Cure.ToMeta.load_beams/1`** -- extracted the beam loading done by the `cure` escript fallback into a public, tested function. It loads only `Cure.*` modules and never replaces a module that is already loaded or reachable on the code path.
+- **Why it matters** -- the released `cure` escript embeds its own dependencies, including an older Metastatic. Before this fix (v0.30.0), the fallback force-loaded every embedded beam whose path contained "cure", which replaced `Metastatic.Adapters.Cure` with the older copy that has no `parse/1`. Hosts with `cure` on `PATH` and no Cure compiler on the code path (for example CI using `setup-cure`) then failed with `function Metastatic.Adapters.Cure.parse/1 is undefined or private`.
+- **Regression tests** -- added tests covering Metastatic modules in the archive, already-loaded Cure modules, and non-beam entries.
+
 ### Added & Fixed -- Subprocess Fallback & Comprehensive Language Support
 - **`Metastatic.Adapters.Cure.Subprocess`** -- added CLI / Subprocess fallback parser module for the Cure language adapter, enabling Cure source code parsing via external `cure` CLI binaries when in-process compiler modules (`Cure.Compiler.Lexer` / `Parser`) are unavailable.
 - **Language Delegation in `Metastatic`** -- updated `Metastatic.languages/0`, `Metastatic.supported?/1`, and `Metastatic.adapter_for_language/1` to delegate directly to `Metastatic.Languages` single source of truth, properly exposing all 9 supported languages (`:cure`, `:elixir`, `:erlang`, `:haskell`, `:javascript`, `:march`, `:python`, `:ruby`, `:typescript`).
