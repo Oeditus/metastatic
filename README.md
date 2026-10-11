@@ -10,7 +10,7 @@ Metastatic provides a unified MetaAST (Meta-level Abstract Syntax Tree) intermed
 
 Parse once, use everywhere. A universal meta-model for program syntax that enables cross-language code transformation and tooling.
 
-**Metastatic provides the foundation** - the MetaAST meta-model and 9 language adapters. Cross-language analysis and linting tools are provided by the companion Elixir library [MetaCredo](https://github.com/Oeditus/metacredo), which can handle and lint whatever sources `metastatic` understands.
+**Metastatic provides the foundation** - the MetaAST meta-model and 10 language adapters. Cross-language analysis and linting tools are provided by the companion Elixir library [MetaCredo](https://github.com/Oeditus/metacredo), which can handle and lint whatever sources `metastatic` understands.
 
 ## Key Features
 
@@ -26,7 +26,7 @@ Parse once, use everywhere. A universal meta-model for program syntax that enabl
 **What Metastatic Provides:**
 - MetaAST meta-model (M2 level) with three layers
 - Natural Language MetaAST (NL-MetaAST) for prose and documentation analysis (see [METAST_NL_SPEC.md](METAST_NL_SPEC.md))
-- Language adapters (Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, TypeScript; English and Spanish for prose)
+- Language adapters (Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, TypeScript; English and Spanish for prose)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
 - Semantic enrichment (OpKind metadata for code; voice, hedging, and readability for prose)
@@ -69,9 +69,21 @@ mix metastatic.validate_equivalence --verbose file1.py file2.ex
 
 ### Using Language Adapters
 
-### Using Language Adapters
+Metastatic currently supports 10 language adapters: Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, and TypeScript.
 
-Metastatic currently supports 9 language adapters: Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, and TypeScript.
+#### Agda & Haskell
+
+```elixir
+alias Metastatic.Adapters.{Agda, Haskell}
+alias Metastatic.Adapter
+
+# Parse Agda source code (Haskell parser bridge)
+{:ok, doc} = Adapter.abstract(Agda, "1 + 2", :agda)
+doc.ast  # => {:binary_op, [category: :arithmetic, operator: :+], ...}
+
+# Parse Haskell source code
+{:ok, doc} = Adapter.abstract(Haskell, "1 + 2", :haskell)
+```
 
 #### Cure & March
 

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added -- Agda Language Adapter (Option A: Haskell-based Parser Bridge)
+- **`Metastatic.Adapters.Agda`** -- added complete Agda language adapter supporting bidirectional transformations between Agda source code (`.agda`, `.lagda`) and MetaAST (M2).
+  - **`priv/parsers/agda/Parser.hs`** -- built-in Haskell-based parser bridge using `Agda.Syntax.Parser` and `Agda.Syntax.Concrete` to parse Agda modules, declarations, types, and expressions into JSON AST with precise source location ranges.
+  - **`Metastatic.Adapters.Agda.Subprocess`** -- execution manager for the parser binary with automatic GHC compile fallback.
+  - **`Metastatic.Adapters.Agda.ToMeta`** -- transforms concrete Agda AST to MetaAST layers: literals, variables, infix binary operations, lambdas, applications, arrow types, type definitions (`type_sig`, `data`, `record`), modules, imports, and postulates.
+  - **`Metastatic.Adapters.Agda.FromMeta` & `Unparser`** -- reifies MetaAST back to Agda AST and unparses to valid Agda source code, supporting full cross-language translation and round-tripping.
+  - **Registration** -- added `:agda` to `Metastatic.Languages` single source of truth and supported extensions (`.agda`, `.lagda`).
+
+### Improved -- Haskell Adapter Performance & Round-Trip Unparsing
+- **Direct Binary Execution in `Metastatic.Adapters.Haskell.Subprocess`** -- optimized subprocess execution to directly invoke the compiled parser binary if present instead of invoking `stack exec parser` on every run, resulting in a ~10x speedup for parsing and test suites.
+- **`Metastatic.Adapters.Haskell.Unparser`** -- implemented Haskell unparsing for expressions, literals, infix operations, lambdas, conditionals, let bindings, case expressions, type signatures, and modules, enabling `Metastatic.Adapters.Haskell.unparse/1` and `Metastatic.Adapter.round_trip/2` support.
+
 ### Fixed -- Cure escript loading no longer downgrades Metastatic
 - **`Metastatic.Adapters.Cure.ToMeta.load_beams/1`** -- extracted the beam loading done by the `cure` escript fallback into a public, tested function. It loads only `Cure.*` modules and never replaces a module that is already loaded or reachable on the code path.
 - **Why it matters** -- the released `cure` escript embeds its own dependencies, including an older Metastatic. Before this fix (v0.30.0), the fallback force-loaded every embedded beam whose path contained "cure", which replaced `Metastatic.Adapters.Cure` with the older copy that has no `parse/1`. Hosts with `cure` on `PATH` and no Cure compiler on the code path (for example CI using `setup-cure`) then failed with `function Metastatic.Adapters.Cure.parse/1 is undefined or private`.

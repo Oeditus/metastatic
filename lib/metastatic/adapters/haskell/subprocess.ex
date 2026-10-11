@@ -6,9 +6,10 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   """
 
   @parser_dir Path.expand("../../../../priv/parsers/haskell", __DIR__)
+  @bin_path Path.expand("../../../../priv/parsers/haskell/bin/parser", __DIR__)
 
   @doc """
-  Parse Haskell source code by invoking the Stack-based parser subprocess.
+  Parse Haskell source code by invoking the parser binary or Stack subprocess.
 
   Returns `{:ok, ast}` on success or `{:error, reason}` on failure.
 
@@ -20,31 +21,38 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    if File.dir?(@parser_dir) and System.find_executable("stack") != nil do
-      temp_path =
-        Path.join(
-          System.tmp_dir!(),
-          "metastatic_hs_#{System.unique_integer([:positive, :monotonic])}.txt"
-        )
+    cond do
+      File.exists?(@bin_path) ->
+        run_cmd(@bin_path, [], source)
 
-      File.write!(temp_path, source)
+      File.dir?(@parser_dir) and System.find_executable("stack") != nil ->
+        run_cmd("stack", ["exec", "parser", "--"], source, cd: @parser_dir)
 
-      try do
-        case System.cmd("stack", ["exec", "parser", "--", temp_path],
-               cd: @parser_dir,
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
-            handle_parser_output(output)
+      true ->
+        {:error, "Haskell parser unavailable"}
+    end
+  end
 
-          {error_output, _exit_code} ->
-            {:error, "Haskell parser failed: #{inspect(error_output)}"}
-        end
-      after
-        File.rm(temp_path)
+  defp run_cmd(executable, args, source, opts \\ []) do
+    temp_path =
+      Path.join(
+        System.tmp_dir!(),
+        "metastatic_hs_#{System.unique_integer([:positive, :monotonic])}.txt"
+      )
+
+    File.write!(temp_path, source)
+
+    try do
+      cmd_args = args ++ [temp_path]
+      case System.cmd(executable, cmd_args, Keyword.merge([stderr_to_stdout: true], opts)) do
+        {output, 0} ->
+          handle_parser_output(output)
+
+        {error_output, _exit_code} ->
+          {:error, "Haskell parser failed: #{inspect(error_output)}"}
       end
-    else
-      {:error, "Haskell parser unavailable"}
+    after
+      File.rm(temp_path)
     end
   end
 

@@ -23,7 +23,7 @@ defmodule Metastatic.Adapters.Haskell do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.Adapters.Haskell.{FromMeta, Subprocess, ToMeta}
+  alias Metastatic.Adapters.Haskell.{FromMeta, Subprocess, ToMeta, Unparser}
   alias Metastatic.Semantic.Enricher
 
   @impl true
@@ -49,8 +49,12 @@ defmodule Metastatic.Adapters.Haskell do
   end
 
   @impl true
+  def unparse(haskell_ast) when is_map(haskell_ast) do
+    Unparser.unparse(haskell_ast)
+  end
+
   def unparse(_haskell_ast) do
-    {:error, "Unparsing not yet implemented for Haskell"}
+    {:error, "Invalid Haskell AST"}
   end
 
   @impl true

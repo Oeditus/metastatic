@@ -751,4 +751,22 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert [_, _] = decls
     end
   end
+
+  describe "unparse/1 and round_trip" do
+    test "unparses literals and binary operators" do
+      ast = %{
+        "type" => "infix",
+        "left" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 1}},
+        "operator" => "+",
+        "right" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 2}}
+      }
+
+      assert {:ok, "1 + 2"} = Haskell.unparse(ast)
+    end
+
+    test "round-trips arithmetic expression via Metastatic.Adapter" do
+      assert {:ok, code} = Metastatic.Adapter.round_trip(Haskell, "1 + 2")
+      assert String.trim(code) == "1 + 2"
+    end
+  end
 end
