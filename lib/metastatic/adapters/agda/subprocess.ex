@@ -25,7 +25,8 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
       File.exists?(@bin_path) ->
         run_cmd(@bin_path, [], source)
 
-      File.dir?(@parser_dir) and (System.find_executable("ghc") != nil or File.exists?("/usr/bin/ghc")) ->
+      File.dir?(@parser_dir) and
+          (System.find_executable("ghc") != nil or File.exists?("/usr/bin/ghc")) ->
         ensure_compiled_and_run(source)
 
       true ->
@@ -37,7 +38,10 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
     ghc = System.find_executable("ghc") || "/usr/bin/ghc"
     File.mkdir_p!(Path.dirname(@bin_path))
 
-    case System.cmd(ghc, ["-O2", "Parser.hs", "-o", @bin_path], cd: @parser_dir, stderr_to_stdout: true) do
+    case System.cmd(ghc, ["-O2", "Parser.hs", "-o", @bin_path],
+           cd: @parser_dir,
+           stderr_to_stdout: true
+         ) do
       {_, 0} ->
         run_cmd(@bin_path, [], source)
 
@@ -57,6 +61,7 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
 
     try do
       cmd_args = args ++ [temp_path]
+
       case System.cmd(executable, cmd_args, Keyword.merge([stderr_to_stdout: true], opts)) do
         {output, 0} ->
           handle_parser_output(output)

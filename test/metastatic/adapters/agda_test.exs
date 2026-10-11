@@ -211,12 +211,20 @@ defmodule Metastatic.Adapters.AgdaTest do
         "params" => [],
         "typeExpr" => %{"type" => "var", "name" => "Set"},
         "constructors" => [
-          %{"type" => "type_sig", "name" => "zero", "signature" => %{"type" => "var", "name" => "Nat"}},
-          %{"type" => "type_sig", "name" => "suc", "signature" => %{
-            "type" => "arrow",
-            "from" => %{"type" => "var", "name" => "Nat"},
-            "to" => %{"type" => "var", "name" => "Nat"}
-          }}
+          %{
+            "type" => "type_sig",
+            "name" => "zero",
+            "signature" => %{"type" => "var", "name" => "Nat"}
+          },
+          %{
+            "type" => "type_sig",
+            "name" => "suc",
+            "signature" => %{
+              "type" => "arrow",
+              "from" => %{"type" => "var", "name" => "Nat"},
+              "to" => %{"type" => "var", "name" => "Nat"}
+            }
+          }
         ]
       }
 
@@ -232,7 +240,11 @@ defmodule Metastatic.Adapters.AgdaTest do
         "type" => "module",
         "name" => "Logic",
         "declarations" => [
-          %{"type" => "type_sig", "name" => "P", "signature" => %{"type" => "var", "name" => "Set"}}
+          %{
+            "type" => "type_sig",
+            "name" => "P",
+            "signature" => %{"type" => "var", "name" => "Set"}
+          }
         ]
       }
 
@@ -255,7 +267,11 @@ defmodule Metastatic.Adapters.AgdaTest do
       ast = %{
         "type" => "postulate",
         "declarations" => [
-          %{"type" => "type_sig", "name" => "axiom", "signature" => %{"type" => "var", "name" => "A"}}
+          %{
+            "type" => "type_sig",
+            "name" => "axiom",
+            "signature" => %{"type" => "var", "name" => "A"}
+          }
         ]
       }
 
@@ -275,7 +291,10 @@ defmodule Metastatic.Adapters.AgdaTest do
     end
 
     test "reifies binary operation" do
-      meta = {:binary_op, [operator: :+], [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+      meta =
+        {:binary_op, [operator: :+],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+
       assert {:ok, ast} = FromMeta.transform(meta)
       assert ast["type"] == "infix"
       assert ast["operator"] == "+"
@@ -289,7 +308,10 @@ defmodule Metastatic.Adapters.AgdaTest do
     end
 
     test "reifies type signature" do
-      meta = {:type_def, [name: "id", kind: :signature], [{:type_annotation, [kind: :arrow], [{:variable, [], "A"}, {:variable, [], "A"}]}]}
+      meta =
+        {:type_def, [name: "id", kind: :signature],
+         [{:type_annotation, [kind: :arrow], [{:variable, [], "A"}, {:variable, [], "A"}]}]}
+
       assert {:ok, ast} = FromMeta.transform(meta)
       assert ast["type"] == "type_sig"
       assert ast["name"] == "id"
@@ -326,8 +348,16 @@ defmodule Metastatic.Adapters.AgdaTest do
         "name" => "Bool",
         "typeExpr" => %{"type" => "var", "name" => "Set"},
         "constructors" => [
-          %{"type" => "type_sig", "name" => "true", "signature" => %{"type" => "var", "name" => "Bool"}},
-          %{"type" => "type_sig", "name" => "false", "signature" => %{"type" => "var", "name" => "Bool"}}
+          %{
+            "type" => "type_sig",
+            "name" => "true",
+            "signature" => %{"type" => "var", "name" => "Bool"}
+          },
+          %{
+            "type" => "type_sig",
+            "name" => "false",
+            "signature" => %{"type" => "var", "name" => "Bool"}
+          }
         ]
       }
 

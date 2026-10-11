@@ -44,6 +44,7 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
 
     try do
       cmd_args = args ++ [temp_path]
+
       case System.cmd(executable, cmd_args, Keyword.merge([stderr_to_stdout: true], opts)) do
         {output, 0} ->
           handle_parser_output(output)

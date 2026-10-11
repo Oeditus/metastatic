@@ -101,13 +101,17 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
     with {:ok, decls_meta} <- transform_list(decls) do
       body_meta =
         case Map.get(node, "body") do
-          nil -> []
+          nil ->
+            []
+
           %{} = b ->
             case transform(b) do
               {:ok, m, _} -> [m]
               _ -> []
             end
-          _ -> []
+
+          _ ->
+            []
         end
 
       {:ok,
@@ -139,8 +143,7 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
 
       {:ok,
        add_location(
-         {:language_specific,
-          [construct: :pi_type, telescope: tel_texts, language: :agda],
+         {:language_specific, [construct: :pi_type, telescope: tel_texts, language: :agda],
           [target_meta]},
          node
        ), %{}}
@@ -181,7 +184,10 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
     end
   end
 
-  def transform(%{"type" => "data", "name" => name, "typeExpr" => type_expr, "constructors" => ctors} = node) do
+  def transform(
+        %{"type" => "data", "name" => name, "typeExpr" => type_expr, "constructors" => ctors} =
+          node
+      ) do
     with {:ok, type_meta, _} <- transform(type_expr),
          {:ok, ctors_meta} <- transform_list(ctors) do
       {:ok,
@@ -192,7 +198,9 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
     end
   end
 
-  def transform(%{"type" => "record", "name" => name, "typeExpr" => type_expr, "fields" => fields} = node) do
+  def transform(
+        %{"type" => "record", "name" => name, "typeExpr" => type_expr, "fields" => fields} = node
+      ) do
     with {:ok, type_meta, _} <- transform(type_expr),
          {:ok, fields_meta} <- transform_list(fields) do
       {:ok,
@@ -209,9 +217,7 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
 
       {:ok,
        add_location(
-         {:container,
-          [container_type: :module, name: name, language: :agda],
-          decls_meta},
+         {:container, [container_type: :module, name: name, language: :agda], decls_meta},
          node
        ), %{}}
     end
@@ -239,9 +245,7 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
     with {:ok, decls_meta} <- transform_list(decls) do
       {:ok,
        add_location(
-         {:language_specific,
-          [construct: :postulate, language: :agda],
-          decls_meta},
+         {:language_specific, [construct: :postulate, language: :agda], decls_meta},
          node
        ), %{}}
     end
@@ -250,8 +254,7 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
   def transform(%{"type" => "infix_decl", "fixity" => fixity, "names" => names} = node) do
     {:ok,
      add_location(
-       {:language_specific,
-        [construct: :fixity, fixity: fixity, names: names, language: :agda],
+       {:language_specific, [construct: :fixity, fixity: fixity, names: names, language: :agda],
         []},
        node
      ), %{}}
@@ -400,16 +403,12 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
     end
   end
 
-  defp add_location(ast, %{"location" => %{"startLine" => sl, "startCol" => sc, "endLine" => el, "endCol" => ec}})
-       when not is_nil(sl) and not is_nil(sc) do
-    case ast do
-      {tag, meta, children} when is_list(meta) ->
-        loc_meta = [line: sl, col: sc, end_line: el, end_col: ec]
-        {tag, Keyword.merge(meta, loc_meta), children}
-
-      _ ->
-        ast
-    end
+  defp add_location({tag, meta, children} = _ast, %{
+         "location" => %{"startLine" => sl, "startCol" => sc, "endLine" => el, "endCol" => ec}
+       })
+       when is_list(meta) and not is_nil(sl) and not is_nil(sc) do
+    loc_meta = [line: sl, col: sc, end_line: el, end_col: ec]
+    {tag, Keyword.merge(meta, loc_meta), children}
   end
 
   defp add_location(ast, _), do: ast

@@ -120,8 +120,12 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
   defp to_sub_source(node), do: to_source(node)
 
   defp to_pattern(%{"type" => "var_pat", "name" => name}), do: name
-  defp to_pattern(%{"type" => "lit_pat", "value" => val}), do: to_source(%{"type" => "literal", "value" => val})
+
+  defp to_pattern(%{"type" => "lit_pat", "value" => val}),
+    do: to_source(%{"type" => "literal", "value" => val})
+
   defp to_pattern(%{"type" => "wildcard"}), do: "_"
+
   defp to_pattern(%{"type" => "con_pat", "name" => name, "patterns" => args}) do
     if args == [] do
       name
@@ -129,21 +133,26 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
       "#{name} " <> Enum.map_join(args, " ", &to_pattern/1)
     end
   end
+
   defp to_pattern(%{"type" => "tuple_pat", "elements" => elems}) do
     "(" <> Enum.map_join(elems, ", ", &to_pattern/1) <> ")"
   end
+
   defp to_pattern(%{"type" => "list_pat", "elements" => elems}) do
     "[" <> Enum.map_join(elems, ", ", &to_pattern/1) <> "]"
   end
+
   defp to_pattern(name) when is_binary(name), do: name
   defp to_pattern(other), do: inspect(other)
 
   defp to_binding(%{"type" => "pat_bind", "pattern" => p, "rhs" => rhs}) do
     "#{to_pattern(p)} = #{to_source(rhs)}"
   end
+
   defp to_binding(%{"type" => "fun_bind", "matches" => matches}) do
     Enum.map_join(matches, "; ", &to_match/1)
   end
+
   defp to_binding(other), do: to_source(other)
 
   defp to_match(%{"name" => name, "patterns" => pats, "rhs" => rhs}) do
@@ -158,8 +167,10 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
   defp to_type(sig) when is_binary(sig), do: sig
   defp to_type(%{"type" => "type_con", "name" => name}), do: name
   defp to_type(%{"type" => "type_var", "name" => name}), do: name
+
   defp to_type(%{"type" => "type_fun", "from" => from, "to" => to}) do
     "#{to_type(from)} -> #{to_type(to)}"
   end
+
   defp to_type(other), do: inspect(other)
 end

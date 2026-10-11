@@ -73,7 +73,12 @@ defmodule Metastatic.Adapters.Agda.Unparser do
     "#{lhs_str} = #{rhs_str}"
   end
 
-  def to_source(%{"type" => "data", "name" => name, "typeExpr" => type_expr, "constructors" => ctors}) do
+  def to_source(%{
+        "type" => "data",
+        "name" => name,
+        "typeExpr" => type_expr,
+        "constructors" => ctors
+      }) do
     type_str = to_source(type_expr)
 
     ctors_str =
@@ -86,7 +91,12 @@ defmodule Metastatic.Adapters.Agda.Unparser do
     end
   end
 
-  def to_source(%{"type" => "record", "name" => name, "typeExpr" => type_expr, "fields" => fields}) do
+  def to_source(%{
+        "type" => "record",
+        "name" => name,
+        "typeExpr" => type_expr,
+        "fields" => fields
+      }) do
     type_str = to_source(type_expr)
     fields_str = Enum.map_join(fields, "\n    ", &to_source/1)
     "record #{name} : #{type_str} where\n  field\n    #{fields_str}"
@@ -98,10 +108,9 @@ defmodule Metastatic.Adapters.Agda.Unparser do
 
   def to_source(%{"type" => "module", "name" => name, "declarations" => decls}) do
     decls_str =
-      decls
-      |> Enum.map(&to_source/1)
-      |> Enum.map(fn d -> "  " <> String.replace(d, "\n", "\n  ") end)
-      |> Enum.join("\n\n")
+      Enum.map_join(decls, "\n\n", fn d ->
+        "  " <> String.replace(to_source(d), "\n", "\n  ")
+      end)
 
     "module #{name} where\n\n#{decls_str}"
   end
@@ -120,10 +129,9 @@ defmodule Metastatic.Adapters.Agda.Unparser do
 
   def to_source(%{"type" => "postulate", "declarations" => decls}) do
     decls_str =
-      decls
-      |> Enum.map(&to_source/1)
-      |> Enum.map(fn d -> "  " <> String.replace(d, "\n", "\n  ") end)
-      |> Enum.join("\n")
+      Enum.map_join(decls, "\n", fn d ->
+        "  " <> String.replace(to_source(d), "\n", "\n  ")
+      end)
 
     "postulate\n#{decls_str}"
   end
@@ -149,13 +157,19 @@ defmodule Metastatic.Adapters.Agda.Unparser do
   defp to_rhs(other), do: to_source(other)
 
   defp to_pattern(%{"type" => "var_pat", "name" => name}), do: name
-  defp to_pattern(%{"type" => "lit_pat", "value" => val}), do: to_source(%{"type" => "literal", "value" => val})
+
+  defp to_pattern(%{"type" => "lit_pat", "value" => val}),
+    do: to_source(%{"type" => "literal", "value" => val})
+
   defp to_pattern(%{"type" => "wildcard"}), do: "_"
+
   defp to_pattern(%{"type" => "infix_pat", "operator" => op, "left" => left, "right" => right}) do
     "#{to_pattern(left)} #{op} #{to_pattern(right)}"
   end
+
   defp to_pattern(%{"type" => "app_pat", "elements" => elems}) do
     Enum.map_join(elems, " ", &to_pattern/1)
   end
+
   defp to_pattern(other), do: to_source(other)
 end

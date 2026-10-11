@@ -96,7 +96,13 @@ defmodule Metastatic.Adapters.Agda.FromMeta do
         if params == [] do
           %{"type" => "var_pat", "name" => name}
         else
-          %{"type" => "app_pat", "elements" => [%{"type" => "var_pat", "name" => name} | Enum.map(params, fn p -> %{"type" => "var_pat", "name" => p} end)]}
+          %{
+            "type" => "app_pat",
+            "elements" => [
+              %{"type" => "var_pat", "name" => name}
+              | Enum.map(params, fn p -> %{"type" => "var_pat", "name" => p} end)
+            ]
+          }
         end
 
       {:ok,
@@ -199,11 +205,22 @@ defmodule Metastatic.Adapters.Agda.FromMeta do
     {:error, "Unsupported MetaAST node for Agda: #{inspect(other)}"}
   end
 
-  defp transform_literal(:integer, val), do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "int", "value" => val}}}
-  defp transform_literal(:float, val), do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "float", "value" => val}}}
-  defp transform_literal(:string, val), do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "string", "value" => val}}}
-  defp transform_literal(:char, val), do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "char", "value" => val}}}
-  defp transform_literal(_, val), do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "string", "value" => to_string(val)}}}
+  defp transform_literal(:integer, val),
+    do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "int", "value" => val}}}
+
+  defp transform_literal(:float, val),
+    do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "float", "value" => val}}}
+
+  defp transform_literal(:string, val),
+    do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "string", "value" => val}}}
+
+  defp transform_literal(:char, val),
+    do: {:ok, %{"type" => "literal", "value" => %{"literalType" => "char", "value" => val}}}
+
+  defp transform_literal(_, val),
+    do:
+      {:ok,
+       %{"type" => "literal", "value" => %{"literalType" => "string", "value" => to_string(val)}}}
 
   defp transform_list(elements) when is_list(elements) do
     Enum.reduce_while(elements, {:ok, []}, fn elem, {:ok, acc} ->
