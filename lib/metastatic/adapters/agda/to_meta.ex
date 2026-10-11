@@ -381,12 +381,7 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
   end
 
   defp classify_operator(op) when is_binary(op) do
-    op_atom =
-      try do
-        String.to_existing_atom(op)
-      rescue
-        ArgumentError -> String.to_atom(op)
-      end
+    op_atom = String.to_atom(op)
 
     case op do
       o when o in ["+", "-", "*", "/", "%", "mod", "div"] ->
