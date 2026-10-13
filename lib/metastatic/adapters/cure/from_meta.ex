@@ -45,7 +45,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
     end
   end
 
-  defp emit({:variable, _meta, name}, _indent), do: name
+  defp emit({:variable, _meta, name}, _indent), do: to_string(name)
 
   defp emit({:binary_op, meta, [left, right]}, indent) do
     op = meta[:operator]
@@ -101,7 +101,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
 
   defp emit({:lambda, meta, [body]}, indent) do
     params = meta[:params] || []
-    param_names = Enum.map_join(params, ", ", fn {:param, _, n} -> n end)
+    param_names = Enum.map_join(params, ", ", fn {:param, _, n} -> to_string(n) end)
     "fn(#{param_names}) -> #{emit(body, indent)}"
   end
 
@@ -112,7 +112,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
     param_strs =
       Enum.map_join(params, ", ", fn
         {:param, pm, n} ->
-          if pm[:type], do: "#{n}: #{emit(pm[:type], indent)}", else: n
+          if pm[:type], do: "#{to_string(n)}: #{emit(pm[:type], indent)}", else: to_string(n)
       end)
 
     ret = if meta[:return_type], do: " -> #{emit(meta[:return_type], indent)}", else: ""
@@ -269,11 +269,103 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
     "#{prefix}#{module} as #{id}#{opts_str}"
   end
 
+  defp emit({:param, meta, name}, indent) do
+    type = if meta[:type], do: ": #{emit(meta[:type], indent)}", else: ""
+    "#{to_string(name)}#{type}"
+  end
+
+  defp emit({:macro_def, meta, rules}, indent) do
+    name = meta[:name]
+    pad = pad(indent + 2)
+
+    header = "macro #{name}"
+
+    case rules do
+      [] ->
+        header
+
+      _ ->
+        rules_str =
+          Enum.map_join(rules, "\n#{pad}", fn
+            rule when is_map(rule) ->
+              emit_macro_rule(rule, indent + 2)
+
+            ast ->
+              emit(ast, indent + 2)
+          end)
+
+        "#{header}\n#{pad}#{rules_str}"
+    end
+  end
+
+  defp emit({:precedencegroup, meta, _}, _indent) do
+    name = Keyword.get(meta, :name)
+    "precedencegroup #{name}"
+  end
+
+  defp emit({:fixity, meta, _}, _indent) do
+    fixity = Keyword.get(meta, :fixity, "infix")
+    op = Keyword.get(meta, :operator, "")
+    group = Keyword.get(meta, :group, "")
+    "#{fixity} `#{op}` : #{group}"
+  end
+
   defp emit(other, _indent), do: inspect(other)
+
+  defp emit_macro_rule(%{kind: :syntax} = rule, indent) do
+    keyword = rule[:keyword] || ""
+    keyword_str = if keyword != "", do: " #{keyword}", else: ""
+    contextual = if rule[:contextual], do: " contextual", else: ""
+
+    target = rule[:template] || rule[:expander]
+
+    if target do
+      "syntax#{keyword_str}#{contextual} becomes #{emit(target, indent)}"
+    else
+      "syntax#{keyword_str}#{contextual}"
+    end
+  end
+
+  defp emit_macro_rule(%{kind: :computed} = rule, indent) do
+    keyword = rule[:keyword] || ""
+    keyword_str = if keyword != "", do: " #{keyword} ", else: " "
+    elab = rule[:elab] || rule[:template] || rule[:expander]
+    verb = if rule[:direct_inputs], do: "computed directly by", else: "computed by"
+    "syntax#{keyword_str}#{verb} #{emit(elab, indent)}"
+  end
+
+  defp emit_macro_rule(%{kind: :literal, template: template}, indent) do
+    "literal becomes #{emit(template, indent)}"
+  end
+
+  defp emit_macro_rule(%{kind: :accepts, family: family}, _indent) do
+    "accepts #{family}"
+  end
+
+  defp emit_macro_rule(%{kind: :expands_with, expander: expander}, indent) do
+    "expands with #{emit(expander, indent)}"
+  end
+
+  defp emit_macro_rule(%{kind: :syntax_family, name: name}, _indent) do
+    "syntax family #{name}"
+  end
+
+  defp emit_macro_rule(%{kind: :open_category, name: name}, _indent) do
+    "open #{name}"
+  end
+
+  defp emit_macro_rule(%{kind: :fail, name: name}, _indent) do
+    "fail #{name}"
+  end
+
+  defp emit_macro_rule(rule, _indent) when is_map(rule) do
+    kind = Map.get(rule, :kind, "rule")
+    "#{kind}"
+  end
 
   defp emit_field({:param, meta, name}, indent) do
     type = if meta[:type], do: ": #{emit(meta[:type], indent)}", else: ""
-    "#{name}#{type}"
+    "#{to_string(name)}#{type}"
   end
 
   defp emit_variant({:function_def, meta, _}) do
@@ -287,7 +379,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
     end
   end
 
-  defp emit_variant({:variable, _, name}), do: name
+  defp emit_variant({:variable, _, name}), do: to_string(name)
 
   # Actor container rendering (Cure v0.25.0+).
   # Emits `actor Name [with InitExpr]` followed by lifecycle callback blocks.

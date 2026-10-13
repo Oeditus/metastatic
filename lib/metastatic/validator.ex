@@ -210,7 +210,10 @@ defmodule Metastatic.Validator do
     :type_annotation,
     :decorator,
     :record_update,
-    :child_spec
+    :child_spec,
+    :macro_def,
+    :precedencegroup,
+    :fixity
   ]
 
   # Native layer types (M2.3)

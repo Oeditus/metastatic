@@ -905,4 +905,119 @@ defmodule Metastatic.ASTTest do
       assert Enum.reverse(tags) == [:function_def, :param, :variable, :variable, :literal]
     end
   end
+
+  describe "Atom identifiers for variables and parameters" do
+    test "variable accepts atom identifiers like :end" do
+      ast = {:variable, [], :end}
+      assert AST.conforms?(ast)
+      assert AST.to_string(ast) == "end"
+      assert AST.variables(ast) == MapSet.new(["end"])
+    end
+
+    test "param accepts atom identifiers like :end" do
+      ast = {:param, [], :end}
+      assert AST.conforms?(ast)
+      assert AST.to_string(ast) == "end"
+    end
+
+    test "param with atom name and default conforms" do
+      ast = {:param, [default: {:literal, [subtype: :integer], 0}], :end}
+      assert AST.conforms?(ast)
+    end
+
+    test "function_def with atom parameters conforms" do
+      func =
+        {:function_def, [name: "slice", params: [{:param, [], :start}, {:param, [], :end}]],
+         [{:variable, [], :end}]}
+
+      assert AST.conforms?(func)
+      assert AST.variables(func) == MapSet.new(["end"])
+    end
+
+    test "lambda with atom parameters conforms" do
+      lam =
+        {:lambda, [params: [{:param, [], :end}]], [{:variable, [], :end}]}
+
+      assert AST.conforms?(lam)
+      assert AST.variables(lam) == MapSet.new(["end"])
+    end
+
+    test "builders support atom identifiers" do
+      var = AST.variable(:end)
+      assert var == {:variable, [], :end}
+      assert AST.conforms?(var)
+
+      param = AST.param_node(:end)
+      assert param == {:param, [name: :end], :end}
+      assert AST.conforms?(param)
+    end
+  end
+
+  describe "Macro and Syntax Extensions conformance" do
+    test "empty macro_def conforms" do
+      macro_ast = {:macro_def, [name: "Every"], []}
+      assert AST.conforms?(macro_ast)
+      assert AST.to_string(macro_ast) == "macro Every"
+    end
+
+    test "macro_def with rule maps conforms" do
+      macro_ast =
+        {:macro_def, [name: "Every", line: 1],
+         [
+           %{
+             kind: :syntax,
+             template: {:variable, [line: 1], "pattern"},
+             expander: {:literal, [subtype: :integer], 42}
+           }
+         ]}
+
+      assert AST.conforms?(macro_ast)
+    end
+
+    test "macro_def builder creates conforming AST" do
+      macro_ast = AST.macro_def("Every", [%{kind: :syntax}])
+      assert AST.conforms?(macro_ast)
+    end
+
+    test "macro_def invalid children are rejected" do
+      refute AST.conforms?({:macro_def, [name: "Bad"], "not_a_list"})
+      refute AST.conforms?({:macro_def, [name: "Bad"], ["not_a_map_or_node"]})
+      refute AST.conforms?({:macro_def, [name: "Bad"], [%{template: {:invalid, [], []}}]})
+    end
+
+    test "macro_def traverses embedded AST inside rule maps" do
+      macro_ast =
+        {:macro_def, [name: "Every"],
+         [
+           %{
+             kind: :syntax,
+             template: {:variable, [], :pattern},
+             expander: {:variable, [], "result"}
+           }
+         ]}
+
+      vars = AST.variables(macro_ast)
+      assert vars == MapSet.new(["pattern", "result"])
+
+      {_, count} =
+        AST.traverse(macro_ast, 0, fn node, acc -> {node, acc + 1} end, fn node, acc ->
+          {node, acc}
+        end)
+
+      # 4 visits: :macro_def root, rule map, template :variable, expander :variable
+      assert count == 4
+    end
+
+    test "precedencegroup conforms" do
+      node = {:precedencegroup, [name: "Additive", higher_than: "Multiplicative"], []}
+      assert AST.conforms?(node)
+      assert AST.to_string(node) == "precedencegroup Additive"
+    end
+
+    test "fixity conforms" do
+      node = {:fixity, [operator: "+", assoc: :left, group: "Additive"], []}
+      assert AST.conforms?(node)
+      assert AST.to_string(node) == "infix `+` : Additive"
+    end
+  end
 end

@@ -312,8 +312,29 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
     {:match_arm, meta, Enum.map(body, &normalize/1)}
   end
 
-  def normalize({:variable, meta, name}) when is_binary(name) do
+  def normalize({:variable, meta, name}) when is_binary(name) or is_atom(name) do
     {:variable, to_keyword_list(meta), name}
+  end
+
+  def normalize({:param, meta, name}) when is_binary(name) or is_atom(name) do
+    normalize_param({:param, meta, name})
+  end
+
+  def normalize({:macro_def, meta, rules}) when is_list(rules) do
+    meta = to_keyword_list(meta)
+
+    normalized_rules =
+      Enum.map(rules, fn
+        rule when is_map(rule) ->
+          rule
+          |> normalize_map_key(:template, &normalize/1)
+          |> normalize_map_key(:expander, &normalize/1)
+
+        other ->
+          normalize(other)
+      end)
+
+    {:macro_def, meta, normalized_rules}
   end
 
   def normalize({type, meta, children}) when is_atom(type) and is_list(children) do
@@ -390,7 +411,7 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
     end
   end
 
-  defp normalize_param({:param, meta, name}) when is_binary(name) do
+  defp normalize_param({:param, meta, name}) when is_binary(name) or is_atom(name) do
     meta =
       meta
       |> to_keyword_list()
@@ -401,6 +422,13 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
     {:param, meta, name}
   end
 
-  defp normalize_param(name) when is_binary(name), do: {:param, [], name}
+  defp normalize_param(name) when is_binary(name) or is_atom(name), do: {:param, [], name}
   defp normalize_param(other), do: other
+
+  defp normalize_map_key(map, key, fun) do
+    case Map.get(map, key) do
+      nil -> map
+      val -> Map.put(map, key, fun.(val))
+    end
+  end
 end

@@ -227,5 +227,44 @@ defmodule Metastatic.Adapters.CureTest do
       assert {:ok, source} = Cure.unparse(meta_ast)
       assert String.contains?(source, "fn add(a, b) = a + b")
     end
+
+    test "reifies atom-named variables and params" do
+      meta_ast =
+        {:function_def, [name: "slice", params: [{:param, [], :start}, {:param, [], :end}]],
+         [
+           {:variable, [], :end}
+         ]}
+
+      assert {:ok, source} = Cure.unparse(meta_ast)
+      assert String.contains?(source, "fn slice(start, end) = end")
+    end
+
+    test "normalizes and reifies macro_def" do
+      macro_ast =
+        {:macro_def, [name: "Every"],
+         [
+           %{
+             kind: :syntax,
+             keyword: "value",
+             template: {:literal, [subtype: :integer], 100}
+           }
+         ]}
+
+      normalised = ToMeta.normalize(macro_ast)
+      assert AST.conforms?(normalised)
+
+      assert {:ok, source} = Cure.unparse(normalised)
+      assert String.contains?(source, "macro Every")
+      assert String.contains?(source, "syntax value becomes 100")
+    end
+
+    test "parses Cure macro source and conforms when Cure compiler available" do
+      if ToMeta.available?() do
+        cure_code = "macro Value\n  syntax value becomes 42\nend"
+        assert {:ok, ast} = Cure.parse(cure_code)
+        assert {:ok, meta_ast, _meta} = Cure.to_meta(ast)
+        assert AST.conforms?(meta_ast)
+      end
+    end
   end
 end

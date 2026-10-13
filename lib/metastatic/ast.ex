@@ -231,6 +231,18 @@ defmodule Metastatic.AST do
     `##`), or `:block` (C-style). Analyzers and code generators skip
     comments; formatters and documentation tooling use them to
     round-trip source faithfully.
+
+  ## Macro / Syntax Extensions (Cure v0.30.0+)
+
+  - **`:macro_def`** -- macro container definition `macro Name`.
+    Shape `{:macro_def, meta, rules}`. `meta` carries `:name` (string or atom),
+    and optional `:leading_segments`. `rules` is a list of macro rules
+    (such as syntax rules `%{kind: :syntax, ...}`, syntax families, etc.)
+    or child AST nodes.
+  - **`:precedencegroup`** -- operator precedence group declaration.
+    Shape `{:precedencegroup, meta, []}` where meta carries `:name`, `:associativity`, etc.
+  - **`:fixity`** -- operator fixity declaration.
+    Shape `{:fixity, meta, []}` where meta carries `:operator`, `:fixity`, `:group`, etc.
   """
 
   # ----- Type Definitions -----
@@ -302,6 +314,9 @@ defmodule Metastatic.AST do
           | :decorator
           | :record_update
           | :child_spec
+          | :macro_def
+          | :precedencegroup
+          | :fixity
 
   @typedoc """
   Clause entry for grouped multi-clause function definitions.
@@ -531,7 +546,10 @@ defmodule Metastatic.AST do
     :type_annotation,
     :decorator,
     :record_update,
-    :child_spec
+    :child_spec,
+    :macro_def,
+    :precedencegroup,
+    :fixity
   ]
 
   @native_types [:language_specific]
@@ -818,6 +836,43 @@ defmodule Metastatic.AST do
     {value, acc}
   end
 
+  # Macro definitions: rules may contain maps (e.g. syntax rules) with embedded ASTs
+  defp traverse_children(:macro_def, rules, acc, pre, post) when is_list(rules) do
+    Enum.map_reduce(rules, acc, fn
+      rule, acc when is_map(rule) ->
+        {rule, acc} = pre.(rule, acc)
+
+        {rule, acc} =
+          Enum.reduce(rule, {%{}, acc}, fn {k, v}, {map_acc, acc} ->
+            case v do
+              {type, meta, _} = node when is_atom(type) and is_list(meta) ->
+                {new_node, acc} = do_traverse(node, acc, pre, post)
+                {Map.put(map_acc, k, new_node), acc}
+
+              nodes when is_list(nodes) ->
+                {new_nodes, acc} =
+                  Enum.map_reduce(nodes, acc, fn
+                    {type, meta, _} = node, acc when is_atom(type) and is_list(meta) ->
+                      do_traverse(node, acc, pre, post)
+
+                    other, acc ->
+                      {other, acc}
+                  end)
+
+                {Map.put(map_acc, k, new_nodes), acc}
+
+              other ->
+                {Map.put(map_acc, k, other), acc}
+            end
+          end)
+
+        post.(rule, acc)
+
+      child, acc ->
+        do_traverse(child, acc, pre, post)
+    end)
+  end
+
   # Nodes with list of children
   defp traverse_children(_type, children, acc, pre, post) when is_list(children) do
     {new_children, acc} =
@@ -961,7 +1016,7 @@ defmodule Metastatic.AST do
   end
 
   defp valid_node?(:variable, _meta, name) do
-    is_binary(name)
+    is_binary(name) or is_atom(name)
   end
 
   defp valid_node?(:list, _meta, elements) do
@@ -1244,7 +1299,7 @@ defmodule Metastatic.AST do
   # Param node: {:param, [kind: :positional, pattern: pattern, default: default], name}
   @param_kinds [:positional, :keyword, :variadic, :keyword_variadic]
 
-  defp valid_node?(:param, meta, name) when is_binary(name) do
+  defp valid_node?(:param, meta, name) when is_binary(name) or is_atom(name) do
     pattern = Keyword.get(meta, :pattern)
     default = Keyword.get(meta, :default)
     kind = Keyword.get(meta, :kind, :positional)
@@ -1342,10 +1397,57 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:child_spec, _meta, _), do: false
 
+  # Macro definition: {:macro_def, meta, rules}
+  # (Cure v0.30.0+). rules is a list of rule maps (syntax rules, families, etc.)
+  # or child AST nodes.
+  defp valid_node?(:macro_def, meta, rules) do
+    name = Keyword.get(meta, :name)
+
+    (is_nil(name) or is_binary(name) or is_atom(name)) and
+      is_list(rules) and Enum.all?(rules, &valid_macro_rule?/1)
+  end
+
+  # Precedence group: {:precedencegroup, meta, []}
+  defp valid_node?(:precedencegroup, meta, []) do
+    name = Keyword.get(meta, :name)
+    is_atom(name) or is_binary(name)
+  end
+
+  defp valid_node?(:precedencegroup, _meta, _), do: false
+
+  # Fixity declaration: {:fixity, meta, []}
+  defp valid_node?(:fixity, meta, []) do
+    operator = Keyword.get(meta, :operator)
+    group = Keyword.get(meta, :group)
+    (is_binary(operator) or is_atom(operator)) and (is_atom(group) or is_binary(group))
+  end
+
+  defp valid_node?(:fixity, _meta, _), do: false
+
   # M2.3 Native type
   defp valid_node?(:language_specific, meta, _native_ast) do
     language = Keyword.get(meta, :language)
     is_atom(language)
+  end
+
+  defp valid_macro_rule?(rule) when is_map(rule) do
+    valid_template? =
+      case Map.get(rule, :template) do
+        {t, m, _} when is_atom(t) and is_list(m) -> conforms?(rule.template)
+        _ -> true
+      end
+
+    valid_expander? =
+      case Map.get(rule, :expander) do
+        {t, m, _} when is_atom(t) and is_list(m) -> conforms?(rule.expander)
+        _ -> true
+      end
+
+    valid_template? and valid_expander?
+  end
+
+  defp valid_macro_rule?(rule) do
+    conforms?(rule)
   end
 
   defp valid_pattern_arms?(arms) when is_list(arms) do
@@ -1363,7 +1465,7 @@ defmodule Metastatic.AST do
   # Validate params list in function definitions and lambdas
   defp valid_params?(params) when is_list(params) do
     Enum.all?(params, fn
-      {:param, meta, name} when is_list(meta) and is_binary(name) ->
+      {:param, meta, name} when is_list(meta) and (is_binary(name) or is_atom(name)) ->
         pattern = Keyword.get(meta, :pattern)
         default = Keyword.get(meta, :default)
 
@@ -1427,8 +1529,8 @@ defmodule Metastatic.AST do
         ast,
         MapSet.new(),
         fn
-          {:variable, _meta, name} = node, acc when is_binary(name) ->
-            {node, MapSet.put(acc, name)}
+          {:variable, _meta, name} = node, acc when is_binary(name) or is_atom(name) ->
+            {node, MapSet.put(acc, Kernel.to_string(name))}
 
           node, acc ->
             {node, acc}
@@ -1724,8 +1826,8 @@ defmodule Metastatic.AST do
       iex> Metastatic.AST.variable("count", line: 10)
       {:variable, [line: 10], "count"}
   """
-  @spec variable(String.t(), keyword()) :: meta_ast()
-  def variable(name, meta \\ []) when is_binary(name) do
+  @spec variable(String.t() | atom(), keyword()) :: meta_ast()
+  def variable(name, meta \\ []) when is_binary(name) or is_atom(name) do
     {:variable, meta, name}
   end
 
@@ -1857,7 +1959,7 @@ defmodule Metastatic.AST do
   end
 
   defp normalize_param({:param, _, _} = param), do: param
-  defp normalize_param(name) when is_binary(name), do: {:param, [], name}
+  defp normalize_param(name) when is_binary(name) or is_atom(name), do: {:param, [], name}
 
   # ----- New Type Builder Helpers -----
 
@@ -2165,9 +2267,16 @@ defmodule Metastatic.AST do
   end
 
   @doc "Builds a `:param` node."
-  @spec param_node(String.t(), keyword()) :: meta_ast()
-  def param_node(name, extra_meta \\ []) when is_binary(name) do
+  @spec param_node(String.t() | atom(), keyword()) :: meta_ast()
+  def param_node(name, extra_meta \\ []) when is_binary(name) or is_atom(name) do
     {:param, [name: name] ++ extra_meta, name}
+  end
+
+  @doc "Builds a `:macro_def` node."
+  @spec macro_def(String.t() | atom(), list(), keyword()) :: meta_ast()
+  def macro_def(name, rules \\ [], extra_meta \\ [])
+      when (is_binary(name) or is_atom(name)) and is_list(rules) do
+    {:macro_def, [name: name] ++ extra_meta, rules}
   end
 
   @doc "Builds an `:attribute_access` node."
@@ -2525,7 +2634,7 @@ defmodule Metastatic.AST do
     end
   end
 
-  defp do_to_string({:variable, _meta, name}), do: name
+  defp do_to_string({:variable, _meta, name}), do: Kernel.to_string(name)
 
   defp do_to_string({:binary_op, meta, [left, right]}) do
     op = Keyword.get(meta, :operator, :op)
@@ -2597,7 +2706,15 @@ defmodule Metastatic.AST do
     "def #{name}(#{params_str}) do #{body_str} end"
   end
 
-  defp do_to_string({:param, _meta, name}), do: name
+  defp do_to_string({:param, _meta, name}), do: Kernel.to_string(name)
+  defp do_to_string({:macro_def, meta, _rules}), do: "macro #{Keyword.get(meta, :name, "?")}"
+
+  defp do_to_string({:precedencegroup, meta, _}),
+    do: "precedencegroup #{Keyword.get(meta, :name, "?")}"
+
+  defp do_to_string({:fixity, meta, _}),
+    do:
+      "#{Keyword.get(meta, :fixity, "infix")} `#{Keyword.get(meta, :operator, "")}` : #{Keyword.get(meta, :group, "")}"
 
   defp do_to_string({:lambda, meta, body}) do
     params = Keyword.get(meta, :params, [])
@@ -2748,6 +2865,12 @@ defmodule Metastatic.AST do
        when type in [:literal, :variable] do
     _ = children
     nil
+  end
+
+  defp find_invalid_child({:macro_def, _meta, rules}) when is_list(rules) do
+    Enum.find_value(rules, fn rule ->
+      if valid_macro_rule?(rule), do: nil, else: {:error, {:invalid_macro_rule, rule}}
+    end)
   end
 
   defp find_invalid_child({_type, _meta, children}) when is_list(children) do
