@@ -5,23 +5,31 @@ defmodule Metastatic.Adapters.March.Subprocess do
   Handles communication with OCaml binaries via stdin/stdout with JSON serialization.
   """
 
-  @parser_bin "priv/parsers/march/_build/default/bin/parser.exe"
-  @unparser_bin "priv/parsers/march/_build/default/bin/unparser.exe"
+  alias Metastatic.Priv
+
+  @parser_bin "parsers/march/_build/default/bin/parser.exe"
+  @unparser_bin "parsers/march/_build/default/bin/unparser.exe"
+  @parser_rel_dir "parsers/march"
 
   @doc """
   Parse March source code to AST JSON map using native OCaml parser.
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    bin_full_path = Path.join(File.cwd!(), @parser_bin)
+    bin_full_path = Priv.parser_path(@parser_bin)
+    global_bin = Priv.find_executable("metastatic-march-parser")
+    dune_bin = Priv.find_executable("dune")
 
     cond do
       File.exists?(bin_full_path) ->
         run_binary(bin_full_path, source, &extract_ast/1)
 
-      System.find_executable("dune") != nil ->
-        parser_dir = Path.join(File.cwd!(), "priv/parsers/march")
-        run_dune_cmd(parser_dir, ["exec", "parser"], source, &extract_ast/1)
+      global_bin != nil ->
+        run_binary(global_bin, source, &extract_ast/1)
+
+      dune_bin != nil ->
+        parser_dir = Priv.parser_path(@parser_rel_dir)
+        run_dune_cmd(dune_bin, parser_dir, ["exec", "parser"], source, &extract_ast/1)
 
       true ->
         {:error, "March OCaml parser binary unavailable"}
@@ -35,15 +43,20 @@ defmodule Metastatic.Adapters.March.Subprocess do
   def unparse(ast) when is_map(ast) do
     case Jason.encode(ast) do
       {:ok, json} ->
-        bin_full_path = Path.join(File.cwd!(), @unparser_bin)
+        bin_full_path = Priv.parser_path(@unparser_bin)
+        global_bin = Priv.find_executable("metastatic-march-unparser")
+        dune_bin = Priv.find_executable("dune")
 
         cond do
           File.exists?(bin_full_path) ->
             run_binary(bin_full_path, json, &extract_source/1)
 
-          System.find_executable("dune") != nil ->
-            parser_dir = Path.join(File.cwd!(), "priv/parsers/march")
-            run_dune_cmd(parser_dir, ["exec", "unparser"], json, &extract_source/1)
+          global_bin != nil ->
+            run_binary(global_bin, json, &extract_source/1)
+
+          dune_bin != nil ->
+            parser_dir = Priv.parser_path(@parser_rel_dir)
+            run_dune_cmd(dune_bin, parser_dir, ["exec", "unparser"], json, &extract_source/1)
 
           true ->
             {:error, "March OCaml unparser binary unavailable"}
@@ -66,7 +79,10 @@ defmodule Metastatic.Adapters.March.Subprocess do
     File.write!(temp_path, input)
 
     try do
-      case System.cmd(bin_path, [temp_path], stderr_to_stdout: true) do
+      case System.cmd(bin_path, [temp_path],
+             env: Priv.subprocess_env(),
+             stderr_to_stdout: true
+           ) do
         {output, 0} -> decoder.(output)
         {output, _code} -> {:error, output}
       end
@@ -75,7 +91,7 @@ defmodule Metastatic.Adapters.March.Subprocess do
     end
   end
 
-  defp run_dune_cmd(dir, args, input, decoder) do
+  defp run_dune_cmd(dune_bin, dir, args, input, decoder) do
     temp_path =
       Path.join(
         System.tmp_dir!(),
@@ -85,7 +101,11 @@ defmodule Metastatic.Adapters.March.Subprocess do
     File.write!(temp_path, input)
 
     try do
-      case System.cmd("dune", args ++ ["--", temp_path], cd: dir, stderr_to_stdout: true) do
+      case System.cmd(dune_bin, args ++ ["--", temp_path],
+             cd: dir,
+             env: Priv.subprocess_env(),
+             stderr_to_stdout: true
+           ) do
         {output, 0} -> decoder.(output)
         {output, _code} -> {:error, output}
       end

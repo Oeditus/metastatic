@@ -1,7 +1,14 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-require 'bundler/setup'
+$VERBOSE = nil
+
+begin
+  require 'bundler/setup'
+rescue LoadError, StandardError
+  # Fall back to global/mise Ruby gems when running outside a bundle context
+end
+
 require 'parser/current'
 require 'json'
 

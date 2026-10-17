@@ -102,24 +102,73 @@ defmodule Metastatic.Adapters.Erlang do
     if Code.ensure_loaded?(:erl_scan) and Code.ensure_loaded?(:erl_parse) do
       charlist = String.to_charlist(source)
 
-      with {:ok, tokens, _} <- :erl_scan.string(charlist),
-           {:ok, exprs} <- :erl_parse.parse_exprs(tokens) do
-        # For single expression, return it directly
-        # For multiple expressions, return as list
-        case exprs do
-          [single] -> {:ok, single}
-          multiple -> {:ok, {:block, multiple}}
-        end
-      else
+      case :erl_scan.string(charlist) do
+        {:ok, tokens, _} ->
+          parse_tokens(tokens)
+
         {:error, {_line, _module, reason}, _} ->
           {:error, "Syntax error: #{inspect(reason)}"}
-
-        {:error, {_line, _module, reason}} ->
-          {:error, "Parse error: #{inspect(reason)}"}
       end
     else
       {:error, "Erlang parser unavailable"}
     end
+  end
+
+  defp parse_tokens(tokens) do
+    case :erl_parse.parse_exprs(tokens) do
+      {:ok, [single]} ->
+        {:ok, single}
+
+      {:ok, multiple} ->
+        {:ok, {:block, multiple}}
+
+      {:error, {_line, _module, reason}} ->
+        case parse_forms(tokens, []) do
+          {:ok, [single]} ->
+            {:ok, single}
+
+          {:ok, [_ | _] = forms} ->
+            {:ok, {:block, forms}}
+
+          :error ->
+            {:error, "Parse error: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  defp parse_forms([], []), do: :error
+  defp parse_forms([], forms), do: {:ok, Enum.reverse(forms)}
+
+  defp parse_forms(tokens, forms) do
+    case split_next_form(tokens, []) do
+      {:ok, form_tokens, rest} ->
+        case :erl_parse.parse_form(form_tokens) do
+          {:ok, form} ->
+            parse_forms(rest, [form | forms])
+
+          {:error, _} ->
+            case :erl_parse.parse_exprs(form_tokens) do
+              {:ok, exprs} ->
+                parse_forms(rest, Enum.reverse(exprs) ++ forms)
+
+              {:error, _} ->
+                :error
+            end
+        end
+
+      :error ->
+        :error
+    end
+  end
+
+  defp split_next_form([], _acc), do: :error
+
+  defp split_next_form([{:dot, _} = dot | rest], acc) do
+    {:ok, Enum.reverse([dot | acc]), rest}
+  end
+
+  defp split_next_form([tok | rest], acc) do
+    split_next_form(rest, [tok | acc])
   end
 
   @impl true

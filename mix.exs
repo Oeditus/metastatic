@@ -96,6 +96,30 @@ defmodule Metastatic.MixProject do
       name: @app,
       files: ~w(
         lib
+        priv/parsers/agda/Makefile
+        priv/parsers/agda/Parser.hs
+        priv/parsers/english/parser.js
+        priv/parsers/haskell/Parser.hs
+        priv/parsers/haskell/README.md
+        priv/parsers/haskell/metastatic-haskell-parser.cabal
+        priv/parsers/haskell/package.yaml
+        priv/parsers/haskell/stack.yaml
+        priv/parsers/haskell/stack.yaml.lock
+        priv/parsers/javascript/package.json
+        priv/parsers/javascript/package-lock.json
+        priv/parsers/javascript/parser.js
+        priv/parsers/javascript/unparser.js
+        priv/parsers/march/dune-project
+        priv/parsers/march/march_parser.opam
+        priv/parsers/march/bin
+        priv/parsers/march/lib
+        priv/parsers/python/parser.py
+        priv/parsers/python/requirements.txt
+        priv/parsers/python/unparser.py
+        priv/parsers/ruby/Gemfile
+        priv/parsers/ruby/Gemfile.lock
+        priv/parsers/ruby/parser.rb
+        priv/parsers/ruby/unparser.rb
         .formatter.exs
         mix.exs
         README.md
@@ -161,6 +185,7 @@ defmodule Metastatic.MixProject do
         Metastatic.AST,
         Metastatic.Document,
         Metastatic.Builder,
+        Metastatic.Priv,
         Metastatic.Validator,
         Metastatic.Cache,
         Metastatic.Cache.ETS,

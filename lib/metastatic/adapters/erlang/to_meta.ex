@@ -214,10 +214,23 @@ defmodule Metastatic.Adapters.Erlang.ToMeta do
     end
   end
 
-  # Blocks without line info (legacy form)
+  # Blocks without line info (legacy form / multi-form module)
   def transform({:block, expressions}) when is_list(expressions) do
-    with {:ok, exprs_meta} <- transform_list(expressions) do
-      {:ok, {:block, [], exprs_meta}, %{}}
+    case Enum.split_while(expressions, &(not match?({:attribute, _, :module, _}, &1))) do
+      {leading, [{:attribute, line, :module, name} | rest]} ->
+        mod_name = if is_atom(name), do: Atom.to_string(name), else: inspect(name)
+
+        with {:ok, body_meta} <- transform_list(leading ++ rest) do
+          {:ok,
+           {:container,
+            [container_type: :module, name: mod_name, language: :erlang] ++ line_meta(line),
+            body_meta}, %{}}
+        end
+
+      _ ->
+        with {:ok, exprs_meta} <- transform_list(expressions) do
+          {:ok, {:block, [], exprs_meta}, %{}}
+        end
     end
   end
 

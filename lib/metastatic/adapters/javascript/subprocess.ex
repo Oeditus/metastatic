@@ -6,8 +6,10 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   Automatically ensures npm packages in `priv/parsers/javascript` are installed on demand when needed.
   """
 
-  @parser_path "priv/parsers/javascript/parser.js"
-  @unparser_path "priv/parsers/javascript/unparser.js"
+  alias Metastatic.Priv
+
+  @parser_path "parsers/javascript/parser.js"
+  @unparser_path "parsers/javascript/unparser.js"
 
   @doc """
   Parse JS/TS source code to Babel AST JSON.
@@ -22,9 +24,9 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    script_full_path = Path.join(File.cwd!(), @parser_path)
+    script_full_path = Priv.parser_path(@parser_path)
 
-    if File.exists?(script_full_path) and System.find_executable("node") != nil do
+    if File.exists?(script_full_path) and Priv.find_executable("node") != nil do
       case run_node_script(@parser_path, source) do
         {:ok, result} ->
           case Jason.decode(result) do
@@ -84,48 +86,84 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   # Private Functions
 
   defp run_node_script(script_path, input) do
-    with :ok <- ensure_node_modules() do
-      script_full_path = Path.join(File.cwd!(), script_path)
+    script_full_path = Priv.parser_path(script_path)
+    parser_dir = Path.dirname(script_full_path)
 
-      if File.exists?(script_full_path) do
-        temp_path =
-          Path.join(
-            System.tmp_dir!(),
-            "metastatic_js_#{System.unique_integer([:positive, :monotonic])}.txt"
-          )
+    case ensure_node_modules(parser_dir) do
+      :ok ->
+        do_run_node_script(script_full_path, parser_dir, input)
 
-        File.write!(temp_path, input)
-
-        try do
-          case System.cmd("node", [script_full_path, temp_path], stderr_to_stdout: true) do
-            {output, 0} ->
-              {:ok, output}
-
-            {error_output, exit_code} ->
-              {:error, "Exit code #{exit_code}: #{error_output}"}
-          end
-        after
-          File.rm(temp_path)
-        end
-      else
-        {:error, "JavaScript script not found: #{script_full_path}"}
-      end
+      {:error, _} = err ->
+        err
     end
   rescue
     e ->
       {:error, "Exception: #{Exception.message(e)}"}
   end
 
-  defp ensure_node_modules do
-    parser_dir = Path.join(File.cwd!(), "priv/parsers/javascript")
-    node_modules_path = Path.join(parser_dir, "node_modules")
+  defp do_run_node_script(script_full_path, parser_dir, input) do
+    node_bin = Priv.find_executable("node") || "node"
+
+    if File.exists?(script_full_path) do
+      temp_path =
+        Path.join(
+          System.tmp_dir!(),
+          "metastatic_js_#{System.unique_integer([:positive, :monotonic])}.txt"
+        )
+
+      File.write!(temp_path, input)
+
+      try do
+        case System.cmd(node_bin, [script_full_path, temp_path],
+               cd: parser_dir,
+               env: Priv.subprocess_env(),
+               stderr_to_stdout: true
+             ) do
+          {output, 0} ->
+            {:ok, output}
+
+          {error_output, exit_code} ->
+            {:error, "Exit code #{exit_code}: #{error_output}"}
+        end
+      after
+        File.rm(temp_path)
+      end
+    else
+      {:error, "JavaScript script not found: #{script_full_path}"}
+    end
+  end
+
+  defp ensure_node_modules(parser_dir) do
+    local_babel = Path.join([parser_dir, "node_modules", "@babel", "parser"])
+    home = System.user_home() || ""
+
+    global_babel =
+      Path.join([
+        home,
+        ".local",
+        "share",
+        "mise",
+        "installs",
+        "node",
+        "latest",
+        "lib",
+        "node_modules",
+        "@babel",
+        "parser"
+      ])
+
+    npm_bin = Priv.find_executable("npm")
 
     cond do
-      File.exists?(node_modules_path) ->
+      File.exists?(local_babel) or File.exists?(global_babel) ->
         :ok
 
-      System.find_executable("npm") != nil ->
-        case System.cmd("npm", ["install"], cd: parser_dir, stderr_to_stdout: true) do
+      npm_bin != nil and File.dir?(parser_dir) ->
+        case System.cmd(npm_bin, ["install", "--no-audit", "--no-fund"],
+               cd: parser_dir,
+               env: Priv.subprocess_env(),
+               stderr_to_stdout: true
+             ) do
           {_, 0} ->
             :ok
 

@@ -5,8 +5,10 @@ defmodule Metastatic.Adapters.Python.Subprocess do
   Handles communication with Python scripts via stdin/stdout with JSON serialization.
   """
 
-  @parser_path "priv/parsers/python/parser.py"
-  @unparser_path "priv/parsers/python/unparser.py"
+  alias Metastatic.Priv
+
+  @parser_path "parsers/python/parser.py"
+  @unparser_path "parsers/python/unparser.py"
 
   @doc """
   Parse Python source code to AST JSON.
@@ -21,9 +23,9 @@ defmodule Metastatic.Adapters.Python.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
-    script_full_path = Path.join(File.cwd!(), @parser_path)
+    script_full_path = Priv.parser_path(@parser_path)
 
-    if File.exists?(script_full_path) and System.find_executable("python3") != nil do
+    if File.exists?(script_full_path) and python_bin() != nil do
       case run_python_script(@parser_path, source) do
         {:ok, result} ->
           case Jason.decode(result) do
@@ -82,10 +84,14 @@ defmodule Metastatic.Adapters.Python.Subprocess do
 
   # Private Functions
 
-  defp run_python_script(script_path, input) do
-    script_full_path = Path.join(File.cwd!(), script_path)
+  defp python_bin do
+    Priv.find_executable("python3") || Priv.find_executable("python")
+  end
 
-    # Check if script exists
+  defp run_python_script(script_path, input) do
+    script_full_path = Priv.parser_path(script_path)
+    py_bin = python_bin() || "python3"
+
     if File.exists?(script_full_path) do
       temp_path =
         Path.join(
@@ -96,7 +102,10 @@ defmodule Metastatic.Adapters.Python.Subprocess do
       File.write!(temp_path, input)
 
       try do
-        case System.cmd("python3", [script_full_path, temp_path], stderr_to_stdout: true) do
+        case System.cmd(py_bin, [script_full_path, temp_path],
+               env: Priv.subprocess_env(),
+               stderr_to_stdout: true
+             ) do
           {output, 0} ->
             {:ok, output}
 

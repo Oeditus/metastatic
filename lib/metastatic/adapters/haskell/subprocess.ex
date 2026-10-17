@@ -5,8 +5,10 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   Uses Stack to execute the parser binary built from `priv/parsers/haskell/`.
   """
 
-  @parser_dir Path.expand("../../../../priv/parsers/haskell", __DIR__)
-  @bin_path Path.expand("../../../../priv/parsers/haskell/bin/parser", __DIR__)
+  alias Metastatic.Priv
+
+  @parser_rel_dir "parsers/haskell"
+  @bin_rel_path "parsers/haskell/bin/parser"
 
   @doc """
   Parse Haskell source code by invoking the parser binary or Stack subprocess.
@@ -21,12 +23,20 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    cond do
-      File.exists?(@bin_path) ->
-        run_cmd(@bin_path, [], source)
+    bin_path = Priv.parser_path(@bin_rel_path)
+    parser_dir = Priv.parser_path(@parser_rel_dir)
+    global_bin = Priv.find_executable("metastatic-haskell-parser")
+    stack_bin = Priv.find_executable("stack")
 
-      File.dir?(@parser_dir) and System.find_executable("stack") != nil ->
-        run_cmd("stack", ["exec", "parser", "--"], source, cd: @parser_dir)
+    cond do
+      File.exists?(bin_path) ->
+        run_cmd(bin_path, [], source)
+
+      global_bin != nil ->
+        run_cmd(global_bin, [], source)
+
+      File.dir?(parser_dir) and stack_bin != nil ->
+        run_cmd(stack_bin, ["exec", "parser", "--"], source, cd: parser_dir)
 
       true ->
         {:error, "Haskell parser unavailable"}
@@ -44,8 +54,9 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
 
     try do
       cmd_args = args ++ [temp_path]
+      default_opts = [stderr_to_stdout: true, env: Priv.subprocess_env()]
 
-      case System.cmd(executable, cmd_args, Keyword.merge([stderr_to_stdout: true], opts)) do
+      case System.cmd(executable, cmd_args, Keyword.merge(default_opts, opts)) do
         {output, 0} ->
           handle_parser_output(output)
 

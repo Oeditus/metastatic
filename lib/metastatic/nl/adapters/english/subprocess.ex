@@ -21,8 +21,9 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
   """
 
   require Logger
+  alias Metastatic.Priv
 
-  @parser_script "priv/parsers/english/parser.js"
+  @parser_script "parsers/english/parser.js"
 
   @doc """
   Returns the configured tree-sitter executable name or path.
@@ -50,7 +51,10 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
 
       executable ->
         try do
-          case System.cmd(executable, ["--version"], stderr_to_stdout: true) do
+          case System.cmd(executable, ["--version"],
+                 env: Priv.subprocess_env(),
+                 stderr_to_stdout: true
+               ) do
             {output, 0} ->
               String.contains?(output, "tree-sitter")
 
@@ -67,7 +71,7 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
     if File.exists?(bin) and not File.dir?(bin) do
       bin
     else
-      System.find_executable(bin)
+      Priv.find_executable(bin)
     end
   end
 
@@ -131,9 +135,10 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
   end
 
   defp run_tree_sitter_parser(source, bin) do
-    script_full_path = Path.join(File.cwd!(), @parser_script)
+    script_full_path = Priv.parser_path(@parser_script)
+    node_bin = Priv.find_executable("node")
 
-    if File.exists?(script_full_path) and System.find_executable("node") != nil do
+    if File.exists?(script_full_path) and node_bin != nil do
       temp_path =
         Path.join(
           System.tmp_dir!(),
@@ -143,8 +148,8 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
       File.write!(temp_path, source)
 
       try do
-        case System.cmd("node", [script_full_path, temp_path, "--tree-sitter-bin", bin],
-               env: [{"TREE_SITTER_BIN", bin}],
+        case System.cmd(node_bin, [script_full_path, temp_path, "--tree-sitter-bin", bin],
+               env: Priv.subprocess_env([{"TREE_SITTER_BIN", bin}]),
                stderr_to_stdout: true
              ) do
           {output, 0} ->

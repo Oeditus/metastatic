@@ -6,15 +6,17 @@ defmodule Metastatic.Adapters.Cure.Subprocess do
   Cure compiler modules are unavailable.
   """
 
-  @parser_bin "priv/parsers/cure/bin/parser.exe"
+  alias Metastatic.Priv
+
+  @parser_bin "parsers/cure/bin/parser.exe"
 
   @doc """
   Parse Cure source code to AST using external subprocess binary or `cure` CLI executable.
   """
   @spec parse(String.t(), keyword()) :: {:ok, term()} | {:error, String.t()}
   def parse(source, opts \\ []) when is_binary(source) and is_list(opts) do
-    bin_full_path = Keyword.get(opts, :parser_bin, Path.join(File.cwd!(), @parser_bin))
-    cure_cli = Keyword.get_lazy(opts, :cure_cli, fn -> System.find_executable("cure") end)
+    bin_full_path = Keyword.get_lazy(opts, :parser_bin, fn -> Priv.parser_path(@parser_bin) end)
+    cure_cli = Keyword.get_lazy(opts, :cure_cli, fn -> Priv.find_executable("cure") end)
 
     cond do
       bin_full_path != nil and File.exists?(bin_full_path) ->
@@ -35,8 +37,10 @@ defmodule Metastatic.Adapters.Cure.Subprocess do
   def unparse(ast, opts \\ []) when is_list(opts) do
     case Jason.encode(ast) do
       {:ok, json} ->
-        bin_full_path = Keyword.get(opts, :parser_bin, Path.join(File.cwd!(), @parser_bin))
-        cure_cli = Keyword.get_lazy(opts, :cure_cli, fn -> System.find_executable("cure") end)
+        bin_full_path =
+          Keyword.get_lazy(opts, :parser_bin, fn -> Priv.parser_path(@parser_bin) end)
+
+        cure_cli = Keyword.get_lazy(opts, :cure_cli, fn -> Priv.find_executable("cure") end)
 
         cond do
           bin_full_path != nil and File.exists?(bin_full_path) ->
