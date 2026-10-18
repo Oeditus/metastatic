@@ -204,6 +204,43 @@ defmodule Metastatic.Adapters.AgdaTest do
       assert {:variable, _, "false"} = rhs
     end
 
+    test "transforms curried infix function clause and nested argument patterns" do
+      ast = %{
+        "type" => "fun_clause",
+        "lhs" => %{
+          "type" => "app_pat",
+          "elements" => [
+            %{
+              "type" => "infix_pat",
+              "operator" => "∘s",
+              "left" => %{"type" => "var_pat", "name" => "σ"},
+              "right" => %{"type" => "var_pat", "name" => "ρ"}
+            },
+            %{
+              "type" => "app_pat",
+              "elements" => [
+                %{"type" => "var_pat", "name" => "suc"},
+                %{"type" => "var_pat", "name" => "k"}
+              ]
+            },
+            %{
+              "type" => "hidden_pat",
+              "pattern" => %{"type" => "var_pat", "name" => "n"}
+            }
+          ]
+        },
+        "rhs" => %{
+          "type" => "rhs",
+          "expression" => %{"type" => "var", "name" => "k"}
+        }
+      }
+
+      assert {:ok, {:function_def, meta, [rhs]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :name) == "∘s"
+      assert Keyword.get(meta, :params) == ["σ", "ρ", "(suc k)", "{n}"]
+      assert {:variable, _, "k"} = rhs
+    end
+
     test "transforms data definition" do
       ast = %{
         "type" => "data",

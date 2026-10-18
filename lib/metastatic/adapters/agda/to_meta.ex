@@ -355,19 +355,53 @@ defmodule Metastatic.Adapters.Agda.ToMeta do
   end
 
   defp extract_lhs(%{"type" => "app_pat", "elements" => [head | rest]}) do
-    name = extract_pat_name(head)
-    params = Enum.map(rest, &extract_pat_name/1)
-    {name, params}
+    case head do
+      %{"type" => type} when type in ["infix_pat", "app_pat"] ->
+        {name, inner_params} = extract_lhs(head)
+        {name, inner_params ++ Enum.map(rest, &extract_pat_name/1)}
+
+      _ ->
+        name = extract_pat_name(head)
+        params = Enum.map(rest, &extract_pat_name/1)
+        {name, params}
+    end
   end
 
+  defp extract_lhs(%{"type" => "other_pat", "text" => text}), do: {text, []}
+
   defp extract_lhs(other) do
-    {"_", [inspect(other)]}
+    {"_", [extract_pat_name(other)]}
   end
 
   defp extract_pat_name(%{"type" => "var_pat", "name" => name}), do: name
   defp extract_pat_name(%{"type" => "lit_pat", "value" => %{"value" => val}}), do: to_string(val)
   defp extract_pat_name(%{"type" => "wildcard"}), do: "_"
-  defp extract_pat_name(other), do: inspect(other)
+
+  defp extract_pat_name(%{
+         "type" => "infix_pat",
+         "operator" => op,
+         "left" => left,
+         "right" => right
+       }) do
+    "(#{extract_pat_name(left)} #{op} #{extract_pat_name(right)})"
+  end
+
+  defp extract_pat_name(%{"type" => "app_pat", "elements" => elems}) when is_list(elems) do
+    "(" <> Enum.map_join(elems, " ", &extract_pat_name/1) <> ")"
+  end
+
+  defp extract_pat_name(%{"type" => "hidden_pat", "pattern" => pat}) do
+    "{#{extract_pat_name(pat)}}"
+  end
+
+  defp extract_pat_name(%{"type" => "instance_pat", "pattern" => pat}) do
+    "{{#{extract_pat_name(pat)}}}"
+  end
+
+  defp extract_pat_name(%{"type" => "dot_pat"}), do: "._"
+  defp extract_pat_name(%{"type" => "absurd_pat"}), do: "()"
+  defp extract_pat_name(%{"type" => "other_pat", "text" => text}), do: text
+  defp extract_pat_name(_), do: "_"
 
   defp extract_name({:variable, _, name}), do: name
   defp extract_name({:function_call, meta, _}), do: Keyword.get(meta, :name, "call")
