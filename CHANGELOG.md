@@ -70,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hard-coding `mise`/`~/.local` paths; the previous behaviour is the default.
 - **`Metastatic.NL.AST.traverse/4`** -- now traverses metadata values, matching
   `Metastatic.AST.traverse/4`.
+- **`Metastatic.AST.traverse/4`** -- the metadata-walk invariant is now
+  documented, and the internal `contains_meta_node?`/`meta_node?` helpers make
+  explicit that only genuine 3-tuple nodes (not incidental `{:ok, _}`-style
+  tuples) are descended into.
 
 ### Removed
 - Unused `:typle` dependency.

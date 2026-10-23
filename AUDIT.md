@@ -307,7 +307,7 @@ merged below a quality bar — directly addressing the Agda/Haskell 0 % problem.
 | 19 | Adapter conformance suite (Python/Elixir/Erlang) | R-5 | ✅ |
 | 20 | Drop `:typle`; ignore stray socket | F-21 | ✅ |
 | 21 | `Languages.parse_language/1` consistent return type | F-22 | ✅ |
-| 22 | `AST.traverse` metadata-walk invariant documented | F-9 | ⏳ pending |
+| 22 | `AST.traverse` metadata-walk invariant documented + `contains_meta_node?` | F-9 | ✅ |
 
 > **Deferred items and why.**
 >
@@ -319,8 +319,10 @@ merged below a quality bar — directly addressing the Agda/Haskell 0 % problem.
 >   a keyword list by design. A struct would have to be serialised back to a
 >   keyword list at every AST boundary, so the recommendation was scoped to
 >   correcting the stale moduledoc (7 domains, not 1).
-> - **F-10 / F-9** — pure-internal refactors with no behavioural impact; left as
->   follow-up work to keep this change set reviewable.
+> - **F-10** — pure-internal refactor of the 559-line `Formatter` (three
+>   parallel pattern-match ladders → one `to_map/1` intermediate) with no
+>   behavioural impact; left as follow-up work to keep this change set
+>   reviewable.
 
 ---
 

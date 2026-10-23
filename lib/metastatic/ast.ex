@@ -772,7 +772,20 @@ defmodule Metastatic.AST do
     post.(other, acc)
   end
 
-  # Traverse keyword metadata values for subterm nodes
+  # Traverse keyword metadata values for subterm nodes.
+  #
+  # ## Invariant: which metadata values are traversed
+  #
+  # A metadata value is descended into *only* when it is itself a MetaAST
+  # node, or a (possibly nested) list/keyword that contains at least one
+  # MetaAST node. A "MetaAST node" is a 3-tuple `{atom, list, _}` — the same
+  # shape `conforms?/1` accepts. Everything else (integers, strings, atoms,
+  # plain lists of scalars) is passed through untouched.
+  #
+  # This keeps `pre`/`post` callbacks from being invoked on metadata that
+  # merely *looks* tuple-shaped by coincidence (e.g. `{:ok, value}` is a
+  # 2-tuple, not a node). The cost is one `Enum.any?` scan per list value;
+  # it short-circuits on the first node found.
   defp traverse_meta(meta, acc, pre, post) when is_list(meta) do
     if Keyword.keyword?(meta) do
       Enum.map_reduce(meta, acc, fn {key, val}, acc ->
@@ -799,7 +812,7 @@ defmodule Metastatic.AST do
           {{k, new_v}, acc}
         end)
 
-      Enum.any?(list, &hides_meta_node?/1) ->
+      contains_meta_node?(list) ->
         Enum.map_reduce(list, acc, fn item, acc ->
           traverse_meta_val(item, acc, pre, post)
         end)
@@ -811,9 +824,12 @@ defmodule Metastatic.AST do
 
   defp traverse_meta_val(other, acc, _pre, _post), do: {other, acc}
 
-  defp hides_meta_node?({type, meta, _}) when is_atom(type) and is_list(meta), do: true
-  defp hides_meta_node?(list) when is_list(list), do: Enum.any?(list, &hides_meta_node?/1)
-  defp hides_meta_node?(_), do: false
+  # `true` if `list` contains (at any nesting depth) a MetaAST node.
+  # Short-circuits on the first hit.
+  defp contains_meta_node?(list) when is_list(list), do: Enum.any?(list, &meta_node?/1)
+  defp meta_node?({type, meta, _}) when is_atom(type) and is_list(meta), do: true
+  defp meta_node?(list) when is_list(list), do: contains_meta_node?(list)
+  defp meta_node?(_), do: false
 
   # Traverse children based on node type
   # :literal nodes with a bin_segment list payload (Cure v0.20.0+) are
