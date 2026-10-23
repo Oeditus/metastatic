@@ -49,13 +49,11 @@ defmodule Metastatic.Supplemental.CompatibilityMatrix do
   @spec build() :: matrix()
   def build do
     Registry.list_all()
-    |> Enum.reduce(%{}, fn {module, info}, acc ->
-      # For each construct supported by this module
-      Enum.reduce(info.constructs, acc, fn construct, acc2 ->
-        # For the target language of this module
-        lang = info.target_language
+    |> Enum.reduce(%{}, fn module, acc ->
+      info = module.info()
+      lang = info.language
 
-        # Add module to the list of providers for this construct+language
+      Enum.reduce(info.constructs, acc, fn construct, acc2 ->
         acc2
         |> Map.put_new(construct, %{})
         |> update_in([construct], fn lang_map ->
@@ -268,17 +266,17 @@ defmodule Metastatic.Supplemental.CompatibilityMatrix do
 
       [
         "Module: #{inspect(module)}",
-        "  Target Language: #{info.target_language}",
+        "  Target Language: #{info.language}",
         "  Constructs: #{Enum.join(info.constructs, ", ")}",
-        "  Dependencies: #{format_dependencies(info.dependencies)}",
+        "  Dependencies: #{format_dependencies(info.requires)}",
         ""
       ]
     end)
   end
 
-  defp format_dependencies(deps) when map_size(deps) == 0, do: "(none)"
+  defp format_dependencies([]), do: "(none)"
 
-  defp format_dependencies(deps) do
-    Enum.map_join(deps, ", ", fn {lib, version} -> "#{lib} #{version}" end)
+  defp format_dependencies(deps) when is_list(deps) do
+    Enum.join(deps, ", ")
   end
 end

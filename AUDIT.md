@@ -282,7 +282,37 @@ merged below a quality bar — directly addressing the Agda/Haskell 0 % problem.
 
 ---
 
-## 4. Roadmap (as executed)
+## 4. Follow-up phase — coverage of pure-Elixir public modules
+
+The roadmap above closed every *defect*. A second phase then closed the
+**coverage** gaps that need no external toolchain (the Agda/Haskell 0 % is
+correctly excluded — it requires GHC/Agda).
+
+### F-23 · `Supplemental.CompatibilityMatrix` was broken and untested — **P1**
+`build/0` iterated `Registry.list_all()` as `{module, info}` tuples, but that
+function returns a bare `[module()]`. It also read `info.target_language` and
+`info.dependencies`, whereas `Info` defines `:language` and `:requires`. Every
+public function in the module therefore raised at runtime, and it sat at 0 %
+coverage so nothing caught it.
+
+**Fix:** iterate modules and call `module.info/0`; use the real `Info` fields.
+Added `compatibility_matrix_test.exs` (16 tests) — module now at **100 %**.
+
+### Coverage added (0 % → exercised)
+
+| Module | Before | After | New test file |
+| --- | --- | --- | --- |
+| `supplemental/compatibility_matrix.ex` | 0 % | **100 %** | `compatibility_matrix_test.exs` |
+| `supplemental/validator.ex` | 0 % | **100 %** | `validator_test.exs` |
+| `adapters/english.ex` | 0 % | **100 %** | `nl_facades_test.exs` |
+| `adapters/spanish.ex` | 0 % | **100 %** | `nl_facades_test.exs` |
+| `cli/formatter.ex` | 26 % | exercised | `formatter_test.exs` (F-10) |
+
+Project total: **56.2 % → 58.2 %**; test count **1535 → 1624**.
+
+---
+
+## 5. Roadmap (as executed)
 
 | # | Item | Findings | Status |
 | --- | --- | --- | --- |
@@ -327,7 +357,7 @@ merged below a quality bar — directly addressing the Agda/Haskell 0 % problem.
 
 ---
 
-## 5. Bottom line
+## 6. Bottom line
 
 This is an **ambitious, well-architected, genuinely novel** library with a strong
 theoretical spine, an unusually good `AST` API and disciplined tooling. The core

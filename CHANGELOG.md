@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round-trip). Applied to the Python, Elixir and Erlang adapters.
 
 ### Fixed
+- **`Metastatic.Supplemental.CompatibilityMatrix`** -- `build/0` (and therefore
+  every public function) raised at runtime: it iterated `Registry.list_all()`
+  as `{module, info}` tuples (it returns a bare `[module()]`) and read
+  `info.target_language` / `info.dependencies` (the `Info` fields are
+  `:language` / `:requires`). Now iterates modules, calls `module.info/0`, and
+  uses the correct fields. Covered by a new `compatibility_matrix_test.exs`
+  (module 0 % -> 100 %).
 - **`Metastatic.Cache.DLLB`** -- payloads are now decoded with
   `:erlang.binary_to_term/2` **and `[:safe]`**, so a tampered or foreign cache
   cannot exhaust atoms or execute code; malformed payloads are treated as a
