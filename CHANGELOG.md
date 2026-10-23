@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Metastatic.Priv`** -- `subprocess_env/1` and the `priv` search path are
   configurable (`config :metastatic, :subprocess_env` / `:priv_dirs`) instead of
   hard-coding `mise`/`~/.local` paths; the previous behaviour is the default.
+- **`Metastatic.CLI.Formatter`** -- rewritten to render the `:tree`, `:json`
+  and `:plain` formats from a single canonical `to_map/1` intermediate instead
+  of three parallel pattern-match ladders. Node-type knowledge now lives in one
+  place, and the module gained its first dedicated test suite
+  (`formatter_test.exs`, 17 tests).
 - **`Metastatic.NL.AST.traverse/4`** -- now traverses metadata values, matching
   `Metastatic.AST.traverse/4`.
 - **`Metastatic.AST.traverse/4`** -- the metadata-walk invariant is now

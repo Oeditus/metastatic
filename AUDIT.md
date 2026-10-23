@@ -301,7 +301,7 @@ merged below a quality bar — directly addressing the Agda/Haskell 0 % problem.
 | 13 | `Priv` configurable env/priv paths | F-16 | ✅ |
 | 14 | `Adapter.Registry` re-registration conflict guard | F-18 | ✅ |
 | 15 | `OpKind` moduledoc corrected (struct migration deferred — keyword list is the AST-metadata contract) | R-4 | ✅ (doc) |
-| 16 | `Formatter` single `to_map/1` intermediate | F-10 | ⏳ pending |
+| 16 | `Formatter` single `to_map/1` intermediate | F-10 | ✅ |
 | 17 | `NL.AST` metadata traversal parity | R-3 | ✅ |
 | 18 | Property-based round-trip tests (`stream_data`) | R-2 | ✅ |
 | 19 | Adapter conformance suite (Python/Elixir/Erlang) | R-5 | ✅ |
@@ -319,10 +319,11 @@ merged below a quality bar — directly addressing the Agda/Haskell 0 % problem.
 >   a keyword list by design. A struct would have to be serialised back to a
 >   keyword list at every AST boundary, so the recommendation was scoped to
 >   correcting the stale moduledoc (7 domains, not 1).
-> - **F-10** — pure-internal refactor of the 559-line `Formatter` (three
->   parallel pattern-match ladders → one `to_map/1` intermediate) with no
->   behavioural impact; left as follow-up work to keep this change set
->   reviewable.
+> - **F-10** — the `Formatter` now renders tree/JSON/plain from a single
+>   `to_map/1` canonical intermediate instead of three parallel pattern-match
+>   ladders. Node-type knowledge lives in one place; adding a node type no
+>   longer requires editing three functions. Covered by a new
+>   `formatter_test.exs`.
 
 ---
 

@@ -2,16 +2,43 @@ defmodule Metastatic.CLI.Formatter do
   @moduledoc """
   Output formatting utilities for Metastatic CLI.
 
-  Supports multiple output formats:
-  - Tree format (default) - Human-readable tree structure
-  - JSON format - Machine-readable JSON
-  - Plain format - Simple text representation
+  Supports three output formats, all rendered from a single canonical
+  intermediate representation produced by `to_map/1`:
+
+  - `:tree` (default) -- human-readable, indented tree
+  - `:json` -- machine-readable JSON
+  - `:plain` -- compact single-line text
+
+  ## Why a single intermediate
+
+  Historically each format had its own pattern-match ladder over MetaAST
+  nodes, so adding or changing a node type meant editing three functions in
+  lockstep. `to_map/1` now normalises every node into one shape:
+
+      %{type: atom, meta: keyword, children: [map] | value, label: String.t()}
+
+  - `type`     -- the MetaAST node type atom
+  - `meta`     -- the node's metadata keyword list
+  - `children` -- normalised child maps (or the raw leaf value)
+  - `label`    -- a format-independent short description used by the tree
+                  and plain renderers (e.g. `"binary_op (arithmetic: +)"`)
+
+  Tree, JSON and plain renderers then only need to *walk* this one shape,
+  never to re-interpret MetaAST again.
   """
 
   alias Metastatic.{AST, Document}
 
   @type format :: :tree | :json | :plain
   @type meta_ast :: AST.meta_ast()
+
+  @typedoc "Canonical intermediate node consumed by every renderer."
+  @type node_map :: %{
+          type: atom(),
+          meta: keyword(),
+          children: [node_map()] | term(),
+          label: String.t()
+        }
 
   @doc """
   Format a MetaAST node for display.
@@ -27,9 +54,9 @@ defmodule Metastatic.CLI.Formatter do
       "binary_op (arithmetic: +)\\n  variable: x\\n  literal (integer): 5"
   """
   @spec format(meta_ast(), format()) :: String.t()
-  def format(ast, :tree), do: format_tree(ast, 0)
-  def format(ast, :json), do: format_json(ast)
-  def format(ast, :plain), do: format_plain(ast)
+  def format(ast, :tree), do: ast |> to_map() |> render_tree(0)
+  def format(ast, :json), do: ast |> to_map() |> render_json()
+  def format(ast, :plain), do: ast |> to_map() |> render_plain()
 
   @doc """
   Format a Document for display.
@@ -48,244 +75,402 @@ defmodule Metastatic.CLI.Formatter do
     Enum.join(header, "\n") <> "\n" <> ast_output
   end
 
-  # Tree format - human-readable with tree structure
-  # 3-tuple format: {type, meta, children_or_value}
+  # ----- Canonical intermediate -----
 
-  @spec format_tree(meta_ast(), non_neg_integer()) :: String.t()
-  defp format_tree(ast, depth) do
-    indent = String.duplicate("  ", depth)
-    format_tree_node(ast, indent, depth)
+  @doc """
+  Normalise a MetaAST node into the canonical `node_map` shape.
+
+  Every renderer consumes this, so node-type knowledge lives in exactly one
+  place. Leaf nodes keep their raw value in `children`; composite nodes carry
+  a list of normalised child maps.
+
+  ## Examples
+
+      iex> m = Metastatic.CLI.Formatter.to_map({:literal, [subtype: :integer], 42})
+      iex> {m.type, m.label}
+      {:literal, "literal (integer)"}
+  """
+  @spec to_map(meta_ast() | term()) :: node_map()
+  def to_map({:literal, meta, value}) when is_list(meta) do
+    subtype = Keyword.get(meta, :subtype, :unknown)
+    %{type: :literal, meta: meta, children: value, label: "literal (#{subtype})"}
   end
 
-  # 3-tuple: {:literal, [subtype: type], value}
-  defp format_tree_node({:literal, meta, value}, indent, _depth) when is_list(meta) do
-    type = Keyword.get(meta, :subtype, :unknown)
-    "#{indent}literal (#{type}): #{inspect(value)}"
+  def to_map({:variable, meta, name}) when is_list(meta) do
+    %{type: :variable, meta: meta, children: name, label: "variable: #{name}"}
   end
 
-  # 3-tuple: {:variable, meta, name}
-  defp format_tree_node({:variable, _meta, name}, indent, _depth) do
-    "#{indent}variable: #{name}"
+  def to_map({:list, meta, elements}) when is_list(meta) and is_list(elements) do
+    %{type: :list, meta: meta, children: map_children(elements), label: "list"}
   end
 
-  # 3-tuple: {:list, meta, elements}
-  defp format_tree_node({:list, _meta, elements}, indent, depth) when is_list(elements) do
-    element_lines = Enum.map(elements, &format_tree(&1, depth + 1))
-    lines = ["#{indent}list" | element_lines]
-    Enum.join(lines, "\n")
-  end
+  def to_map({:map, meta, pairs}) when is_list(meta) and is_list(pairs) do
+    # Pairs are normalised as `:pair` nodes; a bare `{k, v}` tuple is coerced
+    # into one so downstream renderers see a uniform shape.
+    normalised_pairs =
+      Enum.map(pairs, fn
+        {:pair, _pair_meta, [k, v]} ->
+          %{type: :pair, meta: [], children: [to_map(k), to_map(v)], label: "pair"}
 
-  # 3-tuple: {:map, meta, pairs}
-  defp format_tree_node({:map, _meta, pairs}, indent, depth) when is_list(pairs) do
-    pair_lines =
-      Enum.flat_map(pairs, fn
-        {:pair, _, [key, value]} ->
-          [
-            "#{indent}  key:",
-            format_tree(key, depth + 2),
-            "#{indent}  value:",
-            format_tree(value, depth + 2)
-          ]
-
-        {key, value} ->
-          [
-            "#{indent}  key:",
-            format_tree(key, depth + 2),
-            "#{indent}  value:",
-            format_tree(value, depth + 2)
-          ]
+        {k, v} ->
+          %{type: :pair, meta: [], children: [to_map(k), to_map(v)], label: "pair"}
       end)
 
-    lines = ["#{indent}map" | pair_lines]
-    Enum.join(lines, "\n")
+    %{type: :map, meta: meta, children: normalised_pairs, label: "map"}
   end
 
-  # 3-tuple: {:binary_op, [category: cat, operator: op], [left, right]}
-  defp format_tree_node({:binary_op, meta, [left, right]}, indent, depth) when is_list(meta) do
+  def to_map({:binary_op, meta, [left, right]}) when is_list(meta) do
     category = Keyword.get(meta, :category, :unknown)
-    op = Keyword.get(meta, :operator, :unknown)
+    operator = Keyword.get(meta, :operator, :unknown)
 
-    lines = [
-      "#{indent}binary_op (#{category}: #{op})",
-      format_tree(left, depth + 1),
-      format_tree(right, depth + 1)
-    ]
-
-    Enum.join(lines, "\n")
+    %{
+      type: :binary_op,
+      meta: meta,
+      children: [to_map(left), to_map(right)],
+      label: "binary_op (#{category}: #{operator})"
+    }
   end
 
-  # 3-tuple: {:unary_op, [category: cat, operator: op], [operand]}
-  defp format_tree_node({:unary_op, meta, [operand]}, indent, depth) when is_list(meta) do
+  def to_map({:unary_op, meta, [operand]}) when is_list(meta) do
     category = Keyword.get(meta, :category, :unknown)
-    op = Keyword.get(meta, :operator, :unknown)
+    operator = Keyword.get(meta, :operator, :unknown)
 
-    lines = [
-      "#{indent}unary_op (#{category}: #{op})",
-      format_tree(operand, depth + 1)
-    ]
-
-    Enum.join(lines, "\n")
+    %{
+      type: :unary_op,
+      meta: meta,
+      children: [to_map(operand)],
+      label: "unary_op (#{category}: #{operator})"
+    }
   end
 
-  # 3-tuple: {:function_call, [name: name], args}
-  defp format_tree_node({:function_call, meta, args}, indent, depth) when is_list(meta) do
+  def to_map({:function_call, meta, args}) when is_list(meta) and is_list(args) do
     name = Keyword.get(meta, :name, "unknown")
-    arg_lines = Enum.map(args, &format_tree(&1, depth + 1))
 
-    lines = ["#{indent}function_call: #{name}" | arg_lines]
-
-    Enum.join(lines, "\n")
+    %{
+      type: :function_call,
+      meta: meta,
+      children: map_children(args),
+      label: "function_call: #{name}"
+    }
   end
 
-  # 3-tuple: {:conditional, meta, [condition, then_branch, else_branch?]}
-  defp format_tree_node({:conditional, _meta, children}, indent, depth) when is_list(children) do
+  def to_map({:conditional, meta, children}) when is_list(meta) and is_list(children) do
     {condition, then_branch, else_branch} =
       case children do
         [c, t, e] -> {c, t, e}
         [c, t] -> {c, t, nil}
       end
 
-    lines = [
-      "#{indent}conditional",
-      "#{indent}  condition:",
-      format_tree(condition, depth + 2),
-      "#{indent}  then:",
-      format_tree(then_branch, depth + 2)
-    ]
+    mapped =
+      [
+        %{type: :role, meta: [], children: to_map(condition), label: "condition"},
+        %{type: :role, meta: [], children: to_map(then_branch), label: "then"}
+      ]
 
-    lines =
+    mapped =
       if else_branch do
-        lines ++
-          [
-            "#{indent}  else:",
-            format_tree(else_branch, depth + 2)
-          ]
+        mapped ++ [%{type: :role, meta: [], children: to_map(else_branch), label: "else"}]
       else
-        lines
+        mapped
       end
 
-    Enum.join(lines, "\n")
+    %{type: :conditional, meta: meta, children: mapped, label: "conditional"}
   end
 
-  # 3-tuple: {:block, meta, statements}
-  defp format_tree_node({:block, _meta, statements}, indent, depth) when is_list(statements) do
-    statement_lines = Enum.map(statements, &format_tree(&1, depth + 1))
-    lines = ["#{indent}block" | statement_lines]
-    Enum.join(lines, "\n")
+  def to_map({:block, meta, statements}) when is_list(meta) and is_list(statements) do
+    %{type: :block, meta: meta, children: map_children(statements), label: "block"}
   end
 
-  # 3-tuple: {:early_return, meta, [value]}
-  defp format_tree_node({:early_return, meta, children}, indent, depth) when is_list(meta) do
+  def to_map({:early_return, meta, children}) when is_list(meta) do
     kind = Keyword.get(meta, :kind, :return)
     value = if is_list(children) and children != [], do: hd(children), else: nil
 
-    lines = [
-      "#{indent}early_return (#{kind})"
-    ]
-
-    lines =
-      if value do
-        lines ++ [format_tree(value, depth + 1)]
-      else
-        lines
-      end
-
-    Enum.join(lines, "\n")
+    %{
+      type: :early_return,
+      meta: meta,
+      children: if(value, do: [to_map(value)], else: []),
+      label: "early_return (#{kind})"
+    }
   end
 
-  # 3-tuple: {:loop, [loop_type: :while], [condition, body]}
-  defp format_tree_node({:loop, meta, children}, indent, depth) when is_list(meta) do
+  def to_map({:loop, meta, children}) when is_list(meta) do
     loop_type = Keyword.get(meta, :loop_type, :unknown)
-
-    case {loop_type, children} do
-      {:while, [condition, body]} ->
-        lines = [
-          "#{indent}loop (while)",
-          "#{indent}  condition:",
-          format_tree(condition, depth + 2),
-          "#{indent}  body:",
-          format_tree(body, depth + 2)
-        ]
-
-        Enum.join(lines, "\n")
-
-      {kind, [iterator, collection, body]} when kind in [:for, :for_each] ->
-        lines = [
-          "#{indent}loop (#{kind})",
-          "#{indent}  iterator:",
-          format_tree(iterator, depth + 2),
-          "#{indent}  collection:",
-          format_tree(collection, depth + 2),
-          "#{indent}  body:",
-          format_tree(body, depth + 2)
-        ]
-
-        Enum.join(lines, "\n")
-
-      _ ->
-        "#{indent}loop (#{loop_type})"
-    end
+    {label, mapped} = map_loop(loop_type, children)
+    %{type: :loop, meta: meta, children: mapped, label: label}
   end
 
-  # 3-tuple: {:lambda, [params: params, captures: caps], [body]}
-  defp format_tree_node({:lambda, meta, children}, indent, depth) when is_list(meta) do
+  def to_map({:lambda, meta, children}) when is_list(meta) do
     params = Keyword.get(meta, :params, [])
     captures = Keyword.get(meta, :captures, [])
     body = if is_list(children) and children != [], do: List.last(children), else: nil
     param_str = Enum.map_join(params, ", ", &format_param/1)
 
-    lines = [
-      "#{indent}lambda (#{param_str})",
-      "#{indent}  captures: #{inspect(captures)}"
-    ]
-
-    lines =
+    mapped =
       if body do
-        lines ++ ["#{indent}  body:", format_tree(body, depth + 2)]
+        [%{type: :role, meta: [], children: to_map(body), label: "body"}]
       else
-        lines
+        []
       end
 
-    Enum.join(lines, "\n")
+    %{
+      type: :lambda,
+      meta: meta,
+      children: mapped,
+      label: "lambda (#{param_str})",
+      captures: captures
+    }
   end
 
-  # 3-tuple: {:collection_op, [op: :map|:filter], [lambda, collection]}
-  defp format_tree_node({:collection_op, meta, children}, indent, depth) when is_list(meta) do
+  def to_map({:collection_op, meta, children}) when is_list(meta) do
     op = Keyword.get(meta, :op, :unknown)
+    {label, mapped} = map_collection_op(op, children)
+    %{type: :collection_op, meta: meta, children: mapped, label: label}
+  end
 
-    case {op, children} do
-      {op, [lambda, collection]} when op in [:map, :filter] ->
-        lines = [
-          "#{indent}collection_op (#{op})",
-          "#{indent}  lambda:",
-          format_tree(lambda, depth + 2),
-          "#{indent}  collection:",
-          format_tree(collection, depth + 2)
-        ]
+  def to_map({:exception_handling, meta, children}) when is_list(meta) and is_list(children) do
+    %{
+      type: :exception_handling,
+      meta: meta,
+      children: map_exception(children),
+      label: "exception_handling"
+    }
+  end
 
-        Enum.join(lines, "\n")
+  def to_map({:language_specific, meta, _native_ast}) when is_list(meta) do
+    language = Keyword.get(meta, :language, :unknown)
+    hint = Keyword.get(meta, :hint)
 
-      {:reduce, [lambda, collection, initial]} ->
-        lines = [
-          "#{indent}collection_op (reduce)",
-          "#{indent}  lambda:",
-          format_tree(lambda, depth + 2),
-          "#{indent}  collection:",
-          format_tree(collection, depth + 2),
-          "#{indent}  initial:",
-          format_tree(initial, depth + 2)
-        ]
+    %{
+      type: :language_specific,
+      meta: meta,
+      children: nil,
+      label: "language_specific (#{language}, hint: #{inspect(hint)})"
+    }
+  end
 
-        Enum.join(lines, "\n")
+  # Fallback for any other 3-tuple node type.
+  def to_map({type, meta, children}) when is_atom(type) and is_list(meta) do
+    mapped = if is_list(children), do: map_children(children), else: children
+    %{type: type, meta: meta, children: mapped, label: to_string(type)}
+  end
 
-      _ ->
-        "#{indent}collection_op (#{op})"
+  def to_map(other) do
+    %{type: :unknown, meta: [], children: other, label: inspect(other)}
+  end
+
+  # ----- Tree renderer -----
+
+  @spec render_tree(node_map(), non_neg_integer()) :: String.t()
+  defp render_tree(%{type: :role, label: label, children: child}, depth) do
+    indent = String.duplicate("  ", depth)
+    "#{indent}#{label}:\n" <> render_tree(child, depth + 1)
+  end
+
+  defp render_tree(%{type: :pair, children: [key, value]}, depth) do
+    indent = String.duplicate("  ", depth)
+
+    "#{indent}key:\n" <>
+      render_tree(key, depth + 1) <> "\n" <> "#{indent}value:\n" <> render_tree(value, depth + 1)
+  end
+
+  defp render_tree(%{type: :lambda, label: label, captures: captures, children: children}, depth) do
+    indent = String.duplicate("  ", depth)
+    head = "#{indent}#{label}\n#{indent}  captures: #{inspect(captures)}"
+    render_tree_children(head, children, depth)
+  end
+
+  defp render_tree(%{type: :literal, meta: meta, children: value}, depth) do
+    indent = String.duplicate("  ", depth)
+    "#{indent}literal (#{Keyword.get(meta, :subtype, :unknown)}): #{inspect(value)}"
+  end
+
+  defp render_tree(%{type: :variable, children: name}, depth) do
+    indent = String.duplicate("  ", depth)
+    "#{indent}variable: #{name}"
+  end
+
+  defp render_tree(%{label: label, children: children}, depth) do
+    indent = String.duplicate("  ", depth)
+    render_tree_children("#{indent}#{label}", children, depth)
+  end
+
+  defp render_tree_children(head, children, depth) when is_list(children) do
+    case Enum.map(children, &render_tree(&1, depth + 1)) do
+      [] -> head
+      lines -> Enum.join([head | lines], "\n")
     end
   end
 
-  # 3-tuple: {:exception_handling, meta, [body, rescue_clauses, finally]}
-  defp format_tree_node({:exception_handling, _meta, children}, indent, depth)
-       when is_list(children) do
+  defp render_tree_children(head, value, _depth), do: "#{head}: #{inspect(value)}"
+
+  # ----- JSON renderer -----
+
+  @spec render_json(node_map()) :: String.t()
+  defp render_json(node_map) do
+    node_map
+    |> json_map()
+    |> Jason.encode!(pretty: true)
+  end
+
+  defp json_map(%{type: :literal, meta: meta, children: value}) do
+    %{type: "literal", semantic_type: Keyword.get(meta, :subtype, :unknown), value: value}
+  end
+
+  defp json_map(%{type: :variable, children: name}) do
+    %{type: "variable", name: name}
+  end
+
+  defp json_map(%{type: :list, children: elements}) do
+    %{type: "list", elements: Enum.map(elements, &json_map/1)}
+  end
+
+  defp json_map(%{type: :map, children: pairs}) do
+    %{type: "map", pairs: Enum.map(pairs, &json_pair/1)}
+  end
+
+  defp json_map(%{type: :binary_op, meta: meta, children: [left, right]}) do
+    %{
+      type: "binary_op",
+      category: Keyword.get(meta, :category, :unknown),
+      operator: Keyword.get(meta, :operator, :unknown),
+      left: json_map(left),
+      right: json_map(right)
+    }
+  end
+
+  defp json_map(%{type: :unary_op, meta: meta, children: [operand]}) do
+    %{
+      type: "unary_op",
+      category: Keyword.get(meta, :category, :unknown),
+      operator: Keyword.get(meta, :operator, :unknown),
+      operand: json_map(operand)
+    }
+  end
+
+  defp json_map(%{type: :function_call, meta: meta, children: args}) do
+    %{
+      type: "function_call",
+      name: Keyword.get(meta, :name, "unknown"),
+      args: Enum.map(args, &json_map/1)
+    }
+  end
+
+  defp json_map(%{type: :conditional, children: roles}) do
+    by_label = Map.new(roles, fn %{label: label, children: child} -> {label, child} end)
+
+    %{
+      type: "conditional",
+      condition: json_map(by_label["condition"]),
+      then_branch: json_map(by_label["then"]),
+      else_branch: if(by_label["else"], do: json_map(by_label["else"]), else: nil)
+    }
+  end
+
+  defp json_map(%{type: :block, children: statements}) do
+    %{type: "block", statements: Enum.map(statements, &json_map/1)}
+  end
+
+  defp json_map(%{type: :language_specific, meta: meta}) do
+    %{
+      type: "language_specific",
+      language: Keyword.get(meta, :language, :unknown),
+      hint: Keyword.get(meta, :hint)
+    }
+  end
+
+  defp json_map(%{type: type, meta: meta, children: children}) do
+    %{type: to_string(type), meta: Map.new(meta), children: json_children(children)}
+  end
+
+  defp json_pair(%{type: :pair, children: [key, value]}) do
+    %{key: json_map(key), value: json_map(value)}
+  end
+
+  defp json_children(children) when is_list(children), do: Enum.map(children, &json_map/1)
+  defp json_children(value), do: value
+
+  # ----- Plain renderer -----
+
+  @spec render_plain(node_map()) :: String.t()
+  defp render_plain(%{type: :literal, meta: meta, children: value}) do
+    "literal(#{Keyword.get(meta, :subtype, :unknown)}, #{inspect(value)})"
+  end
+
+  defp render_plain(%{type: :variable, children: name}) do
+    "variable(#{name})"
+  end
+
+  defp render_plain(%{type: :binary_op, meta: meta, children: [left, right]}) do
+    category = Keyword.get(meta, :category, :unknown)
+    operator = Keyword.get(meta, :operator, :unknown)
+    "binary_op(#{category}, #{operator}, #{render_plain(left)}, #{render_plain(right)})"
+  end
+
+  defp render_plain(%{type: :unary_op, meta: meta, children: [operand]}) do
+    category = Keyword.get(meta, :category, :unknown)
+    operator = Keyword.get(meta, :operator, :unknown)
+    "unary_op(#{category}, #{operator}, #{render_plain(operand)})"
+  end
+
+  defp render_plain(%{type: :function_call, meta: meta, children: args}) do
+    name = Keyword.get(meta, :name, "unknown")
+    args_str = Enum.map_join(args, ", ", &render_plain/1)
+    "function_call(#{name}, [#{args_str}])"
+  end
+
+  defp render_plain(%{type: type}) when is_atom(type), do: to_string(type)
+
+  defp render_plain(%{children: value}), do: inspect(value)
+
+  # ----- Shared helpers -----
+
+  defp map_children(children) when is_list(children), do: Enum.map(children, &to_map/1)
+
+  defp map_loop(loop_type, children) do
+    case {loop_type, children} do
+      {:while, [condition, body]} ->
+        {"loop (while)",
+         [
+           %{type: :role, meta: [], children: to_map(condition), label: "condition"},
+           %{type: :role, meta: [], children: to_map(body), label: "body"}
+         ]}
+
+      {kind, [iterator, collection, body]} when kind in [:for, :for_each] ->
+        {"loop (#{kind})",
+         [
+           %{type: :role, meta: [], children: to_map(iterator), label: "iterator"},
+           %{type: :role, meta: [], children: to_map(collection), label: "collection"},
+           %{type: :role, meta: [], children: to_map(body), label: "body"}
+         ]}
+
+      _ ->
+        {"loop (#{loop_type})", []}
+    end
+  end
+
+  defp map_collection_op(op, children) do
+    case {op, children} do
+      {op, [lambda, collection]} when op in [:map, :filter] ->
+        {"collection_op (#{op})",
+         [
+           %{type: :role, meta: [], children: to_map(lambda), label: "lambda"},
+           %{type: :role, meta: [], children: to_map(collection), label: "collection"}
+         ]}
+
+      {:reduce, [lambda, collection, initial]} ->
+        {"collection_op (reduce)",
+         [
+           %{type: :role, meta: [], children: to_map(lambda), label: "lambda"},
+           %{type: :role, meta: [], children: to_map(collection), label: "collection"},
+           %{type: :role, meta: [], children: to_map(initial), label: "initial"}
+         ]}
+
+      _ ->
+        {"collection_op (#{op})", []}
+    end
+  end
+
+  defp map_exception(children) do
     {body, rescue_clauses, finally_clause} =
       case children do
         [b, r, f] -> {b, r, f}
@@ -293,67 +478,35 @@ defmodule Metastatic.CLI.Formatter do
         [b] -> {b, [], nil}
       end
 
-    lines = [
-      "#{indent}exception_handling",
-      "#{indent}  body:",
-      format_tree(body, depth + 2),
-      "#{indent}  rescue:"
-    ]
-
     rescue_list = if is_list(rescue_clauses), do: rescue_clauses, else: []
 
-    rescue_lines =
-      Enum.flat_map(rescue_list, fn
+    rescue_roles =
+      Enum.map(rescue_list, fn
         {:catch_clause, _, [_type, _var, handler]} ->
-          [
-            "#{indent}    handler:",
-            format_tree(handler, depth + 3)
-          ]
+          %{type: :role, meta: [], children: to_map(handler), label: "handler"}
 
         {:rescue, _, [pattern, handler]} ->
-          [
-            "#{indent}    pattern:",
-            format_tree(pattern, depth + 3),
-            "#{indent}    handler:",
-            format_tree(handler, depth + 3)
-          ]
+          %{
+            type: :role,
+            meta: [],
+            children: [to_map(pattern), to_map(handler)],
+            label: "rescue"
+          }
 
         other ->
-          ["#{indent}    #{inspect(other)}"]
+          %{type: :role, meta: [], children: other, label: inspect(other)}
       end)
 
-    lines = lines ++ rescue_lines
+    base = [%{type: :role, meta: [], children: to_map(body), label: "body"}]
 
-    lines =
+    tail =
       if finally_clause do
-        lines ++
-          [
-            "#{indent}  finally:",
-            format_tree(finally_clause, depth + 2)
-          ]
+        [%{type: :role, meta: [], children: to_map(finally_clause), label: "finally"}]
       else
-        lines
+        []
       end
 
-    Enum.join(lines, "\n")
-  end
-
-  # 3-tuple: {:language_specific, [language: lang, hint: hint], native_ast}
-  defp format_tree_node({:language_specific, meta, _native_ast}, indent, _depth)
-       when is_list(meta) do
-    language = Keyword.get(meta, :language, :unknown)
-    hint = Keyword.get(meta, :hint)
-    "#{indent}language_specific (#{language}, hint: #{inspect(hint)})"
-  end
-
-  # Fallback for any unrecognized 3-tuple
-  defp format_tree_node({type, meta, _children}, indent, _depth)
-       when is_atom(type) and is_list(meta) do
-    "#{indent}#{type}"
-  end
-
-  defp format_tree_node(ast, indent, _depth) do
-    "#{indent}#{inspect(ast)}"
+    base ++ rescue_roles ++ tail
   end
 
   # 3-tuple params: {:param, [pattern: pattern, default: default], name}
@@ -382,177 +535,4 @@ defmodule Metastatic.CLI.Formatter do
   # Handle string params (e.g. from Python lambda)
   defp format_param(name) when is_binary(name), do: name
   defp format_param(other), do: inspect(other)
-
-  # JSON format - machine-readable
-  # 3-tuple format: {type, meta, children_or_value}
-
-  @spec format_json(meta_ast()) :: String.t()
-  defp format_json(ast) do
-    ast
-    |> ast_to_map()
-    |> Jason.encode!(pretty: true)
-  end
-
-  # 3-tuple: {:literal, [subtype: type], value}
-  defp ast_to_map({:literal, meta, value}) when is_list(meta) do
-    type = Keyword.get(meta, :subtype, :unknown)
-    %{type: "literal", semantic_type: type, value: value}
-  end
-
-  # 3-tuple: {:variable, meta, name}
-  defp ast_to_map({:variable, _meta, name}) do
-    %{type: "variable", name: name}
-  end
-
-  # 3-tuple: {:list, meta, elements}
-  defp ast_to_map({:list, _meta, elements}) when is_list(elements) do
-    %{type: "list", elements: Enum.map(elements, &ast_to_map/1)}
-  end
-
-  # 3-tuple: {:map, meta, pairs}
-  defp ast_to_map({:map, _meta, pairs}) when is_list(pairs) do
-    %{
-      type: "map",
-      pairs:
-        Enum.map(pairs, fn
-          {:pair, _, [k, v]} -> %{key: ast_to_map(k), value: ast_to_map(v)}
-          {k, v} -> %{key: ast_to_map(k), value: ast_to_map(v)}
-        end)
-    }
-  end
-
-  # 3-tuple: {:binary_op, [category: cat, operator: op], [left, right]}
-  defp ast_to_map({:binary_op, meta, [left, right]}) when is_list(meta) do
-    category = Keyword.get(meta, :category, :unknown)
-    op = Keyword.get(meta, :operator, :unknown)
-
-    %{
-      type: "binary_op",
-      category: category,
-      operator: op,
-      left: ast_to_map(left),
-      right: ast_to_map(right)
-    }
-  end
-
-  # 3-tuple: {:unary_op, [category: cat, operator: op], [operand]}
-  defp ast_to_map({:unary_op, meta, [operand]}) when is_list(meta) do
-    category = Keyword.get(meta, :category, :unknown)
-    op = Keyword.get(meta, :operator, :unknown)
-
-    %{
-      type: "unary_op",
-      category: category,
-      operator: op,
-      operand: ast_to_map(operand)
-    }
-  end
-
-  # 3-tuple: {:function_call, [name: name], args}
-  defp ast_to_map({:function_call, meta, args}) when is_list(meta) do
-    name = Keyword.get(meta, :name, "unknown")
-
-    %{
-      type: "function_call",
-      name: name,
-      args: Enum.map(args, &ast_to_map/1)
-    }
-  end
-
-  # 3-tuple: {:conditional, meta, [condition, then_branch, else_branch?]}
-  defp ast_to_map({:conditional, _meta, children}) when is_list(children) do
-    {condition, then_branch, else_branch} =
-      case children do
-        [c, t, e] -> {c, t, e}
-        [c, t] -> {c, t, nil}
-      end
-
-    %{
-      type: "conditional",
-      condition: ast_to_map(condition),
-      then_branch: ast_to_map(then_branch),
-      else_branch: if(else_branch, do: ast_to_map(else_branch), else: nil)
-    }
-  end
-
-  # 3-tuple: {:block, meta, statements}
-  defp ast_to_map({:block, _meta, statements}) when is_list(statements) do
-    %{
-      type: "block",
-      statements: Enum.map(statements, &ast_to_map/1)
-    }
-  end
-
-  # 3-tuple: {:language_specific, [language: lang, hint: hint], native_ast}
-  defp ast_to_map({:language_specific, meta, _native_ast}) when is_list(meta) do
-    language = Keyword.get(meta, :language, :unknown)
-    hint = Keyword.get(meta, :hint)
-
-    %{
-      type: "language_specific",
-      language: language,
-      hint: hint
-    }
-  end
-
-  # Fallback for other 3-tuple types
-  defp ast_to_map({type, meta, children}) when is_atom(type) and is_list(meta) do
-    %{type: to_string(type), meta: Map.new(meta), children: format_children(children)}
-  end
-
-  defp ast_to_map(ast) do
-    %{type: "unknown", data: inspect(ast)}
-  end
-
-  defp format_children(children) when is_list(children) do
-    Enum.map(children, &ast_to_map/1)
-  end
-
-  defp format_children(value), do: value
-
-  # Plain format - simple text representation
-  # 3-tuple format: {type, meta, children_or_value}
-
-  @spec format_plain(meta_ast()) :: String.t()
-
-  # 3-tuple: {:literal, [subtype: type], value}
-  defp format_plain({:literal, meta, value}) when is_list(meta) do
-    type = Keyword.get(meta, :subtype, :unknown)
-    "literal(#{type}, #{inspect(value)})"
-  end
-
-  # 3-tuple: {:variable, meta, name}
-  defp format_plain({:variable, _meta, name}) do
-    "variable(#{name})"
-  end
-
-  # 3-tuple: {:binary_op, [category: cat, operator: op], [left, right]}
-  defp format_plain({:binary_op, meta, [left, right]}) when is_list(meta) do
-    category = Keyword.get(meta, :category, :unknown)
-    op = Keyword.get(meta, :operator, :unknown)
-    "binary_op(#{category}, #{op}, #{format_plain(left)}, #{format_plain(right)})"
-  end
-
-  # 3-tuple: {:unary_op, [category: cat, operator: op], [operand]}
-  defp format_plain({:unary_op, meta, [operand]}) when is_list(meta) do
-    category = Keyword.get(meta, :category, :unknown)
-    op = Keyword.get(meta, :operator, :unknown)
-    "unary_op(#{category}, #{op}, #{format_plain(operand)})"
-  end
-
-  # 3-tuple: {:function_call, [name: name], args}
-  defp format_plain({:function_call, meta, args}) when is_list(meta) do
-    name = Keyword.get(meta, :name, "unknown")
-    args_str = Enum.map_join(args, ", ", &format_plain/1)
-    "function_call(#{name}, [#{args_str}])"
-  end
-
-  # Fallback for other 3-tuples
-  defp format_plain({type, _meta, _children}) when is_atom(type) do
-    to_string(type)
-  end
-
-  defp format_plain(ast) do
-    inspect(ast)
-  end
 end
