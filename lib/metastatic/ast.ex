@@ -592,7 +592,7 @@ defmodule Metastatic.AST do
       :binary_op
   """
   @spec type(meta_ast()) :: atom()
-  def type({type, _meta, _children}) when is_atom(type), do: type
+  defdelegate type(node), to: Metastatic.MetaAST
 
   @doc """
   Extract the metadata keyword list from a MetaAST node.
@@ -606,7 +606,7 @@ defmodule Metastatic.AST do
       []
   """
   @spec meta(meta_ast()) :: keyword()
-  def meta({_type, meta, _children}) when is_list(meta), do: meta
+  defdelegate meta(node), to: Metastatic.MetaAST
 
   @doc """
   Extract the children or value from a MetaAST node.
@@ -625,7 +625,7 @@ defmodule Metastatic.AST do
       [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]
   """
   @spec children(meta_ast()) :: term()
-  def children({_type, _meta, children}), do: children
+  defdelegate children(node), to: Metastatic.MetaAST
 
   @doc """
   Get a specific metadata value by key.
@@ -645,9 +645,7 @@ defmodule Metastatic.AST do
       0
   """
   @spec get_meta(meta_ast(), atom(), term()) :: term()
-  def get_meta({_type, meta, _children}, key, default \\ nil) when is_atom(key) do
-    Keyword.get(meta, key, default)
-  end
+  defdelegate get_meta(node, key, default \\ nil), to: Metastatic.MetaAST
 
   @doc """
   Put a metadata value by key.
@@ -663,9 +661,7 @@ defmodule Metastatic.AST do
       {:variable, [line: 10], "x"}
   """
   @spec put_meta(meta_ast(), atom(), term()) :: meta_ast()
-  def put_meta({type, meta, children}, key, value) when is_atom(key) do
-    {type, Keyword.put(meta, key, value), children}
-  end
+  defdelegate put_meta(node, key, value), to: Metastatic.MetaAST
 
   @doc """
   Update multiple metadata keys at once.
@@ -677,9 +673,7 @@ defmodule Metastatic.AST do
       {:literal, [subtype: :integer, line: 10, col: 5], 42}
   """
   @spec update_meta(meta_ast(), keyword()) :: meta_ast()
-  def update_meta({type, meta, children}, updates) when is_list(updates) do
-    {type, Keyword.merge(meta, updates), children}
-  end
+  defdelegate update_meta(node, updates), to: Metastatic.MetaAST
 
   @doc """
   Update the children/value of a node.
@@ -695,10 +689,7 @@ defmodule Metastatic.AST do
       {:binary_op, [operator: :+], [{:variable, [], "y"}, {:literal, [subtype: :integer], 10}]}
   """
   @spec update_children(meta_ast(), term()) :: meta_ast()
-  def update_children({type, meta, _children}, new_children) do
-    {type, meta, new_children}
-  end
-
+  defdelegate update_children(node, new_children), to: Metastatic.MetaAST
   # ----- Traversal -----
 
   @doc """
@@ -2489,6 +2480,22 @@ defmodule Metastatic.AST do
       [node | rest] -> {node, child_nodes(node) ++ rest}
     end)
   end
+
+  @doc """
+  Returns a lazy pre-order enumerable that threads an accumulator.
+
+  Delegates to `Metastatic.MetaAST.prewalker/3`.
+
+  ## Examples
+
+      iex> ast = {:binary_op, [operator: :+],
+      ...>   [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+      iex> ast |> Metastatic.AST.prewalker(0, fn _n, acc -> {acc, acc + 1} end) |> Enum.to_list()
+      [0, 1, 2]
+  """
+  @spec prewalker(meta_ast(), acc, (meta_ast(), acc -> {term(), acc})) :: Enumerable.t()
+        when acc: term()
+  defdelegate prewalker(ast, acc, fun), to: Metastatic.MetaAST
 
   @doc """
   Returns an enumerable that traverses the MetaAST in depth-first, post-order.

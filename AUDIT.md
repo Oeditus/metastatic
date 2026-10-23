@@ -337,7 +337,7 @@ Project total: **56.2 % → 60.3 %**; test count **1535 → 1645**.
 | 16 | `Formatter` single `to_map/1` intermediate | F-10 | ✅ |
 | 17 | `NL.AST` metadata traversal parity | R-3 | ✅ |
 | 18 | Property-based round-trip tests (`stream_data`) | R-2 | ✅ |
-| 19 | Adapter conformance suite (Python/Elixir/Erlang) | R-5 | ✅ |
+| 19 | Adapter conformance suite (Python/Elixir/Erlang/JavaScript/TypeScript/Ruby) + contract guard | R-5 | ✅ |
 | 20 | Drop `:typle`; ignore stray socket | F-21 | ✅ |
 | 21 | `Languages.parse_language/1` consistent return type | F-22 | ✅ |
 | 22 | `AST.traverse` metadata-walk invariant documented + `contains_meta_node?` | F-9 | ✅ |
@@ -360,7 +360,59 @@ Project total: **56.2 % → 60.3 %**; test count **1535 → 1645**.
 
 ---
 
-## 6. Bottom line
+## 6. Architectural recommendations — final status
+
+This section records how each of R-1..R-5 is satisfied in the codebase.
+
+### R-1 · Explicit, testable M2 canonical form — ✅
+- `Metastatic.AST.canonicalize/1` strips incidental metadata
+  (locations, `original_meta`, formatting) to a fixed shape; the semantic-key
+  list is `AST.semantic_meta_keys/0`.
+- `Metastatic.Document.equivalent?/2` is a thin wrapper:
+  `canonicalize(a) == canonicalize(b)`.
+- `test/metastatic/cross_language_conformance_test.exs` asserts that the same
+  expression canonicalises identically across Python, Elixir, Erlang, Ruby and
+  JavaScript (filtered to the adapters available at runtime), and documents
+  Ruby's bare-identifier ambiguity as a known, intentional difference.
+
+### R-2 · Property-based round-trip testing — ✅
+- `stream_data` is a test-only dependency.
+- `test/metastatic/property_round_trip_test.exs` generates random valid
+  MetaAST trees with the `AST` builder API, reifies them, re-abstracts, and
+  asserts canonical stability — exercising the `from_meta` direction. Also
+  asserts `canonicalize/1` is idempotent and location-insensitive.
+
+### R-3 · Unify the two meta-ASTs — ✅
+- New `Metastatic.MetaAST` module owns the shared 3-tuple core: accessors
+  (`type/1`, `meta/1`, `children/1`), metadata (`get_meta/3`, `put_meta/3`,
+  `update_meta/2,4`), traversal (`traverse/4`, `prewalk/2`, `postwalk/2`),
+  lazy walkers (`prewalker/1`, `prewalker/3`) and `path/2`.
+- Both `Metastatic.AST` and `Metastatic.NL.AST` delegate to it, so the two
+  meta-ASTs can no longer drift apart in their shared surface.
+- NL `traverse/4` now walks metadata values (verified by test: a node embedded
+  in a `:target` metadata key is visited).
+- Both modules expose `traverse/4`, `path/2` and `prewalker/3`.
+
+### R-4 · `OpKind` typed struct — ✅ (scoped to documentation)
+Per the deferral rationale above, `op_kind` remains a keyword list because it
+is stored in AST metadata. The stale moduledoc (which claimed only `:db`
+existed) was corrected to document all seven implemented domains
+(`:db`, `:http`, `:auth`, `:cache`, `:queue`, `:file`, `:external_api`).
+
+### R-5 · Adapter conformance harness — ✅
+- `Metastatic.Test.AdapterConformance` is a `use`-macro generating a uniform
+  suite (behaviour, dot-prefixed extensions, discovery, parse/reject,
+  `to_meta` conformance, `from_meta` reification, round-trip).
+- Applied to Python, Elixir, Erlang, JavaScript, TypeScript and Ruby
+  (`test/metastatic/adapters/*_conformance_test.exs`).
+- `test/metastatic/adapter_contract_test.exs` enumerates every adapter in
+  `Metastatic.Languages` and asserts it satisfies the contract (valid adapter,
+  `to_meta/1` or `/2`, dot-prefixed extensions that round-trip through
+  detection). A new language added below the bar fails this test.
+
+---
+
+## 7. Bottom line
 
 This is an **ambitious, well-architected, genuinely novel** library with a strong
 theoretical spine, an unusually good `AST` API and disciplined tooling. The core

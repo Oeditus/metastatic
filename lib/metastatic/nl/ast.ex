@@ -186,151 +186,72 @@ defmodule Metastatic.NL.AST do
   end
 
   # ----- Node Accessors -----
+  #
+  # These are identical to the programming-language MetaAST and are delegated
+  # to the shared `Metastatic.MetaAST` core so the two meta-ASTs cannot drift.
 
-  @doc """
-  Returns the type atom of an NL node.
-  """
+  @doc "Returns the type atom of an NL node."
   @spec type(nl_node()) :: atom()
-  def type({type, _meta, _children}) when is_atom(type), do: type
+  defdelegate type(node), to: Metastatic.MetaAST
 
-  @doc """
-  Returns the metadata keyword list of an NL node.
-  """
+  @doc "Returns the metadata keyword list of an NL node."
   @spec meta(nl_node()) :: keyword()
-  def meta({_type, meta, _children}) when is_list(meta), do: meta
+  defdelegate meta(node), to: Metastatic.MetaAST
 
-  @doc """
-  Returns the children list or leaf value of an NL node.
-  """
+  @doc "Returns the children list or leaf value of an NL node."
   @spec children(nl_node()) :: term()
-  def children({_type, _meta, children}), do: children
+  defdelegate children(node), to: Metastatic.MetaAST
 
-  @doc """
-  Gets a metadata value by key, returning default if absent.
-  """
+  @doc "Gets a metadata value by key, returning default if absent."
   @spec get_meta(nl_node(), atom(), term()) :: term()
-  def get_meta({_type, meta, _children}, key, default \\ nil) when is_atom(key) do
-    Keyword.get(meta, key, default)
-  end
+  defdelegate get_meta(node, key, default \\ nil), to: Metastatic.MetaAST
 
-  @doc """
-  Sets or updates a metadata key.
-  """
+  @doc "Sets or updates a metadata key."
   @spec put_meta(nl_node(), atom(), term()) :: nl_node()
-  def put_meta({type, meta, children}, key, value) when is_atom(key) do
-    {type, Keyword.put(meta, key, value), children}
-  end
+  defdelegate put_meta(node, key, value), to: Metastatic.MetaAST
 
-  @doc """
-  Updates a metadata value with a function.
-  """
+  @doc "Merges a keyword list of metadata updates into the node."
+  @spec update_meta(nl_node(), keyword()) :: nl_node()
+  defdelegate update_meta(node, updates), to: Metastatic.MetaAST
+
+  @doc "Updates a metadata value with a function."
   @spec update_meta(nl_node(), atom(), term(), (term() -> term())) :: nl_node()
-  def update_meta({type, meta, children}, key, default, fun)
-      when is_atom(key) and is_function(fun, 1) do
-    current = Keyword.get(meta, key, default)
-    {type, Keyword.put(meta, key, fun.(current)), children}
-  end
+  defdelegate update_meta(node, key, default, fun), to: Metastatic.MetaAST
 
   # ----- Traversal -----
 
   @doc """
   Traverses an NL-MetaAST depth-first with pre-visit and post-visit functions.
 
-  Identical in contract to `Metastatic.AST.traverse/4`: metadata values that
-  themselves contain NL nodes are traversed too, so a node embedded in a
-  metadata key (e.g. a `:coreference` target) is visited like any other child.
+  Delegates to `Metastatic.MetaAST.traverse/4`, which also visits metadata
+  values that contain nodes (e.g. a `:coreference` target).
   """
   @spec traverse(nl_node(), acc, (nl_node(), acc -> {nl_node(), acc}), (nl_node(), acc ->
                                                                           {nl_node(), acc})) ::
           {nl_node(), acc}
         when acc: term()
-  def traverse(node, acc, pre, post)
-      when is_function(pre, 2) and is_function(post, 2) do
-    {node, acc} = pre.(node, acc)
+  defdelegate traverse(node, acc, pre, post), to: Metastatic.MetaAST
 
-    case node do
-      {type, meta, children} when is_atom(type) and is_list(meta) ->
-        {meta, acc} = traverse_meta(meta, acc, pre, post)
-
-        {new_children, acc} =
-          if is_list(children) do
-            Enum.map_reduce(children, acc, fn child, acc_in ->
-              traverse(child, acc_in, pre, post)
-            end)
-          else
-            {children, acc}
-          end
-
-        post.({type, meta, new_children}, acc)
-
-      leaf ->
-        post.(leaf, acc)
-    end
-  end
-
-  # Traverse keyword metadata, descending into NL-node values.
-  defp traverse_meta(meta, acc, pre, post) do
-    if Keyword.keyword?(meta) do
-      Enum.map_reduce(meta, acc, fn {key, val}, acc_in ->
-        {new_val, acc_out} = traverse_meta_val(val, acc_in, pre, post)
-        {{key, new_val}, acc_out}
-      end)
-    else
-      {meta, acc}
-    end
-  end
-
-  defp traverse_meta_val({type, meta, _} = node, acc, pre, post)
-       when is_atom(type) and is_list(meta) do
-    traverse(node, acc, pre, post)
-  end
-
-  defp traverse_meta_val(list, acc, pre, post) when is_list(list) do
-    if Keyword.keyword?(list) or Enum.any?(list, &nl_node?/1) do
-      Enum.map_reduce(list, acc, fn item, acc_in ->
-        traverse_meta_val(item, acc_in, pre, post)
-      end)
-    else
-      {list, acc}
-    end
-  end
-
-  defp traverse_meta_val(other, acc, _pre, _post), do: {other, acc}
-
-  defp nl_node?({type, meta, _}) when is_atom(type) and is_list(meta), do: true
-  defp nl_node?(_), do: false
-
-  @doc """
-  Pre-walk traversal over an NL-MetaAST.
-  """
+  @doc "Pre-walk traversal over an NL-MetaAST."
   @spec prewalk(nl_node(), (nl_node() -> nl_node())) :: nl_node()
-  def prewalk(node, fun) when is_function(fun, 1) do
-    {new_node, _} =
-      traverse(
-        node,
-        nil,
-        fn n, acc -> {fun.(n), acc} end,
-        fn n, acc -> {n, acc} end
-      )
+  defdelegate prewalk(node, fun), to: Metastatic.MetaAST
 
-    new_node
-  end
-
-  @doc """
-  Post-walk traversal over an NL-MetaAST.
-  """
+  @doc "Post-walk traversal over an NL-MetaAST."
   @spec postwalk(nl_node(), (nl_node() -> nl_node())) :: nl_node()
-  def postwalk(node, fun) when is_function(fun, 1) do
-    {new_node, _} =
-      traverse(
-        node,
-        nil,
-        fn n, acc -> {n, acc} end,
-        fn n, acc -> {fun.(n), acc} end
-      )
+  defdelegate postwalk(node, fun), to: Metastatic.MetaAST
 
-    new_node
-  end
+  @doc "Lazy depth-first pre-order enumerable over an NL-MetaAST."
+  @spec prewalker(nl_node()) :: Enumerable.t()
+  defdelegate prewalker(node), to: Metastatic.MetaAST
+
+  @doc "Lazy pre-order enumerable that threads an accumulator."
+  @spec prewalker(nl_node(), acc, (nl_node(), acc -> {term(), acc})) :: Enumerable.t()
+        when acc: term()
+  defdelegate prewalker(node, acc, fun), to: Metastatic.MetaAST
+
+  @doc "Path from a matching NL node up to the root, or `nil`."
+  @spec path(nl_node(), (nl_node() -> as_boolean(term()))) :: [nl_node()] | nil
+  defdelegate path(node, fun), to: Metastatic.MetaAST
 
   # ----- Extraction Utilities -----
 

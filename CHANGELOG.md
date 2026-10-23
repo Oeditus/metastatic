@@ -5,10 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
 ### Added -- Project audit, canonicalisation & conformance tooling
+- **`Metastatic.MetaAST`** -- new shared core for MetaAST-shaped trees. Owns the
+  uniform 3-tuple accessors (`type/1`, `meta/1`, `children/1`), metadata helpers
+  (`get_meta/3`, `put_meta/3`, `update_meta/2,4`), traversal (`traverse/4`,
+  `prewalk/2`, `postwalk/2`), lazy walkers (`prewalker/1`, `prewalker/3`) and
+  `path/2`. Both `Metastatic.AST` and `Metastatic.NL.AST` delegate to it, so the
+  two meta-ASTs can no longer drift apart in their shared surface (R-3).
+- **Adapter contract guard** (`test/metastatic/adapter_contract_test.exs`) --
+  enumerates every adapter in `Metastatic.Languages` and asserts it satisfies the
+  `Metastatic.Adapter` contract, so a new language cannot be merged below the
+  quality bar (R-5).
+- **Adapter conformance suites** for JavaScript, TypeScript and Ruby, joining the
+  existing Python/Elixir/Erlang suites (R-5).
 - **`AUDIT.md`** -- full project audit (findings `F-1`…`F-22`, recommendations
+  `R-1`…`R-5`) with the executed roadmap and a final R-1..R-5 status section.
   `R-1`…`R-5`) with the executed roadmap.
 - **`Metastatic.AST.canonicalize/1`** and **`AST.semantic_meta_keys/0`** -- strip
   incidental metadata (locations, `original_meta`, formatting) to a canonical

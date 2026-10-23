@@ -57,7 +57,7 @@ defmodule Metastatic.Test.AdapterConformance do
       test "file_extensions/0 returns dot-prefixed extensions" do
         extensions = @conformance_adapter.file_extensions()
         assert is_list(extensions)
-        assert extensions != []
+        refute Enum.empty?(extensions)
 
         assert Enum.all?(extensions, fn ext ->
                  is_binary(ext) and String.starts_with?(ext, ".")
