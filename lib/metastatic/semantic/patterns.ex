@@ -104,6 +104,8 @@ defmodule Metastatic.Semantic.Patterns do
     key = {__MODULE__, domain, language}
     existing = :persistent_term.get(key, [])
     :persistent_term.put(key, existing ++ patterns)
+    # Invalidate the merged per-language lookup cache.
+    :persistent_term.erase({__MODULE__, :merged, language})
     :ok
   end
 
@@ -135,8 +137,26 @@ defmodule Metastatic.Semantic.Patterns do
 
   # ----- Private Implementation -----
 
-  # Get all patterns applicable to a language (from all domains)
+  # Get all patterns applicable to a language (from all domains).
+  #
+  # The merged list is cached in `:persistent_term` per language and
+  # invalidated by `register/3`, so repeated `match/4` calls during a
+  # tree traversal do not rebuild it on every node.
   defp get_patterns_for_language(language) do
+    merged_key = {__MODULE__, :merged, language}
+
+    case :persistent_term.get(merged_key, :miss) do
+      :miss ->
+        merged = build_merged_patterns(language)
+        :persistent_term.put(merged_key, merged)
+        merged
+
+      merged ->
+        merged
+    end
+  end
+
+  defp build_merged_patterns(language) do
     domains = [:db, :http, :auth, :cache, :queue, :file, :external_api]
 
     Enum.flat_map(domains, fn domain ->

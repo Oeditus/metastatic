@@ -318,7 +318,6 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   # Module mixins - M2.2s Structural Layer
   # Ruby `include`, `prepend`, and `extend` are semantically import directives
   # that bring in module behaviour, not regular method calls.
-
   def transform(
         %{"type" => "send", "children" => [nil, mixin_type, %{"type" => "const"} = const_node]} =
           ast

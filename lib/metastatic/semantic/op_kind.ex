@@ -17,18 +17,19 @@ defmodule Metastatic.Semantic.OpKind do
 
   ## Domains
 
-  Currently supported domains:
+  Seven domains are supported:
 
   - `:db` - Database operations (CRUD, transactions, queries)
-
-  Future domains (not yet implemented):
-
   - `:http` - HTTP client operations
   - `:auth` - Authentication/authorization
   - `:cache` - Cache operations
   - `:queue` - Message queue operations
   - `:file` - File I/O operations
   - `:external_api` - External API calls
+
+  Each domain has its own operation vocabulary (see the `@*_operations`
+  module attributes), and `valid?/1` checks that an operation belongs to its
+  domain.
 
   ## Database Operations (`:db`)
 

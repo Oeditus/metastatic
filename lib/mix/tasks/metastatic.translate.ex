@@ -55,8 +55,6 @@ defmodule Mix.Tasks.Metastatic.Translate do
   """
 
   use Mix.Task
-  @dialyzer {:no_return, run: 1}
-
   alias Metastatic.CLI
   alias Metastatic.CLI.Translator
 
@@ -67,6 +65,7 @@ defmodule Mix.Tasks.Metastatic.Translate do
   ]
 
   @impl Mix.Task
+  @dialyzer {:no_return, run: 1}
   def run(args) do
     Mix.Task.run("app.start")
 
@@ -145,7 +144,7 @@ defmodule Mix.Tasks.Metastatic.Translate do
       {:ok, lang} ->
         {:ok, lang}
 
-      {:error, _} ->
+      _ ->
         {:error,
          "Invalid --#{opt_name} language: #{lang_str}. Supported: #{Metastatic.Languages.supported_languages_string()}"}
     end

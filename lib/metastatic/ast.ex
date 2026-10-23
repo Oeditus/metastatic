@@ -1541,6 +1541,122 @@ defmodule Metastatic.AST do
     vars
   end
 
+  # ----- Canonicalisation -----
+
+  # Metadata keys that carry *semantic* meaning. Two MetaAST nodes are
+  # semantically equivalent when their type, children/values, and the
+  # values of these keys all match. Everything else (source locations,
+  # `:original_meta`, formatting hints, parser-specific bookkeeping) is
+  # treated as incidental and stripped by `canonicalize/1`.
+  #
+  # This list is the single source of truth for `Document.equivalent?/2`
+  # and any cross-language comparison. When a new *semantic* metadata key
+  # is introduced, add it here.
+  @semantic_meta_keys [
+    :subtype,
+    :category,
+    :operator,
+    :name,
+    :op_type,
+    :loop_type,
+    :params,
+    :captures,
+    :container_type,
+    :visibility,
+    :pattern,
+    :construct,
+    :collection_type,
+    :original_form,
+    :language,
+    :hint,
+    :source,
+    :names,
+    :import_type,
+    :alias,
+    :kind,
+    :scope,
+    :annotation_type,
+    :comment_kind,
+    :attribute,
+    :op_kind,
+    :callback_for,
+    :decorator_callback,
+    :async,
+    :framework,
+    :target,
+    :domain,
+    :operation,
+    :arity,
+    :inclusive,
+    :from,
+    :event,
+    :to,
+    :event_kind,
+    :type,
+    :signedness,
+    :endianness,
+    :unit,
+    :module,
+    :id,
+    :parent,
+    :bases,
+    :decorators
+  ]
+
+  @doc """
+  Returns the list of metadata keys considered semantically significant.
+
+  Used by `canonicalize/1` and `Metastatic.Document.equivalent?/2`.
+
+  ## Examples
+
+      iex> :operator in Metastatic.AST.semantic_meta_keys()
+      true
+
+      iex> :line in Metastatic.AST.semantic_meta_keys()
+      false
+  """
+  @spec semantic_meta_keys() :: [atom()]
+  def semantic_meta_keys, do: @semantic_meta_keys
+
+  @doc """
+  Strips incidental metadata, producing a canonical form for comparison.
+
+  Two ASTs are *semantically equivalent* when their canonical forms are
+  equal. Source locations (`:line`, `:col`, `:end_line`, `:end_col`),
+  `:original_meta`, and other parser-specific bookkeeping are removed;
+  only the keys returned by `semantic_meta_keys/0` are kept.
+
+  This is what makes the library's cross-language claim testable: the
+  same program written in Python and Elixir canonicalises to the same
+  term even though their parsers attach different location metadata.
+
+  ## Examples
+
+      iex> py = {:binary_op, [category: :arithmetic, operator: :+, line: 1, col: 0],
+      ...>   [{:variable, [scope: :local, line: 1, col: 0], "x"},
+      ...>    {:literal, [subtype: :integer, line: 1, col: 4], 5}]}
+      iex> ex = {:binary_op, [category: :arithmetic, operator: :+, line: 1],
+      ...>   [{:variable, [scope: :local, line: 1], "x"},
+      ...>    {:literal, [subtype: :integer], 5}]}
+      iex> Metastatic.AST.canonicalize(py) == Metastatic.AST.canonicalize(ex)
+      true
+
+      iex> a = {:literal, [subtype: :integer, line: 1], 42}
+      iex> b = {:literal, [subtype: :integer, line: 9], 42}
+      iex> Metastatic.AST.canonicalize(a) == Metastatic.AST.canonicalize(b)
+      true
+  """
+  @spec canonicalize(meta_ast() | term()) :: meta_ast() | term()
+  def canonicalize({type, meta, children}) when is_atom(type) and is_list(meta) do
+    canonical_meta = Keyword.take(meta, @semantic_meta_keys)
+    {type, canonical_meta, canonicalize(children)}
+  end
+
+  def canonicalize(list) when is_list(list), do: Enum.map(list, &canonicalize/1)
+  def canonicalize(other), do: other
+
+  # ----- Location Helpers -----
   # ----- Location Helpers -----
 
   @doc """

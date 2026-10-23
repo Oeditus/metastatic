@@ -124,6 +124,7 @@ defmodule Mix.Tasks.Metastatic.Inspect do
         case CLI.parse_language(lang_str) do
           {:ok, lang} -> {:ok, lang}
           {:error, reason} -> {:error, reason}
+          :none -> {:error, "Cannot detect language. Use --language option"}
         end
     end
   end

@@ -53,11 +53,34 @@ defmodule Metastatic.Priv do
   end
 
   @doc """
-  Builds environment variables for subprocess execution, ensuring `PATH` includes
-  `mise` shims and `~/.local/bin` and `NODE_PATH` includes `mise` global `node_modules`.
+  Builds environment variables for subprocess execution.
+
+  By default this augments `PATH` with the `mise` shims directory and
+  `~/.local/bin`, and `NODE_PATH` with the `mise` global `node_modules`.
+  These defaults exist to make the subprocess bridges work out of the box on
+  developer machines that use `mise`.
+
+  Host applications can override or replace this entirely with:
+
+      config :metastatic, :subprocess_env, [{"PATH", "/my/path"}]
+
+  When `:subprocess_env` is configured, it is used **verbatim** (the caller's
+  `extra` entries are still merged on top).
   """
   @spec subprocess_env([{String.t(), String.t()}]) :: [{String.t(), String.t()}]
   def subprocess_env(extra \\ []) when is_list(extra) do
+    base_env =
+      case Application.get_env(:metastatic, :subprocess_env) do
+        nil -> default_subprocess_env()
+        configured when is_list(configured) -> configured
+      end
+
+    Enum.reduce(extra, base_env, fn {k, v}, acc ->
+      List.keystore(acc, k, 0, {k, v})
+    end)
+  end
+
+  defp default_subprocess_env do
     home = System.user_home() || ""
     mise_shims = Path.join([home, ".local", "share", "mise", "shims"])
     local_bin = Path.join([home, ".local", "bin"])
@@ -89,24 +112,17 @@ defmodule Metastatic.Priv do
 
     base_env = [{"PATH", augmented_path}]
 
-    base_env =
-      case node_path_parts do
-        [] -> base_env
-        parts -> [{"NODE_PATH", Enum.join(parts, ":")} | base_env]
-      end
-
-    Enum.reduce(extra, base_env, fn {k, v}, acc ->
-      List.keystore(acc, k, 0, {k, v})
-    end)
+    case node_path_parts do
+      [] -> base_env
+      parts -> [{"NODE_PATH", Enum.join(parts, ":")} | base_env]
+    end
   end
 
   defp priv_dir_candidates do
-    [
-      app_priv_dir(:metastatic),
-      @compile_time_priv,
-      app_priv_dir(:ragex),
-      Path.join(File.cwd!(), "priv")
-    ]
+    configured = Application.get_env(:metastatic, :priv_dirs, [])
+
+    ([app_priv_dir(:metastatic), @compile_time_priv] ++
+       configured ++ [Path.join(File.cwd!(), "priv")])
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
   end

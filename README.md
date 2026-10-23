@@ -1,4 +1,4 @@
-<img src="https://raw.githubusercontent.com/Oeditus/metastatic/v0.13.0/stuff/img/logo-128x128.png" alt="Metastatic" width="128" align="right">
+<img src="https://raw.githubusercontent.com/Oeditus/metastatic/main/stuff/img/logo-128x128.png" alt="Metastatic" width="128" align="right">
 
 # Metastatic
 
@@ -475,8 +475,14 @@ Verify that code across languages has identical semantics:
 {:ok, py_doc} = Metastatic.Builder.from_source("x + 5", :python)
 {:ok, ex_doc} = Metastatic.Builder.from_source("x + 5", :elixir)
 
-py_doc.ast == ex_doc.ast  # => true (same MetaAST)
+Metastatic.Document.equivalent?(py_doc, ex_doc)  # => true
 ```
+
+> **Note on equality.** The raw `ast` structs are *not* `==` across languages:
+> adapters attach source-location metadata (`line`, `col`, …) that differs per
+> parser. Use `Metastatic.Document.equivalent?/2` (or `Metastatic.AST.canonicalize/1`)
+> to compare semantics rather than raw terms. This also applies within a single
+> language when formatting differs.
 
 ### AST Infrastructure
 Build language-agnostic tools on top of MetaAST:
@@ -510,7 +516,7 @@ Research synthesis from muex and propwise multi-language projects.
 ```elixir
 def deps do
   [
-    {:metastatic, "~> 0.12"}
+    {:metastatic, "~> 0.32"}
   ]
 end
 ```

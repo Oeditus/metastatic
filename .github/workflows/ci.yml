@@ -72,10 +72,10 @@ jobs:
         run: mix format --check-formatted
 
       - name: Run tests
-        run: mix test --exclude haskell --exclude agda
+        run: mix test
 
-      - name: Run tests with coverage
-        run: mix test --cover --exclude haskell --exclude agda
+      - name: Run tests with coverage (enforces minimum via coveralls.json)
+        run: mix coveralls
 
   quality:
     name: Code Quality

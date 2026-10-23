@@ -61,8 +61,12 @@ defmodule Metastatic.Adapter.Registry do
 
       iex> Registry.register(:python, InvalidModule)
       {:error, :invalid_adapter}
+
+      # Re-registering a *different* adapter for an occupied language is refused
+      # => {:error, {:already_registered, :python, Metastatic.Adapters.Python}}
   """
-  @spec register(atom(), module()) :: :ok | {:error, :invalid_adapter}
+  @spec register(atom(), module()) ::
+          :ok | {:error, :invalid_adapter} | {:error, {:already_registered, atom(), module()}}
   def register(language, adapter) do
     if Adapter.valid_adapter?(adapter) do
       GenServer.call(__MODULE__, {:register, language, adapter})
@@ -188,19 +192,18 @@ defmodule Metastatic.Adapter.Registry do
 
   @impl true
   def handle_call({:register, language, adapter}, _from, state) do
-    # Update adapters map
-    new_adapters = Map.put(state.adapters, language, adapter)
+    case Map.fetch(state.adapters, language) do
+      {:ok, ^adapter} ->
+        # Idempotent re-registration of the same adapter.
+        {:reply, :ok, state}
 
-    # Update extensions map
-    extensions = adapter.file_extensions()
+      {:ok, existing} ->
+        # Refuse to silently replace one adapter with a different one.
+        {:reply, {:error, {:already_registered, language, existing}}, state}
 
-    new_extensions =
-      Enum.reduce(extensions, state.extensions, fn ext, acc ->
-        Map.put(acc, ext, language)
-      end)
-
-    new_state = %{state | adapters: new_adapters, extensions: new_extensions}
-    {:reply, :ok, new_state}
+      :error ->
+        register_new(language, adapter, state)
+    end
   end
 
   @impl true
@@ -254,5 +257,21 @@ defmodule Metastatic.Adapter.Registry do
       [] -> {:reply, {:ok, []}, state}
       errors -> {:reply, {:error, Enum.reverse(errors)}, state}
     end
+  end
+
+  defp register_new(language, adapter, state) do
+    # Update adapters map
+    new_adapters = Map.put(state.adapters, language, adapter)
+
+    # Update extensions map
+    extensions = adapter.file_extensions()
+
+    new_extensions =
+      Enum.reduce(extensions, state.extensions, fn ext, acc ->
+        Map.put(acc, ext, language)
+      end)
+
+    new_state = %{state | adapters: new_adapters, extensions: new_extensions}
+    {:reply, :ok, new_state}
   end
 end

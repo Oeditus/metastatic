@@ -31,6 +31,9 @@ metastatic-*.tar
 /.dsh/
 /.ragex/
 
+# Yoke agent session/job artifacts (local tooling state, never committed)
+/.yoke/
+
 # JavaScript parser node_modules
 /priv/parsers/javascript/node_modules/
 /priv/parsers/march/_build/
@@ -38,3 +41,6 @@ metastatic-*.tar
 # Haskell parser artifacts
 *.hi
 *.o
+
+# Stray local sockets / crash dumps
+*.sock

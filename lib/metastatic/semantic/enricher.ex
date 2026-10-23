@@ -190,6 +190,30 @@ defmodule Metastatic.Semantic.Enricher do
   """
   @spec enrich_tree(AST.meta_ast(), language()) :: AST.meta_ast()
   def enrich_tree(ast, language) do
+    enrich_tree(ast, language, [])
+  end
+
+  @doc """
+  Enriches an entire AST tree, with options.
+
+  ## Options
+
+  - `:enrich` - when `false`, returns the AST unchanged (no extra traversal).
+    Adapters can expose this as an opt-out for callers that do not need
+    semantic metadata and want to avoid the second full-tree pass.
+
+  All other behaviour matches `enrich_tree/2`.
+
+  ## Examples
+
+      iex> ast = {:function_call, [name: "Repo.get"], []}
+      iex> Enricher.enrich_tree(ast, :elixir, enrich: false) == ast
+      true
+  """
+  @spec enrich_tree(AST.meta_ast(), language(), keyword()) :: AST.meta_ast()
+  def enrich_tree(ast, _language, enrich: false), do: ast
+
+  def enrich_tree(ast, language, _opts) do
     initial_acc = %{language: language, behaviours: [], behaviour_stack: []}
 
     {enriched, _acc} =

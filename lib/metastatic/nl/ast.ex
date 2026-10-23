@@ -236,7 +236,9 @@ defmodule Metastatic.NL.AST do
   @doc """
   Traverses an NL-MetaAST depth-first with pre-visit and post-visit functions.
 
-  Identical in contract to `Metastatic.AST.traverse/4`.
+  Identical in contract to `Metastatic.AST.traverse/4`: metadata values that
+  themselves contain NL nodes are traversed too, so a node embedded in a
+  metadata key (e.g. a `:coreference` target) is visited like any other child.
   """
   @spec traverse(nl_node(), acc, (nl_node(), acc -> {nl_node(), acc}), (nl_node(), acc ->
                                                                           {nl_node(), acc})) ::
@@ -247,11 +249,17 @@ defmodule Metastatic.NL.AST do
     {node, acc} = pre.(node, acc)
 
     case node do
-      {type, meta, children} when is_list(children) ->
+      {type, meta, children} when is_atom(type) and is_list(meta) ->
+        {meta, acc} = traverse_meta(meta, acc, pre, post)
+
         {new_children, acc} =
-          Enum.map_reduce(children, acc, fn child, acc_in ->
-            traverse(child, acc_in, pre, post)
-          end)
+          if is_list(children) do
+            Enum.map_reduce(children, acc, fn child, acc_in ->
+              traverse(child, acc_in, pre, post)
+            end)
+          else
+            {children, acc}
+          end
 
         post.({type, meta, new_children}, acc)
 
@@ -259,6 +267,38 @@ defmodule Metastatic.NL.AST do
         post.(leaf, acc)
     end
   end
+
+  # Traverse keyword metadata, descending into NL-node values.
+  defp traverse_meta(meta, acc, pre, post) do
+    if Keyword.keyword?(meta) do
+      Enum.map_reduce(meta, acc, fn {key, val}, acc_in ->
+        {new_val, acc_out} = traverse_meta_val(val, acc_in, pre, post)
+        {{key, new_val}, acc_out}
+      end)
+    else
+      {meta, acc}
+    end
+  end
+
+  defp traverse_meta_val({type, meta, _} = node, acc, pre, post)
+       when is_atom(type) and is_list(meta) do
+    traverse(node, acc, pre, post)
+  end
+
+  defp traverse_meta_val(list, acc, pre, post) when is_list(list) do
+    if Keyword.keyword?(list) or Enum.any?(list, &nl_node?/1) do
+      Enum.map_reduce(list, acc, fn item, acc_in ->
+        traverse_meta_val(item, acc_in, pre, post)
+      end)
+    else
+      {list, acc}
+    end
+  end
+
+  defp traverse_meta_val(other, acc, _pre, _post), do: {other, acc}
+
+  defp nl_node?({type, meta, _}) when is_atom(type) and is_list(meta), do: true
+  defp nl_node?(_), do: false
 
   @doc """
   Pre-walk traversal over an NL-MetaAST.

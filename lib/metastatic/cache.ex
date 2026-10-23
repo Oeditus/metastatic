@@ -3,9 +3,19 @@ defmodule Metastatic.Cache do
   AST Caching behaviour and dispatcher for Metastatic.
 
   Caches the results of parsing and abstracting source code to MetaAST (M2).
-  Supports multiple backends (ETS, DLLB), configured via `:metastatic, :cache`.
 
-  Default backend is `:ets`.
+  ## Backends
+
+  The backend is selected with `config :metastatic, :cache, backend`:
+
+  - `:ets` (default) — `Metastatic.Cache.ETS`, in-memory, always available.
+  - `:dllb` — `Metastatic.Cache.DLLB`, opt-in; requires the host application
+    to provide the `Dllb` module and set `config :dllb, :enabled, true`.
+  - any module implementing the `Metastatic.Cache` behaviour.
+
+  The default is deliberately `:ets` rather than environment sniffing: a
+  library should not silently change behaviour based on what happens to be
+  loaded in the host VM.
   """
 
   @callback init() :: :ok
@@ -25,19 +35,12 @@ defmodule Metastatic.Cache do
   """
   @spec impl() :: module()
   def impl do
-    case Application.get_env(:metastatic, :cache, :auto) do
+    case Application.get_env(:metastatic, :cache, :ets) do
       :ets ->
         Metastatic.Cache.ETS
 
       :dllb ->
         Metastatic.Cache.DLLB
-
-      :auto ->
-        if dllb_available?() do
-          Metastatic.Cache.DLLB
-        else
-          Metastatic.Cache.ETS
-        end
 
       Metastatic.Cache.ETS ->
         Metastatic.Cache.ETS
@@ -45,6 +48,7 @@ defmodule Metastatic.Cache do
       Metastatic.Cache.DLLB ->
         Metastatic.Cache.DLLB
 
+      # Legacy capitalisation alias.
       Metastatic.Cache.Dllb ->
         Metastatic.Cache.DLLB
 
@@ -53,19 +57,8 @@ defmodule Metastatic.Cache do
 
       other ->
         raise ArgumentError,
-              "Invalid cache configuration: #{inspect(other)}. Expected :ets, :dllb, or :auto"
+              "Invalid cache configuration: #{inspect(other)}. Expected :ets, :dllb, or a module"
     end
-  end
-
-  # credo:disable-for-lines:8
-  defp dllb_available? do
-    Application.get_env(:dllb, :enabled, false) &&
-      Code.ensure_loaded?(Dllb) &&
-      match?({:ok, _}, apply(Dllb, :query, ["SELECT 1"]))
-  rescue
-    _ -> false
-  catch
-    _, _ -> false
   end
 
   @doc """

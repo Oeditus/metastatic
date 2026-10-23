@@ -40,6 +40,11 @@ defmodule Metastatic.Languages do
     agda: Metastatic.Adapters.Agda
   }
 
+  # Languages whose adapters are not exercised by the default CI matrix
+  # (they require an external toolchain: GHC/Agda). They remain usable but
+  # are advertised as experimental so the support matrix stays honest.
+  @experimental [:agda, :haskell]
+
   # ── Derived at compile time ─────────────────────────────────────────
 
   @extension_map for {lang, adapter} <- @adapters,
@@ -109,6 +114,38 @@ defmodule Metastatic.Languages do
   def supported?(language), do: Map.has_key?(@adapters, language)
 
   @doc """
+  Returns the list of languages whose adapters are considered experimental.
+
+  Experimental adapters require an external toolchain (GHC/Agda) that is
+  not part of the default CI matrix. They are functional but not covered by
+  the default test run.
+
+  ## Examples
+
+      iex> :agda in Metastatic.Languages.experimental_languages()
+      true
+
+      iex> :python in Metastatic.Languages.experimental_languages()
+      false
+  """
+  @spec experimental_languages() :: [atom()]
+  def experimental_languages, do: @experimental
+
+  @doc """
+  Checks whether a language is experimental.
+
+  ## Examples
+
+      iex> Metastatic.Languages.experimental?(:haskell)
+      true
+
+      iex> Metastatic.Languages.experimental?(:elixir)
+      false
+  """
+  @spec experimental?(atom()) :: boolean()
+  def experimental?(language), do: language in @experimental
+
+  @doc """
   Returns the adapter module for a supported language.
 
   ## Examples
@@ -157,7 +194,16 @@ defmodule Metastatic.Languages do
   @doc """
   Parses a language string (e.g. from CLI `--language` option) into an atom.
 
-  Returns `nil` when given `nil` (language not specified, auto-detect).
+  ## Return contract
+
+  This function has three outcomes, each documented explicitly:
+
+  - `{:ok, atom}` — a supported language
+  - `{:error, message}` — an unknown/unsupported language
+  - `:none` — the input was `nil` (no language specified; caller should
+    auto-detect). This replaces the historical `nil` return so that the
+    "not specified" case is distinguishable from a value that failed to
+    parse and is never confused with a language atom.
 
   ## Examples
 
@@ -168,13 +214,13 @@ defmodule Metastatic.Languages do
       {:ok, :ruby}
 
       iex> Metastatic.Languages.parse_language(nil)
-      nil
+      :none
 
       iex> Metastatic.Languages.parse_language("brainfuck")
       {:error, "Invalid language: brainfuck. Supported: elixir, erlang, haskell, python, ruby"}
   """
-  @spec parse_language(String.t() | nil) :: {:ok, atom()} | {:error, String.t()} | nil
-  def parse_language(nil), do: nil
+  @spec parse_language(String.t() | nil) :: {:ok, atom()} | {:error, String.t()} | :none
+  def parse_language(nil), do: :none
 
   def parse_language(lang_str) when is_binary(lang_str) do
     lang = lang_str |> String.downcase() |> String.to_existing_atom()

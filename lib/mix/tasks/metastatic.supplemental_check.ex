@@ -246,8 +246,11 @@ defmodule Mix.Tasks.Metastatic.SupplementalCheck do
       {:ok, lang} ->
         lang
 
-      {:error, reason} ->
-        Mix.shell().error(reason)
+      _ ->
+        Mix.shell().error(
+          "Invalid language: #{lang_str}. Supported: #{Metastatic.Languages.supported_languages_string()}"
+        )
+
         exit({:shutdown, 2})
     end
   end

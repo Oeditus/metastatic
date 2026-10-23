@@ -190,14 +190,20 @@ defmodule Metastatic.Adapters.Erlang do
 
   @impl true
   def unparse(erlang_ast) do
-    # Use erl_pp (Erlang pretty printer) to format the AST
-    # Wrap in a function form for proper formatting
-    # Convert single expression to iolist and then to string
+    # Use erl_pp (Erlang pretty printer) to format the AST.
+    # `:erl_pp.expr/1` renders an expression *without* its terminating
+    # period, so we append one to keep the output re-parseable by
+    # `:erl_scan`/`:erl_parse` (which require the `.` terminator).
     iolist = :erl_pp.expr(erlang_ast)
-    result = IO.iodata_to_binary(iolist)
-    {:ok, String.trim(result)}
+    result = IO.iodata_to_binary(iolist) |> String.trim()
+    {:ok, ensure_terminator(result)}
   rescue
     e -> {:error, "Unparse failed: #{Exception.message(e)}"}
+  end
+
+  # Append the Erlang expression terminator (`.`) unless one is present.
+  defp ensure_terminator(source) do
+    if String.ends_with?(source, "."), do: source, else: source <> "."
   end
 
   @impl true

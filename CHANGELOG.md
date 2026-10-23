@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added -- Project audit, canonicalisation & conformance tooling
+- **`AUDIT.md`** -- full project audit (findings `F-1`…`F-22`, recommendations
+  `R-1`…`R-5`) with the executed roadmap.
+- **`Metastatic.AST.canonicalize/1`** and **`AST.semantic_meta_keys/0`** -- strip
+  incidental metadata (locations, `original_meta`, formatting) to a canonical
+  form. `Metastatic.Document.equivalent?/2` is now a thin wrapper over it, so the
+  cross-language equivalence claim is backed by one shared definition instead of
+  a private, drift-prone whitelist.
+- **Cross-language conformance matrix test**
+  (`test/metastatic/cross_language_conformance_test.exs`) -- asserts that the
+  same expression canonicalises identically across every available adapter, and
+  documents Ruby's bare-identifier ambiguity as a known, intentional difference.
+- **Property-based round-trip tests** (`stream_data`) -- randomised MetaAST trees
+  are reified and re-abstracted per adapter, asserting canonical stability and
+  that `canonicalize/1` is idempotent and location-insensitive.
+- **`Metastatic.Test.AdapterConformance`** -- a reusable `use`-macro that
+  generates a uniform conformance suite for any adapter (behaviour, extensions,
+  discovery, parse/reject, `to_meta` conformance, `from_meta` reification,
+  round-trip). Applied to the Python, Elixir and Erlang adapters.
+
+### Fixed
+- **`Metastatic.Cache.DLLB`** -- payloads are now decoded with
+  `:erlang.binary_to_term/2` **and `[:safe]`**, so a tampered or foreign cache
+  cannot exhaust atoms or execute code; malformed payloads are treated as a
+  cache miss. Payloads are written with `[:compressed]`.
+- **`Metastatic.Cache.DLLB`** -- cache keys carry a version tag so a parser
+  upgrade never serves stale MetaAST.
+- **`Metastatic.Adapters.Erlang.unparse/1`** -- now appends the Erlang
+  expression terminator (`.`), so generated source is re-parseable. Caught by
+  the new conformance suite.
+- **`mix.exs`** -- `:crypto` added to `extra_applications` (used by the DLLB
+  cache key digest). The non-existent `:dllb` Hex dependency is no longer
+  declared; the backend is documented as host-provided and detected at runtime.
+
+### Changed
+- **`Metastatic.Cache`** -- defaults explicitly to `:ets` instead of sniffing
+  the environment; `:dllb` is opt-in.
+- **`Metastatic.Cache.ETS`** -- replaced the "wipe the whole table" eviction
+  cliff with age-based eviction of the oldest batch, and added key versioning.
+- **`Metastatic.Semantic.Patterns`** -- the merged per-language pattern list is
+  cached in `:persistent_term` and invalidated by `register/3`, removing
+  per-node rebuilds during tree traversal.
+- **`Metastatic.Semantic.Enricher.enrich_tree/3`** -- accepts `enrich: false` to
+  skip the extra traversal; the Elixir adapter threads the option through
+  `to_meta/2`.
+- **`Metastatic.Supplemental.Validator`** -- rebuilt on `AST.layer/1` and
+  `AST.traverse/4`, replacing a bespoke walker and two hard-coded type lists
+  that had drifted from `Metastatic.AST`.
+- **`Metastatic.Adapter`** -- behaviour docs updated to the 3-tuple format;
+  `to_meta/2` is now an optional callback and `valid_adapter?/1` accepts either
+  arity; `for_language/1` resolves through `Metastatic.Languages` instead of
+  `Module.concat` (which created atoms from arbitrary input).
+- **`Metastatic.Adapter.Registry`** -- refuses to silently replace a language's
+  adapter with a different module (`{:error, {:already_registered, …}}`);
+  re-registering the same module stays idempotent.
+- **`Metastatic.Languages`** -- `:agda` and `:haskell` are tagged
+  `experimental`; `parse_language/1` returns `:none` (not `nil`) for the
+  "unspecified" case, making its three outcomes explicit.
+- **`Metastatic.Priv`** -- `subprocess_env/1` and the `priv` search path are
+  configurable (`config :metastatic, :subprocess_env` / `:priv_dirs`) instead of
+  hard-coding `mise`/`~/.local` paths; the previous behaviour is the default.
+- **`Metastatic.NL.AST.traverse/4`** -- now traverses metadata values, matching
+  `Metastatic.AST.traverse/4`.
+
+### Removed
+- Unused `:typle` dependency.
+
+### Documentation
+- README: corrected the cross-language equivalence example to use
+  `Document.equivalent?/2` (raw `ast ==` is false across languages because of
+  location metadata); bumped the install snippet to `~> 0.32`; unpinned the logo
+  URL. `mix.exs` package now ships `METAST_NL_SPEC.md`, `RESEARCH.md` and
+  `CONTRIBUTING_SUPPLEMENTALS.md`.
+- `Metastatic.Semantic.OpKind`: moduledoc now lists all seven domains (it
+  previously claimed only `:db` was implemented).
+
+## [Unreleased] -- prior work
+
 ### Added -- Agda Language Adapter (Option A: Haskell-based Parser Bridge)
 - **`Metastatic.Adapters.Agda`** -- added complete Agda language adapter supporting bidirectional transformations between Agda source code (`.agda`, `.lagda`) and MetaAST (M2).
   - **`priv/parsers/agda/Parser.hs`** -- built-in Haskell-based parser bridge using `Agda.Syntax.Parser` and `Agda.Syntax.Concrete` to parse Agda modules, declarations, types, and expressions into JSON AST with precise source location ranges.

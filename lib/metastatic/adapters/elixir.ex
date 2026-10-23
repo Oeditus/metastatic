@@ -133,6 +133,7 @@ defmodule Metastatic.Adapters.Elixir do
   def to_meta(elixir_ast, opts \\ []) do
     expand? = Keyword.get(opts, :expand_macros, false)
     expander_opts = Keyword.get(opts, :expander_opts, [])
+    enrich_opts = Keyword.take(opts, [:enrich])
 
     ast_to_transform =
       if expand? do
@@ -148,7 +149,7 @@ defmodule Metastatic.Adapters.Elixir do
     case ToMeta.transform(ast_to_transform) do
       {:ok, meta_ast, metadata} ->
         # Enrich AST with semantic metadata (op_kind for DB operations, etc.)
-        enriched_ast = Enricher.enrich_tree(meta_ast, :elixir)
+        enriched_ast = Enricher.enrich_tree(meta_ast, :elixir, enrich_opts)
         {:ok, enriched_ast, metadata}
 
       error ->

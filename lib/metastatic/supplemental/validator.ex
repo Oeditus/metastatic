@@ -6,6 +6,7 @@ defmodule Metastatic.Supplemental.Validator do
   and checks if they are registered and compatible.
   """
 
+  alias Metastatic.AST
   alias Metastatic.Document
   alias Metastatic.Supplemental.Registry
 
@@ -69,92 +70,34 @@ defmodule Metastatic.Supplemental.Validator do
   """
   @spec detect_required_constructs(term()) :: [atom()]
   def detect_required_constructs(meta_ast) do
-    walk_ast(meta_ast, MapSet.new())
+    {_ast, required} =
+      AST.traverse(
+        meta_ast,
+        MapSet.new(),
+        fn
+          {type, _meta, _children} = node, acc when is_atom(type) ->
+            if supplemental_construct?(type) do
+              {node, MapSet.put(acc, type)}
+            else
+              {node, acc}
+            end
+
+          node, acc ->
+            {node, acc}
+        end,
+        fn node, acc -> {node, acc} end
+      )
+
+    required
     |> MapSet.to_list()
     |> Enum.sort()
   end
 
-  # Private Functions
-
-  defp walk_ast({construct, _} = node, acc) when is_atom(construct) do
-    # Add construct if it might need supplemental support
-    # (not a core M2.1 type)
-    acc =
-      if supplemental_construct?(construct) do
-        MapSet.put(acc, construct)
-      else
-        acc
-      end
-
-    # Walk children
-    node
-    |> Tuple.to_list()
-    |> Enum.reduce(acc, &walk_ast/2)
-  end
-
-  defp walk_ast({construct, _, _} = node, acc) when is_atom(construct) do
-    acc =
-      if supplemental_construct?(construct) do
-        MapSet.put(acc, construct)
-      else
-        acc
-      end
-
-    node
-    |> Tuple.to_list()
-    |> Enum.reduce(acc, &walk_ast/2)
-  end
-
-  defp walk_ast({construct, _, _, _} = node, acc) when is_atom(construct) do
-    acc =
-      if supplemental_construct?(construct) do
-        MapSet.put(acc, construct)
-      else
-        acc
-      end
-
-    node
-    |> Tuple.to_list()
-    |> Enum.reduce(acc, &walk_ast/2)
-  end
-
-  defp walk_ast(list, acc) when is_list(list) do
-    Enum.reduce(list, acc, &walk_ast/2)
-  end
-
-  defp walk_ast(_, acc), do: acc
-
-  # Core M2.1 constructs that don't need supplementals
-  @core_constructs [
-    :literal,
-    :variable,
-    :binary_op,
-    :unary_op,
-    :function_call,
-    :conditional,
-    :block,
-    :early_return,
-    :assignment,
-    :inline_match,
-    :tuple
-  ]
-
-  # Extended M2.2 constructs that don't need supplementals
-  @extended_constructs [
-    :loop,
-    :lambda,
-    :collection_op,
-    :pattern_match,
-    :exception_handling,
-    :async_operation
-  ]
-
-  # Native M2.3 - always language-specific, not supplemental
-  @native_constructs [:language_specific]
-
-  defp supplemental_construct?(construct) do
-    construct not in @core_constructs and
-      construct not in @extended_constructs and
-      construct not in @native_constructs
+  # A construct needs supplemental support when it is not a recognised
+  # MetaAST layer type (i.e. `AST.layer/1` returns `:unknown`). This reuses
+  # the single source of truth in `Metastatic.AST` instead of maintaining a
+  # second, drift-prone copy of the core/extended type lists.
+  defp supplemental_construct?(type) do
+    AST.layer(type) == :unknown
   end
 end

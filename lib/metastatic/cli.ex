@@ -66,12 +66,12 @@ defmodule Metastatic.CLI do
       {:ok, :python}
 
       iex> Metastatic.CLI.parse_language(nil)
-      nil
+      :none
 
       iex> Metastatic.CLI.parse_language("brainfuck")
       {:error, "Invalid language: brainfuck. Supported: elixir, erlang, haskell, python, ruby"}
   """
-  @spec parse_language(String.t() | nil) :: {:ok, atom()} | {:error, String.t()} | nil
+  @spec parse_language(String.t() | nil) :: {:ok, atom()} | {:error, String.t()} | :none
   defdelegate parse_language(lang_str), to: Languages
 
   @doc """
@@ -146,7 +146,10 @@ defmodule Metastatic.CLI do
   end
 
   @doc """
-  Print error and exit with status code 1.
+  Print an error and abort the current Mix task with a non-zero exit status.
+
+  Uses `exit({:shutdown, 1})` so that callers and tests can observe the
+  failure via `catch_exit/1`, matching Mix's own task-failure convention.
   """
   @spec fatal(String.t()) :: no_return()
   def fatal(message) do

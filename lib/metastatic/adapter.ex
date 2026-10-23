@@ -159,14 +159,14 @@ defmodule Metastatic.Adapter do
   ## Semantic Equivalence
 
   Different M1 models may map to the same M2 instance:
-  - Python: `BinOp(op=Add)` → `{:binary_op, :arithmetic, :+, ...}`
+  - Python: `BinOp(op=Add)` → `{:binary_op, [category: :arithmetic, operator: :+], [...]}`
   - JavaScript: `BinaryExpression(operator: '+')` → same M2 instance
   - Elixir: `{:+, [], [...]}` → same M2 instance
 
   ## Return Value
 
   Returns a tuple of `{meta_ast, metadata}` where:
-  - `meta_ast` is the M2 representation
+  - `meta_ast` is the M2 representation (uniform 3-tuple nodes)
   - `metadata` preserves M1-specific information for round-tripping
 
   ## Examples
@@ -174,11 +174,31 @@ defmodule Metastatic.Adapter do
       # Python BinOp to MetaAST
       to_meta(%{"_type" => "BinOp", "op" => %{"_type" => "Add"}, ...})
       # => {:ok,
-      #     {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}},
+      #     {:binary_op, [category: :arithmetic, operator: :+],
+      #      [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
       #     %{native_lang: :python, ...}}
   """
   @callback to_meta(native_ast) :: {:ok, meta_ast, metadata} | {:error, reason :: term()}
 
+  @doc """
+  Transform native AST to MetaAST with adapter-specific options.
+
+  Optional variant of `c:to_meta/1`. Adapters that support configuration
+  (e.g. macro expansion in the Elixir adapter) implement this arity; the
+  default behaviour when only `c:to_meta/1` is defined is to ignore the
+  options.
+
+  `Metastatic.Adapter.valid_adapter?/1` accepts adapters that export
+  either arity.
+
+  ## Examples
+
+      # Elixir adapter: expand macros before abstraction
+      to_meta(elixir_ast, expand_macros: true)
+      # => {:ok, meta_ast, %{}}
+  """
+  @callback to_meta(native_ast, keyword()) ::
+              {:ok, meta_ast, metadata} | {:error, reason :: term()}
   @doc """
   Transform MetaAST back to native AST (M2 → M1 reification).
 
@@ -199,7 +219,8 @@ defmodule Metastatic.Adapter do
 
       # MetaAST to Python BinOp
       from_meta(
-        {:binary_op, :arithmetic, :+, {:variable, "x"}, {:literal, :integer, 5}},
+        {:binary_op, [category: :arithmetic, operator: :+],
+         [{:variable, [], "x"}, {:literal, [subtype: :integer], 5}]},
         %{native_lang: :python}
       )
       # => {:ok, %{"_type" => "BinOp", "op" => %{"_type" => "Add"}, ...}}
@@ -293,7 +314,7 @@ defmodule Metastatic.Adapter do
   """
   @callback extract_children(native_ast) :: [native_ast]
 
-  @optional_callbacks validate_mutation: 2, extract_children: 1
+  @optional_callbacks validate_mutation: 2, extract_children: 1, to_meta: 2
 
   # ----- Helper Functions -----
 
@@ -390,7 +411,6 @@ defmodule Metastatic.Adapter do
 
     required_callbacks = [
       {:parse, 1},
-      {:to_meta, 1},
       {:from_meta, 2},
       {:unparse, 1},
       {:file_extensions, 0}
@@ -398,7 +418,8 @@ defmodule Metastatic.Adapter do
 
     Enum.all?(required_callbacks, fn {fun, arity} ->
       function_exported?(adapter, fun, arity)
-    end)
+    end) and
+      (function_exported?(adapter, :to_meta, 1) or function_exported?(adapter, :to_meta, 2))
   end
 
   @doc """
@@ -416,12 +437,12 @@ defmodule Metastatic.Adapter do
   """
   @spec for_language(atom()) :: {:ok, module()} | {:error, :no_adapter_found}
   def for_language(language) do
-    adapter_module = Module.concat([Metastatic.Adapters, camelize(language)])
+    case Metastatic.Languages.get_adapter(language) do
+      {:ok, adapter} ->
+        if valid_adapter?(adapter), do: {:ok, adapter}, else: {:error, :no_adapter_found}
 
-    if Code.ensure_loaded?(adapter_module) and valid_adapter?(adapter_module) do
-      {:ok, adapter_module}
-    else
-      {:error, :no_adapter_found}
+      {:error, _} ->
+        {:error, :no_adapter_found}
     end
   end
 
@@ -445,14 +466,5 @@ defmodule Metastatic.Adapter do
       {:ok, lang} -> {:ok, lang}
       {:error, _} -> {:error, :unknown_extension}
     end
-  end
-
-  # Private helpers
-
-  defp camelize(atom) do
-    atom
-    |> Atom.to_string()
-    |> String.split("_")
-    |> Enum.map_join(&String.capitalize/1)
   end
 end

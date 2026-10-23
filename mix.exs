@@ -39,7 +39,8 @@ defmodule Metastatic.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
+      # `:crypto` backs the DLLB cache key digest (`:crypto.hash/2`).
+      extra_applications: [:logger, :crypto],
       mod: {Metastatic.Application, []}
     ]
   end
@@ -61,7 +62,11 @@ defmodule Metastatic.MixProject do
       # Core dependencies
       {:jason, "~> 1.4"},
       {:ex_panda, "~> 0.2"},
-      {:typle, "~> 0.3", optional: true},
+
+      # NOTE: the optional `Dllb` cache backend (see `Metastatic.Cache.DLLB`)
+      # is *not* a Hex dependency. It is provided by the host application and
+      # detected at runtime via `Code.ensure_loaded?/1`. Enable it with
+      # `config :dllb, :enabled, true` and `config :metastatic, :cache, :dllb`.
 
       # Development and documentation
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
@@ -69,7 +74,8 @@ defmodule Metastatic.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false},
-      {:benchee_html, "~> 1.0", only: [:dev, :test], runtime: false}
+      {:benchee_html, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:stream_data, "~> 1.4", only: [:test], runtime: false}
     ]
   end
 
@@ -128,6 +134,9 @@ defmodule Metastatic.MixProject do
         THEORETICAL_FOUNDATIONS.md
         SUPPLEMENTAL_MODULES.md
         METAST_SPEC.md
+        METAST_NL_SPEC.md
+        RESEARCH.md
+        CONTRIBUTING_SUPPLEMENTALS.md
         LICENSE
       ),
       licenses: ["GPL-3.0", "CC-BY-SA-4.0"],

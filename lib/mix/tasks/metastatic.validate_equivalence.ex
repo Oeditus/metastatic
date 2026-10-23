@@ -146,7 +146,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
           {:ok, lang} ->
             {:ok, lang}
 
-          {:error, _} ->
+          _ ->
             {:error,
              "Invalid language for #{opt_key}: #{lang_str}. Supported: #{Metastatic.Languages.supported_languages_string()}"}
         end
