@@ -21,10 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documents Ruby's bare-identifier ambiguity as a known, intentional difference.
 - **Property-based round-trip tests** (`stream_data`) -- randomised MetaAST trees
   are reified and re-abstracted per adapter, asserting canonical stability and
-  that `canonicalize/1` is idempotent and location-insensitive.
-- **`Metastatic.Test.AdapterConformance`** -- a reusable `use`-macro that
-  generates a uniform conformance suite for any adapter (behaviour, extensions,
-  discovery, parse/reject, `to_meta` conformance, `from_meta` reification,
+### Tests
+- **Mix-task coverage** -- the three previously-untested Mix tasks now have
+  dedicated suites: `metastatic.gen.supplemental` (0 % -> 100 %),
+  `metastatic.lint.prose` (0 % -> 88.5 %), and `metastatic.supplemental_check`
+  (0 % -> 62.7 %), covering argument validation, exit codes, file/directory
+  handling, output formats and parse errors. Project coverage 58.2 % -> 60.3 %.
+
+### Fixed
+- **`Metastatic.Supplemental.CompatibilityMatrix`**
   round-trip). Applied to the Python, Elixir and Erlang adapters.
 
 ### Fixed

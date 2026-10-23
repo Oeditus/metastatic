@@ -307,8 +307,11 @@ Added `compatibility_matrix_test.exs` (16 tests) — module now at **100 %**.
 | `adapters/english.ex` | 0 % | **100 %** | `nl_facades_test.exs` |
 | `adapters/spanish.ex` | 0 % | **100 %** | `nl_facades_test.exs` |
 | `cli/formatter.ex` | 26 % | exercised | `formatter_test.exs` (F-10) |
+| `mix/tasks/metastatic.gen.supplemental.ex` | 0 % | **100 %** | `metastatic_gen_supplemental_test.exs` |
+| `mix/tasks/metastatic.lint.prose.ex` | 0 % | **88.5 %** | `metastatic_lint_prose_test.exs` |
+| `mix/tasks/metastatic.supplemental_check.ex` | 0 % | **62.7 %** | `metastatic_supplemental_check_test.exs` |
 
-Project total: **56.2 % → 58.2 %**; test count **1535 → 1624**.
+Project total: **56.2 % → 60.3 %**; test count **1535 → 1645**.
 
 ---
 
