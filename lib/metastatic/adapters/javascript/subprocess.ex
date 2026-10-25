@@ -134,6 +134,20 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   end
 
   defp ensure_node_modules(parser_dir) do
+    if node_modules_present?(parser_dir) do
+      :ok
+    else
+      :global.trans({__MODULE__, :ensure_node_modules}, fn ->
+        if node_modules_present?(parser_dir) do
+          :ok
+        else
+          do_ensure_node_modules(parser_dir)
+        end
+      end)
+    end
+  end
+
+  defp node_modules_present?(parser_dir) do
     local_babel = Path.join([parser_dir, "node_modules", "@babel", "parser"])
     home = System.user_home() || ""
 
@@ -152,14 +166,24 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
         "parser"
       ])
 
+    File.exists?(local_babel) or File.exists?(global_babel)
+  end
+
+  defp do_ensure_node_modules(parser_dir) do
     npm_bin = Priv.find_executable("npm")
 
     cond do
-      File.exists?(local_babel) or File.exists?(global_babel) ->
-        :ok
-
       npm_bin != nil and File.dir?(parser_dir) ->
-        case System.cmd(npm_bin, ["install", "--no-audit", "--no-fund"],
+        lockfile = Path.join(parser_dir, "package-lock.json")
+
+        cmd_args =
+          if File.exists?(lockfile) do
+            ["ci", "--no-audit", "--no-fund"]
+          else
+            ["install", "--no-audit", "--no-fund"]
+          end
+
+        case System.cmd(npm_bin, cmd_args,
                cd: parser_dir,
                env: Priv.subprocess_env(),
                stderr_to_stdout: true
