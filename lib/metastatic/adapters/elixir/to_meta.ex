@@ -88,6 +88,23 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   @map {:__aliases__, [alias: false], [:Map]}
 
+  # True when the AST node denotes a module alias (`String`, `My.Mod`).
+  # Used to tell a remote call (`String.trim()`) apart from field access
+  # (`a.b`), which share the same `{{:., _, [receiver, key]}, _, args}` shape.
+  defguardp is_alias_node(node) when is_tuple(node) and elem(node, 0) == :__aliases__
+
+  # True when an *already transformed* receiver originated from a module alias.
+  #
+  # By the time a nested dot is post-transformed, its receiver may already be a
+  # MetaAST node: `String` becomes `{:variable, [origin: :alias], "String"}`.
+  # The `:origin` marker is attached structurally by the `:__aliases__` clause,
+  # so this never depends on the shape of the name itself.
+  defp module_alias_receiver?({:variable, meta, _name}) when is_list(meta) do
+    Keyword.get(meta, :origin) == :alias
+  end
+
+  defp module_alias_receiver?(node), do: is_alias_node(node)
+
   @doc """
   Transform Elixir AST to MetaAST.
 
@@ -178,9 +195,21 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {ast, ctx}
   end
 
-  # {{:., [], [{:foo, [], Elixir}, :bar]}, [no_parens: true], []}
-  # {{:., [], [{:__aliases__, [alias: false], [:Map]}, :fetch!]}, [], [{:foo, [], Elixir}, :bar]}
-  defp pre_transform({{:., dot_meta, [{_map, _, _}, _key] = args}, meta, []}, ctx) do
+  # Map field access: `map.field` desugars to `Map.fetch!(map, :field)`.
+  #
+  # This rewrite MUST stay narrowly scoped to genuine field access. A previous
+  # catch-all version of this clause also matched every zero-arity remote call
+  # (`String.trim()`, `Integer.parse()`, ...), because those share the same
+  # `{{:., _, [{_, _, _}, _key]}, _, []}` shape. That silently rewrote
+  # `value |> String.trim()` into `Map.fetch!(value, String, :trim)`.
+  #
+  # Only a *local variable* receiver is a field access. An alias receiver
+  # (`String`) or a nested access (`a.b`) is a remote call and falls through.
+  #
+  #   {{:., [], [{:foo, [], Elixir}, :bar]}, [no_parens: true], []}
+  #   {{:., [], [{:__aliases__, [alias: false], [:Map]}, :fetch!]}, [], [{:foo, [], Elixir}, :bar]}
+  defp pre_transform({{:., dot_meta, [{map, _, context}, key] = args}, meta, []}, ctx)
+       when is_atom(map) and is_atom(key) and is_atom(context) do
     safe_meta = if Keyword.keyword?(meta), do: Keyword.delete(meta, :no_parens), else: meta
     ast = {{:., dot_meta, [@map, :fetch!]}, safe_meta, args}
 
@@ -309,12 +338,22 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   defp do_transform_capture_body({{:., dot_meta, [{:&, _, [n]}, key]}, _meta, []}, max_arg)
        when is_integer(n) do
-    {{:function_call,
-      [
-        name: "Map.fetch!",
-        original_meta: dot_meta,
-        line: safe_keyword_get(dot_meta, :line, 1)
-      ], [{:variable, [], "arg_#{n}"}, {:literal, [subtype: :symbol], key}]}, max(max_arg, n)}
+    {attribute_access_node("arg_#{n}", key, dot_meta), max(max_arg, n)}
+  end
+
+  # Nested field access on a capture argument: `&(&1.foo.bar)`.
+  #
+  # The generic remote-call clause below would treat `&1.foo` as a *module* and
+  # run `extract_module_name/1` on it (yielding "unknown"), while its empty
+  # argument list silently dropped the `&1` reference. Recurse into the receiver
+  # instead so the chain becomes nested field accesses.
+  defp do_transform_capture_body(
+         {{:., dot_meta, [inner, key]}, _meta, []},
+         max_arg
+       )
+       when is_atom(key) do
+    {transformed_inner, new_max} = do_transform_capture_body(inner, max_arg)
+    {attribute_access_node(transformed_inner, key, dot_meta), new_max}
   end
 
   defp do_transform_capture_body({op, meta, args}, max_arg) when is_atom(op) and is_list(args) do
@@ -628,8 +667,14 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # Already transformed nodes - pass through
+  #
+  # `:function_call` is deliberately excluded here: a transformed inner call can
+  # still be the *receiver* of a field access (`a.b.c` becomes
+  # `{{:function_call, ...}, :c}`), and swallowing it here would bypass the
+  # `:attribute_access` clause below.
   defp post_transform({type, meta, _children} = ast, ctx)
-       when is_atom(type) and is_list(meta) and type in @meta_ast_types do
+       when is_atom(type) and is_list(meta) and type in @meta_ast_types and
+              type not in [:function_call] do
     {ast, ctx}
   end
 
@@ -900,9 +945,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # ----- Function Calls -----
 
   # Module alias - parts may be atoms (raw) or {:literal, _, atom} (transformed)
+  #
+  # Tagged with `origin: :alias` so later clauses can tell a module alias apart
+  # from a plain local variable of the same shape (`{:variable, _, "String"}`).
   defp post_transform({:__aliases__, meta, parts}, ctx) when is_list(parts) do
     module_name = safe_join_parts(parts)
-    node_meta = build_meta(meta)
+    node_meta = [origin: :alias] ++ build_meta(meta)
     {{:variable, node_meta, module_name}, ctx}
   end
 
@@ -913,15 +961,45 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   end
 
   # Remote call: Module.function(args) - raw atom function name
+  #
+  # Guarded on a module-alias receiver: a dot on a non-alias receiver is field
+  # access (`a.b`, `&1.foo`, `foo().bar`) and is handled by the
+  # `:attribute_access` clause further down.
   defp post_transform({{:., _dot_meta, [module, func]}, meta, args}, ctx)
-       when is_atom(func) and is_list(args) do
+       when is_alias_node(module) and is_atom(func) and is_list(args) do
     handle_remote_call(module, func, args, meta, ctx)
   end
 
   # Remote call: Module.function(args) - transformed literal function name
   defp post_transform({{:., _dot_meta, [module, {:literal, _, func}]}, meta, args}, ctx)
-       when is_atom(func) and is_list(args) do
+       when is_alias_node(module) and is_atom(func) and is_list(args) do
     handle_remote_call(module, func, args, meta, ctx)
+  end
+
+  # The `:.` operator itself, after the local-call clause has converted
+  # `{{:., _, [receiver, key]}, _, args}` into `{:function_call, [name: "."], ...}`.
+  #
+  # This MUST come before the "transformed function_call representing :." clause,
+  # which would otherwise run `extract_module_name/1` on a MetaAST receiver and
+  # stringify its tag, yielding names like `"function_call.c"`.
+  #
+  # A dot on a module alias is a remote call (`String.trim()`); anything else is
+  # field access (`a.b.c`, `&1.foo`, `foo().bar`).
+  #
+  # Note the receiver arrives *already transformed*: a module alias becomes
+  # `{:variable, _, "String"}`, while a nested access becomes a MetaAST node
+  # (`{:function_call, ...}` / `{:attribute_access, ...}`).
+  defp post_transform(
+         {{:function_call, [name: "."] ++ dot_meta,
+           [receiver, {:literal, [subtype: :symbol], field}]}, meta, []},
+         ctx
+       )
+       when is_atom(field) do
+    if module_alias_receiver?(receiver) do
+      handle_remote_call(receiver, field, [], meta, ctx)
+    else
+      {attribute_access_node(receiver, field, meta ++ dot_meta), ctx}
+    end
   end
 
   # Remote call: Transformed function_call representing :. operator
@@ -935,6 +1013,22 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       # Not a remote call, pass through
       {{:function_call, dot_meta, [module, func_literal]}, ctx}
     end
+  end
+
+  # Map/struct field access: map.field
+  #
+  # MUST precede the local-function-call clause. `Macro.traverse` visits a node
+  # twice: once as raw AST, then again after its children are transformed. On
+  # the second visit the receiver of `a.b.c` is already a MetaAST node, so the
+  # generic `{func, meta, args}` clause would turn the whole thing into a bogus
+  # `{:function_call, [name: "."], ...}` and `extract_module_name/1` would then
+  # stringify its tag into `"function_call.c"`.
+  #
+  # A dot whose receiver is not a module alias is field access; a dot on an
+  # alias (`String.trim()`) is a remote call and is handled above.
+  defp post_transform({{:., _dot_meta, [receiver, field]}, meta, []}, ctx)
+       when is_atom(field) and not is_alias_node(receiver) do
+    {attribute_access_node(receiver, field, meta), ctx}
   end
 
   # Local function call
@@ -1197,13 +1291,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Note: for comprehensions are handled via __for_marker__ in pre/post_transform.
 
   # ----- Attribute Access -----
-
-  # Map/struct field access: map.field
-  defp post_transform({{:., _dot_meta, [receiver, field]}, meta, []}, ctx)
-       when is_atom(field) do
-    node_meta = [attribute: Atom.to_string(field)] ++ build_meta(meta)
-    {{:attribute_access, node_meta, [receiver]}, ctx}
-  end
+  # Note: handled above, before the local-function-call clause.
 
   # ----- Catch-all -----
 
@@ -1267,11 +1355,28 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   defp maybe_add(keyword, _key, nil), do: keyword
   defp maybe_add(keyword, key, value), do: Keyword.put(keyword, key, value)
 
-  # Safe Keyword.get that handles non-keyword lists
-  defp safe_keyword_get(list, key, default) do
-    if is_list(list) and Keyword.keyword?(list),
-      do: Keyword.get(list, key, default),
-      else: default
+  # Build an `:attribute_access` node for Elixir field access (`map.field`).
+  #
+  # Elixir has no dedicated field-access AST: the compiler desugars `map.field`
+  # into `Map.fetch!(map, :field)`. We keep the structural `:attribute_access`
+  # shape (so it stays uniform with every other adapter) and record that
+  # desugaring in metadata:
+  #
+  #   * `:desugars_to` - `"Map.fetch!/2"`, the call this access compiles to
+  #   * `:desugar`     - `:map_fetch`, the same fact as an atom, for matching
+  #
+  # `receiver` is either a variable name (inside a capture, before the receiver
+  # has been transformed) or an already-built MetaAST node.
+  defp attribute_access_node(receiver, field, meta) when is_binary(receiver) do
+    attribute_access_node({:variable, [], receiver}, field, meta)
+  end
+
+  defp attribute_access_node(receiver, field, meta) do
+    node_meta =
+      [attribute: Atom.to_string(field), desugars_to: "Map.fetch!/2", desugar: :map_fetch] ++
+        build_meta(meta)
+
+    {:attribute_access, node_meta, [receiver]}
   end
 
   # Check if a value is already a MetaAST node
