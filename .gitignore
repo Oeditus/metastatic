@@ -28,6 +28,8 @@ metastatic-*.tar
 /.elixir_ls/
 /.erl.history/
 
+/.hex/
+/.mix/
 /.dsh/
 /.ragex/
 
