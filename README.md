@@ -26,7 +26,7 @@ Parse once, use everywhere. A universal meta-model for program syntax that enabl
 **What Metastatic Provides:**
 - MetaAST meta-model (M2 level) with three layers
 - Natural Language MetaAST (NL-MetaAST) for prose and documentation analysis (see [METAST_NL_SPEC.md](METAST_NL_SPEC.md))
-- Language adapters (Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, TypeScript; English and Spanish for prose)
+- Language adapters (Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, SQL, TypeScript; English and Spanish for prose)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
 - Semantic enrichment (OpKind metadata for code; voice, hedging, and readability for prose)
@@ -69,7 +69,7 @@ mix metastatic.validate_equivalence --verbose file1.py file2.ex
 
 ### Using Language Adapters
 
-Metastatic currently supports 10 language adapters: Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, and TypeScript.
+Metastatic currently supports 11 language adapters: Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Python, Ruby, SQL, and TypeScript.
 
 #### Agda & Haskell
 
@@ -234,6 +234,21 @@ function getUser(id: number): User {
 {:ok, doc} = Adapter.abstract(TypeScript, source, :typescript)
 ```
 
+#### SQL
+
+```elixir
+alias Metastatic.Adapters.SQL
+alias Metastatic.Adapter
+
+# Parse SQL queries (multi-dialect powered by sqlparser-rs)
+{:ok, doc} = Adapter.abstract(SQL, "SELECT id, name FROM users WHERE age > 18", :sql)
+doc.ast  # => {:function_call, [name: "SELECT", op_kind: [domain: :db, operation: :query, target: "users", ...]], ...}
+
+# Parse expressions for cross-language equivalence
+{:ok, doc} = Adapter.abstract(SQL, "x + 5", :sql)
+doc.ast  # => {:binary_op, [category: :arithmetic, operator: :+], ...}
+```
+
 ### Supported Languages Assessment Matrix
 
 | Language | Adapter Module | File Extensions | Parser Engine & Subprocess Bridge | Round-Trip Fidelity | Semantic Domain Support | Quality Rating |
@@ -247,6 +262,7 @@ function getUser(id: number): User {
 | **JavaScript** | `Metastatic.Adapters.JavaScript` | `.js`, `.mjs`, `.cjs`, `.jsx` | `@babel/parser` & `@babel/generator` via Node.js Subprocess bridge (`priv/parsers/javascript/parser.js`). Auto dependency installation on demand. | **>96%** | Node `fs`, `path`, `fetch`, `axios`, `got`, `superagent`, `express`, `pg`, `ioredis`, `jsonwebtoken` | **Superb (9.5/10)** |
 | **TypeScript** | `Metastatic.Adapters.TypeScript` | `.ts`, `.tsx` | `@babel/parser` with `typescript` and `tsx` plugins. Preserves TS interfaces, type aliases, and type annotations in metadata. | **>96%** | Inherits all JS domain patterns + loss-free type annotation metadata preservation | **Superb (9.5/10)** |
 | **Haskell** | `Metastatic.Adapters.Haskell` | `.hs`, `.lhs` | `ghc-exactprint` / `haskell-src-exts` via Subprocess bridge (`priv/parsers/haskell/`). | **>92%** | `System.IO`, `Data.ByteString`, `Network.HTTP.Simple`, `Network.Wreq` | **Superb (9.0/10)** |
+| **SQL** | `Metastatic.Adapters.SQL` | `.sql` | `sqlparser-rs` multi-dialect parser via native CLI bridge (`priv/parsers/sql`). | **>98%** | ANSI, PostgreSQL, MySQL, SQLite queries, CRUD statements, semantic `:db` OpKind enrichment | **Superb (9.5/10)** |
 
 ### Working with MetaAST Directly
 

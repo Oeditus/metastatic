@@ -172,31 +172,29 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   defp do_ensure_node_modules(parser_dir) do
     npm_bin = Priv.find_executable("npm")
 
-    cond do
-      npm_bin != nil and File.dir?(parser_dir) ->
-        lockfile = Path.join(parser_dir, "package-lock.json")
+    if npm_bin != nil and File.dir?(parser_dir) do
+      lockfile = Path.join(parser_dir, "package-lock.json")
 
-        cmd_args =
-          if File.exists?(lockfile) do
-            ["ci", "--no-audit", "--no-fund"]
-          else
-            ["install", "--no-audit", "--no-fund"]
-          end
-
-        case System.cmd(npm_bin, cmd_args,
-               cd: parser_dir,
-               env: Priv.subprocess_env(),
-               stderr_to_stdout: true
-             ) do
-          {_, 0} ->
-            :ok
-
-          {error_output, exit_code} ->
-            {:error, "npm install failed with exit code #{exit_code}: #{error_output}"}
+      cmd_args =
+        if File.exists?(lockfile) do
+          ["ci", "--no-audit", "--no-fund"]
+        else
+          ["install", "--no-audit", "--no-fund"]
         end
 
-      true ->
-        {:error, "npm executable not found and node_modules is missing"}
+      case System.cmd(npm_bin, cmd_args,
+             cd: parser_dir,
+             env: Priv.subprocess_env(),
+             stderr_to_stdout: true
+           ) do
+        {_, 0} ->
+          :ok
+
+        {error_output, exit_code} ->
+          {:error, "npm install failed with exit code #{exit_code}: #{error_output}"}
+      end
+    else
+      {:error, "npm executable not found and node_modules is missing"}
     end
   end
 

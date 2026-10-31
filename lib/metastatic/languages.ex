@@ -37,7 +37,8 @@ defmodule Metastatic.Languages do
     typescript: Metastatic.Adapters.TypeScript,
     march: Metastatic.Adapters.March,
     cure: Metastatic.Adapters.Cure,
-    agda: Metastatic.Adapters.Agda
+    agda: Metastatic.Adapters.Agda,
+    sql: Metastatic.Adapters.SQL
   }
 
   # Languages whose adapters are not exercised by the default CI matrix
