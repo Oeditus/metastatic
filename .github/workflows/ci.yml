@@ -63,6 +63,9 @@ jobs:
       - name: Set up Cure
         uses: cure-lang/setup-cure@v1
 
+      - name: Set up Rust for packaged SQL parser smoke tests
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Restore dependencies cache
         uses: actions/cache@v4
         with:

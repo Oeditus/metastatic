@@ -235,6 +235,27 @@ function getUser(id: number): User {
 ```
 
 #### SQL
+SQL parsing uses the native `sqlparser-rs` CLI. Hex packages include its portable
+Rust sources, manifest, and lockfile under `priv/parsers/sql`; they do not ship a
+machine-specific executable. Install Rust/Cargo for automatic compilation on the
+first SQL parse, or install `metastatic-sql-parser` on `PATH`.
+
+To prebuild the parser in a consuming project's dependency checkout:
+
+```bash
+cargo build --release --locked --manifest-path deps/metastatic/priv/parsers/sql/Cargo.toml
+```
+
+Metastatic discovers the resulting `target/release/metastatic-sql-parser`
+automatically. For read-only releases, build before assembling the release, or
+install that executable on the deployment host's `PATH`. Rust/Cargo and writable
+build storage are needed only when compiling from source; a prebuilt parser does
+not need the Rust toolchain at runtime.
+
+If SQL works in a source checkout but reports missing parser assets when used as
+a dependency, check the installed package: `priv/parsers/sql/Cargo.toml`,
+`Cargo.lock`, and `src/main.rs` must all exist. Rebuilding unrelated indexes or
+changing SQL dialects cannot repair a package that omitted those files.
 
 ```elixir
 alias Metastatic.Adapters.SQL

@@ -6,6 +6,13 @@ defmodule Metastatic.Adapters.SQLTest do
   alias Metastatic.Adapters.SQL
   alias Metastatic.{AST, Document, Validator}
 
+  doctest Metastatic.Adapters.SQL.Subprocess
+
+  test "unparse returns an error rather than raising for non-JSON AST values" do
+    assert {:error, reason} = SQL.unparse(make_ref())
+    assert reason =~ "JSON encode failed"
+  end
+
   describe "parse/1 and parse/2" do
     test "parses standalone expressions" do
       assert {:ok, ast} = SQL.parse("1 + 2")

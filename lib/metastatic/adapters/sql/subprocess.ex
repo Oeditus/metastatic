@@ -4,6 +4,11 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
 
   Handles communication with the compiled Rust CLI (`sql_parser`) via stdin/stdout
   with JSON serialization.
+
+  Hex packages include portable Rust sources and `Cargo.lock`, not a
+  platform-specific executable. Install Rust/Cargo for the source fallback or
+  provide `metastatic-sql-parser` on `PATH`. Prebuild the parser when deploying
+  into a read-only release.
   """
 
   alias Metastatic.Priv
@@ -17,6 +22,12 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
 
   Options:
   - `:dialect` - SQL dialect atom or string (e.g., `:generic`, `:postgres`, `:mysql`, `:sqlite`, `:ansi`)
+
+  ## Examples
+
+      iex> {:ok, [statement]} = Metastatic.Adapters.SQL.Subprocess.parse("SELECT 1")
+      iex> is_map(statement)
+      true
   """
   @spec parse(String.t(), keyword()) :: {:ok, term()} | {:error, String.t()}
   def parse(source, opts \\ []) when is_binary(source) do
@@ -25,7 +36,7 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
 
     case run_sql_parser(args, source) do
       {:ok, result} ->
-        case Jason.decode(result) do
+        case JSON.decode(result) do
           {:ok, %{"ok" => true, "ast" => ast}} ->
             {:ok, ast}
 
@@ -37,22 +48,28 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
         end
 
       {:error, reason} ->
-        {:error, "SQL parser process failed: #{inspect(reason)}"}
+        {:error, "SQL parser process failed: #{reason}"}
     end
   end
 
   @doc """
   Unparse AST JSON map or list back to SQL source code using `sqlparser-rs`.
+
+  ## Examples
+
+      iex> {:ok, ast} = Metastatic.Adapters.SQL.Subprocess.parse("SELECT 1")
+      iex> Metastatic.Adapters.SQL.Subprocess.unparse(ast)
+      {:ok, "SELECT 1"}
   """
   @spec unparse(term()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
-    case Jason.encode(ast) do
+    case encode_ast(ast) do
       {:ok, json} ->
         args = ["unparse"]
 
         case run_sql_parser(args, json) do
           {:ok, result} ->
-            case Jason.decode(result) do
+            case JSON.decode(result) do
               {:ok, %{"ok" => true, "source" => source}} ->
                 {:ok, source}
 
@@ -64,7 +81,7 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
             end
 
           {:error, reason} ->
-            {:error, "SQL unparser process failed: #{inspect(reason)}"}
+            {:error, "SQL unparser process failed: #{reason}"}
         end
 
       {:error, reason} ->
@@ -73,6 +90,12 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
   end
 
   # ----- Private Helpers -----
+
+  defp encode_ast(ast) do
+    {:ok, JSON.encode!(ast)}
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
 
   defp run_sql_parser(args, input) do
     bin_path = Priv.parser_path(@parser_bin)
@@ -93,18 +116,26 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
       cargo_bin != nil ->
         cargo_dir = Priv.parser_path(@cargo_rel_dir)
 
-        if File.dir?(cargo_dir) do
+        manifest = Path.join(cargo_dir, "Cargo.toml")
+
+        if File.regular?(manifest) do
           cargo_args =
-            ["run", "--quiet", "--manifest-path", Path.join(cargo_dir, "Cargo.toml"), "--"] ++
+            ["run", "--quiet", "--locked", "--manifest-path", manifest, "--"] ++
               args
 
           execute_cmd(cargo_bin, cargo_args, input)
         else
-          {:error, "SQL parser binary and cargo project unavailable"}
+          {:error,
+           "SQL parser binary and Cargo.toml are missing from the installed Metastatic package " <>
+             "(expected #{manifest}). Upgrade or reinstall a package containing priv/parsers/sql, " <>
+             "or install metastatic-sql-parser on PATH."}
         end
 
       true ->
-        {:error, "SQL parser binary unavailable"}
+        {:error,
+         "SQL parser executable unavailable. Install metastatic-sql-parser on PATH, or install " <>
+           "Rust/Cargo to build the parser sources included in priv/parsers/sql. " <>
+           "For a read-only release, build and install the parser before deployment."}
     end
   end
 

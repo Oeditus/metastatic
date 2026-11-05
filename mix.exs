@@ -126,6 +126,9 @@ defmodule Metastatic.MixProject do
         priv/parsers/ruby/Gemfile.lock
         priv/parsers/ruby/parser.rb
         priv/parsers/ruby/unparser.rb
+        priv/parsers/sql/Cargo.toml
+        priv/parsers/sql/Cargo.lock
+        priv/parsers/sql/src
         .formatter.exs
         mix.exs
         README.md

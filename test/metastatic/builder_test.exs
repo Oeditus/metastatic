@@ -59,11 +59,17 @@ defmodule Metastatic.BuilderTest do
   end
 
   setup do
-    # Register mock adapter
-    Adapter.Registry.register(:python, MockPythonAdapter)
+    original = Adapter.Registry.get(:python)
+    :ok = Adapter.Registry.unregister(:python)
+    :ok = Adapter.Registry.register(:python, MockPythonAdapter)
 
     on_exit(fn ->
-      Adapter.Registry.unregister(:python)
+      :ok = Adapter.Registry.unregister(:python)
+
+      case original do
+        {:ok, adapter} -> Adapter.Registry.register(:python, adapter)
+        {:error, :not_found} -> :ok
+      end
     end)
 
     :ok
