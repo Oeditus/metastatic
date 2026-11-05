@@ -38,7 +38,8 @@ defmodule Metastatic.Languages do
     march: Metastatic.Adapters.March,
     cure: Metastatic.Adapters.Cure,
     agda: Metastatic.Adapters.Agda,
-    sql: Metastatic.Adapters.SQL
+    sql: Metastatic.Adapters.SQL,
+    markdown: Metastatic.Adapters.Markdown
   }
 
   # Languages whose adapters are not exercised by the default CI matrix

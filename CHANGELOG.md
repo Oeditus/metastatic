@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Added -- Markdown as a first-class citizen
+
+Markdown now has a full adapter, its own M1 CST, and a complete M1 ↔ M2
+pipeline into NL-MetaAST. Every M2-level facility (validation, prose linting,
+readability, semantic enrichment, translation, the CLI mix tasks) applies to
+Markdown documents without special-casing.
+
+- **`Metastatic.NL.Adapters.Markdown`** -- the adapter, registered as
+  `:markdown` in `Metastatic.Languages`, so `Metastatic.quote/2`,
+  `Metastatic.unquote/2`, `Metastatic.Builder` and the CLI all accept it.
+  `file_extensions/0` returns `[".md", ".markdown"]`.
+- **`Metastatic.Adapters.Markdown`** -- thin facade registered under the
+  `:markdown` language atom, mirroring the other `Metastatic.Adapters.*`
+  modules.
+- **`Metastatic.NL.Adapters.Markdown.Parser`** -- dependency-free, line-oriented
+  block parser: ATX + setext headings, paragraphs, fenced (``` / ~~~) and
+  indented code, block quotes, bullet/ordered/nested lists, GitHub task lists,
+  GFM tables with alignment, thematic breaks, footnotes and link reference
+  definitions.
+- **`Metastatic.NL.Adapters.Markdown.Inline`** -- recursive-descent inline
+  scanner: emphasis, strong, strikethrough, inline code, links, images,
+  reference links, autolinks and hard line breaks. Unrecognised input degrades
+  to plain words/punctuation, so it cannot fail.
+- **`Metastatic.NL.Adapters.Markdown.ToMeta`** -- M1 → M2 abstraction. Prose
+  (paragraphs, list items, headings, table cells) is chunked into
+  sentences → clauses → phrases so prose lint rules work unchanged; code
+  blocks and inline code stay opaque.
+- **`Metastatic.NL.Adapters.Markdown.FromMeta`** -- M2 → M1 reification and
+  M2 → Markdown source generation, preserving headings, lists, task checkboxes,
+  code fences, tables (with alignment), block quotes and inline markers.
+- **New NL-MetaAST node types** -- Core: `:heading`, `:block_quote`,
+  `:code_block`, `:table`, `:table_row`, `:table_cell`, `:thematic_break`,
+  `:emphasis`, `:strong`, `:strikethrough`, `:link`, `:image`, `:inline_code`,
+  `:line_break`. Extended: `:code_fence`, `:task_item`, `:reference_link`,
+  `:footnote`. Constructors, conformance rules and extraction helpers
+  (`headings/1`, `code_blocks/1`, `links/1`, `list_items/1`, `tables/1`,
+  `all/2`, `list_item/2`, `list_block/2`) added to `Metastatic.NL.AST`.
+- **`Metastatic.NL.AST.text/1`** now renders markup structurally: inline spans
+  flow as plain text, block-level markup contributes separators, and code is
+  omitted so prose linting/readability never see source code as prose.
+- **`Metastatic.NL.Lint.Runner.lint_source/2`** accepts `format: :markdown`,
+  and `mix metastatic.lint.prose` uses the Markdown adapter for `.md` /
+  `.markdown` files automatically.
+- **Tests** -- 3 new suites (parser, adapter behaviour, adapter conformance)
+  plus markup coverage in `Metastatic.NL.ASTTest`.
+
 ### Added -- Project audit, canonicalisation & conformance tooling
 - **`Metastatic.MetaAST`** -- new shared core for MetaAST-shaped trees. Owns the
   uniform 3-tuple accessors (`type/1`, `meta/1`, `children/1`), metadata helpers

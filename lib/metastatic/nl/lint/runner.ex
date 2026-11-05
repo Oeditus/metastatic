@@ -41,12 +41,34 @@ defmodule Metastatic.NL.Lint.Runner do
 
   @doc """
   Convenience function: parses raw text/prose, enriches it, and runs linter rules.
+
+  ## Options
+
+  - `:format` - `:markdown` to parse the input as a Markdown document (headings,
+    lists, tables, code blocks …), or `:prose` (default) for plain text.
+    Markdown parsing keeps code blocks opaque, so source code is never linted
+    as prose.
+  - `:rules` - rules to run (defaults to `default_rules/0`)
+  - any other option is forwarded to the rules themselves (e.g. `:max_words`)
+
+  ## Examples
+
+      iex> {:ok, issues} =
+      ...>   Metastatic.NL.Lint.Runner.lint_source("The task was done by the bot.", rules: [])
+      iex> issues
+      []
   """
   @spec lint_source(String.t(), keyword()) ::
           {:ok, [Metastatic.NL.Lint.Issue.t()]} | {:error, term()}
   def lint_source(text, opts \\ []) when is_binary(text) do
-    with {:ok, cst} <- English.parse(text),
-         {:ok, meta_ast, _} <- English.to_meta(cst) do
+    adapter =
+      case Keyword.get(opts, :format, :prose) do
+        :markdown -> Metastatic.NL.Adapters.Markdown
+        _ -> English
+      end
+
+    with {:ok, cst} <- adapter.parse(text),
+         {:ok, meta_ast, _} <- adapter.to_meta(cst) do
       {:ok, lint(meta_ast, opts)}
     end
   end

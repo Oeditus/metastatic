@@ -17,6 +17,7 @@ Metastatic is a cross-language code meta-model library using a unified MetaAST (
 - Literal subtypes: integer, float, string, boolean, null, symbol, regex, char, bytes
 - M1 Metadata Preservation: Full context threading (module, function, arity, visibility) for Ragex integration
 - Language adapters: Python, Elixir, Ruby, Erlang, and Haskell fully implemented with 3-tuple output
+- Markdown is a first-class citizen: `Metastatic.Adapters.Markdown` (registered as `:markdown`) parses `.md`/`.markdown` into NL-MetaAST via a pure-Elixir block + inline parser. Headings, lists, task lists, code fences, block quotes, GFM tables, links and emphasis are modelled; code stays opaque so prose lint rules never lint source code. `Metastatic.NL.Lint.Runner.lint_source/2` accepts `format: :markdown`, and `mix metastatic.lint.prose` uses it automatically for `.md` files.
 - Python: decorators, async functions, comprehensions, match, yield, throw, walrus, context managers all produce proper M2 nodes
 - Ruby: string interpolation, ranges, break/next, regex all produce proper M2 nodes
 - Haskell: modules, functions, type signatures, list comprehensions, typeclasses all produce proper M2 nodes

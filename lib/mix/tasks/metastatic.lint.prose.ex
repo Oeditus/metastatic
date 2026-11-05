@@ -67,10 +67,16 @@ defmodule Mix.Tasks.Metastatic.Lint.Prose do
     end
   end
 
+  # Markdown files go through the Markdown adapter so headings, lists,
+  # tables and code blocks are modelled structurally (code stays opaque).
+  defp markdown_file?(file), do: Path.extname(file) in [".md", ".markdown"]
+
   defp lint_file(file, opts) do
+    format = if markdown_file?(file), do: :markdown, else: :prose
+
     case File.read(file) do
       {:ok, content} ->
-        case Runner.lint_source(content, opts) do
+        case Runner.lint_source(content, Keyword.put(opts, :format, format)) do
           {:ok, []} ->
             Mix.shell().info("✓ #{file} (clean)")
             0
