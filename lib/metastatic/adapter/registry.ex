@@ -181,13 +181,17 @@ defmodule Metastatic.Adapter.Registry do
 
   @impl true
   def init(:ok) do
-    # State: %{adapters: %{language => module}, extensions: %{ext => language}}
-    state = %{
-      adapters: %{},
-      extensions: %{}
-    }
+    # Seed the registry from the compile-time language list so that the
+    # registry and `Metastatic.Languages` agree out of the box. Dynamic
+    # `register/2` calls can still add adapters at runtime.
+    {adapters, extensions} =
+      Enum.reduce(Metastatic.Languages.all(), {%{}, %{}}, fn lang, {acc_a, acc_e} ->
+        acc_a = Map.put(acc_a, lang.language, lang.adapter)
+        acc_e = Enum.reduce(lang.extensions, acc_e, &Map.put(&2, &1, lang.language))
+        {acc_a, acc_e}
+      end)
 
-    {:ok, state}
+    {:ok, %{adapters: adapters, extensions: extensions}}
   end
 
   @impl true

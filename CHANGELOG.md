@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Changed -- Plug-in language registry (no more hardcoded language list)
+
+`Metastatic.Languages` no longer maintains a hand-written `@adapters` map.
+Adapters are now **discovered at compile time** by scanning
+`lib/metastatic/adapters/` for modules declaring
+`@behaviour Metastatic.Adapter`, and each language atom is derived from the
+module name (`Metastatic.Adapters.Rust` → `:rust`). Adding a language is now
+purely a matter of dropping an adapter module into that directory -- no edit to
+the registry is required.
+
+- **`Metastatic.Language`** -- new value object bundling a language's atom,
+  adapter, extensions, and `experimental?`/`documentation?` flags, so the
+  registry is a list of values rather than several parallel maps.
+- **`Metastatic.Languages.Discovery`** -- the compile-time scanner. Source-based
+  (not `Mix.Project`-based) so it works in releases and escripts.
+- **Config overrides** -- `config :metastatic, :languages, exclude:, include:,
+  experimental:, documentation:` lets operators add adapters that live outside
+  the library or drop/flag languages, without touching code.
+- **`Metastatic.Adapter.Registry`** -- now seeds itself from
+  `Metastatic.Languages` on startup, so the GenServer registry and the
+  compile-time list agree out of the box (previously the registry started empty
+  and `Builder` silently fell back to the hardcoded map).
+- All existing public functions (`supported_languages/0`, `get_adapter/1`,
+  `detect_language/1`, `parse_language/1`, `adapters/0`, …) keep their exact
+  contract; `documentation_languages/0`, `documentation?/1`, `get/1` and `all/0`
+  are new additions.
+
+
 ### Added -- Markdown as a first-class citizen
 
 Markdown now has a full adapter, its own M1 CST, and a complete M1 ↔ M2

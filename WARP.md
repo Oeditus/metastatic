@@ -476,13 +476,23 @@ All tests use meaningful examples demonstrating real-world usage, not just synth
 ## Future Work Context
 
 When adding a new language adapter:
-1. Create module in `lib/metastatic/adapters/`
+
+1. Create module in `lib/metastatic/adapters/` (e.g. `lib/metastatic/adapters/rust.ex`
+   defining `Metastatic.Adapters.Rust`)
 2. Implement `@behaviour Metastatic.Adapter`
 3. Required callbacks: `parse/1`, `to_meta/1`, `from_meta/2`, `unparse/1`, `file_extensions/0`
 4. Target >95% round-trip fidelity (Source → M1 → M2 → M1 → Source)
 5. Create 50+ test fixtures
-6. Add extension to `detect_language/1` helpers in all relevant mix tasks
-7. Aim for <100ms performance per 1000 LOC
+6. Aim for <100ms performance per 1000 LOC
+
+**No registry edit is required.** `Metastatic.Languages` discovers adapters at
+compile time by scanning `lib/metastatic/adapters/` for modules declaring
+`@behaviour Metastatic.Adapter`, and derives the language atom from the module
+name (`Metastatic.Adapters.Rust` → `:rust`). The extension map, supported
+language list, and display strings are all derived automatically. See
+`Metastatic.Languages` for the config overrides (`:exclude`, `:include`,
+`:experimental`, `:documentation`) and `Metastatic.Languages.Discovery` for the
+scanning logic.
 
 Analysis tools are provided by the companion library [MetaCredo](https://github.com/Oeditus/metacredo),
 which operates at the M2 level via OpKind semantic metadata.
