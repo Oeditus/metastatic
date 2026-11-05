@@ -316,6 +316,50 @@ The same pipeline is available through the generic API:
 | **SQL** | `Metastatic.Adapters.SQL` | `.sql` | `sqlparser-rs` multi-dialect parser via native CLI bridge (`priv/parsers/sql`). | **>98%** | ANSI, PostgreSQL, MySQL, SQLite queries, CRUD statements, semantic `:db` OpKind enrichment | **Superb (9.5/10)** |
 | **Markdown** | `Metastatic.Adapters.Markdown` | `.md`, `.markdown` | Pure-Elixir block + inline parser (no external toolchain). Produces NL-MetaAST, so prose linting, readability and validation apply unchanged. | **>95%** | Headings, lists, task lists, code fences, block quotes, GFM tables, links/images, emphasis; code stays opaque to prose rules | **Superb (9.5/10)** |
 
+### Adding a New Language
+
+Languages are **plug-ins**: you do not edit any core file to add one. Drop a
+module in `lib/metastatic/adapters/` that implements `@behaviour
+Metastatic.Adapter` and `Metastatic.Languages` discovers it at compile time,
+deriving the language atom from the module name
+(`Metastatic.Adapters.Rust` → `:rust`) and the extension map from
+`file_extensions/0`. The extension map, supported-language list and error
+messages all update automatically.
+
+```elixir
+defmodule Metastatic.Adapters.Rust do
+  @behaviour Metastatic.Adapter
+
+  @impl true
+  def parse(source), do: Metastatic.Adapters.Rust.Subprocess.parse(source)
+
+  @impl true
+  def to_meta(ast) do
+    # M1 → M2; returns {:ok, meta_ast, metadata}
+  end
+
+  @impl true
+  def from_meta(meta_ast, metadata) do
+    # M2 → M1
+  end
+
+  @impl true
+  def unparse(ast), do: Metastatic.Adapters.Rust.Subprocess.unparse(ast)
+
+  @impl true
+  def file_extensions, do: [".rs"]
+end
+```
+
+Discovery can be tuned without touching core code via config
+(`config :metastatic, :languages, include: [...], exclude: [...],
+experimental: [...], documentation: [...]`).
+
+For the full walkthrough — parsing strategies (native BEAM vs. subprocess
+bridge), the M1 ⇄ M2 mapping, semantic OpKind enrichment, the conformance test
+suite, round-trip fidelity targets, and Ragex integration — see the
+**[Adapter Authoring Guide](ADAPTER_GUIDE.md)**.
+
 ### Working with MetaAST Directly
 
 ```elixir
@@ -464,6 +508,7 @@ See **[Supplemental Modules](SUPPLEMENTAL_MODULES.md)** for comprehensive guide 
 ## Documentation
 
 - **[Theoretical Foundations](THEORETICAL_FOUNDATIONS.md)** - Formal meta-modeling theory and proofs
+- **[Adapter Authoring Guide](ADAPTER_GUIDE.md)** - Step-by-step guide to adding a new language adapter
 - **[Supplemental Modules](SUPPLEMENTAL_MODULES.md)** - Guide to using and creating supplemental modules
 - **API Documentation** - Generate with `mix docs`
 
