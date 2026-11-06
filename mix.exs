@@ -195,13 +195,17 @@ defmodule Metastatic.MixProject do
 
       "Core Components": [
         Metastatic.AST,
-        Metastatic.Document,
         Metastatic.Builder,
-        Metastatic.Priv,
-        Metastatic.Validator,
         Metastatic.Cache,
         Metastatic.Cache.ETS,
-        Metastatic.Cache.DLLB
+        Metastatic.Cache.DLLB,
+        Metastatic.Document,
+        Metastatic.Language,
+        Metastatic.Languages,
+        Metastatic.Languages.Discovery,
+        Metastatic.MetaAST,
+        Metastatic.Priv,
+        Metastatic.Validator
       ],
       CLI: [
         Metastatic.CLI,
@@ -262,6 +266,10 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapters.March.Subprocess,
         Metastatic.Adapters.March.ToMeta,
         Metastatic.Adapters.Markdown,
+        Metastatic.Adapters.SQL,
+        Metastatic.Adapters.SQL.FromMeta,
+        Metastatic.Adapters.SQL.Subprocess,
+        Metastatic.Adapters.SQL.ToMeta,
         Metastatic.Adapters.Ruby,
         Metastatic.Adapters.Ruby.FromMeta,
         Metastatic.Adapters.Ruby.Subprocess,

@@ -1,5 +1,6 @@
 defmodule Metastatic.AdapterContractTest do
-  @moduledoc """
+  @moduledoc false
+  _ = """
   Enumerates every adapter registered in `Metastatic.Languages` and asserts it
   satisfies the `Metastatic.Adapter` contract.
 
