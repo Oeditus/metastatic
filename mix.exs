@@ -183,7 +183,9 @@ defmodule Metastatic.MixProject do
       "GETTING_STARTED.md": [title: "Getting Started"],
       "THEORETICAL_FOUNDATIONS.md": [title: "Theoretical Foundations"],
       "SUPPLEMENTAL_MODULES.md": [title: "Supplemental Modules"],
+      "ADAPTER_GUIDE.md": [title: "Adapter Guide"],
       "METAST_SPEC.md": [title: "MetaAST Informal Specification"],
+      "METAST_NL_SPEC.md": [title: "MetaAST for Natural Languages"],
       "CHANGELOG.md": [title: "Changelog"]
     ]
   end
