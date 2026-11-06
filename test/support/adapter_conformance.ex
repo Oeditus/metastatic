@@ -1,5 +1,7 @@
 defmodule Metastatic.Test.AdapterConformance do
-  @moduledoc """
+  @moduledoc false
+
+  _ = """
   A reusable conformance suite for language adapters.
 
   Including this macro in an adapter test module generates a uniform set of
