@@ -11,6 +11,7 @@ defmodule Metastatic.LanguagesTest do
   use ExUnit.Case, async: true
 
   alias Metastatic.{Language, Languages}
+  alias Metastatic.Languages.Discovery
 
   describe "discovery" do
     test "registers every source-language adapter" do
@@ -22,6 +23,7 @@ defmodule Metastatic.LanguagesTest do
         :elixir,
         :erlang,
         :haskell,
+        :java,
         :javascript,
         :march,
         :markdown,
@@ -51,6 +53,17 @@ defmodule Metastatic.LanguagesTest do
         assert {:ok, adapter} = Languages.get_adapter(lang)
         assert Code.ensure_loaded?(adapter), "#{inspect(adapter)} is not loadable"
       end
+    end
+
+    test "tracks adapter sources for incremental recompilation" do
+      resources = Languages.__info__(:attributes) |> Keyword.get_values(:external_resource)
+
+      for {_language, adapter} <- Discovery.discover() do
+        source = adapter.module_info(:compile)[:source] |> List.to_string()
+        assert [source] in resources
+      end
+
+      refute Languages.__mix_recompile__?()
     end
 
     test "all/0 returns descriptors matching supported_languages/0" do

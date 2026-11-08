@@ -82,6 +82,17 @@ defmodule Metastatic.Languages do
   # `Metastatic.Languages.Discovery` for the scanning logic.
   @discovered_modules Metastatic.Languages.Discovery.discover()
 
+  @adapter_sources Path.wildcard(Path.join(__DIR__, "adapters/*.ex"))
+  for source <- @adapter_sources do
+    @external_resource source
+  end
+
+  @doc false
+  @spec __mix_recompile__?() :: boolean()
+  def __mix_recompile__? do
+    Path.wildcard(Path.join(__DIR__, "adapters/*.ex")) != @adapter_sources
+  end
+
   # Config-driven overrides. `Application.compile_env/3` is evaluated at compile
   # time so the registry stays a compile-time constant.
   @config_overrides Application.compile_env(:metastatic, :languages, [])

@@ -111,6 +111,7 @@ defmodule Metastatic.MixProject do
         priv/parsers/haskell/package.yaml
         priv/parsers/haskell/stack.yaml
         priv/parsers/haskell/stack.yaml.lock
+        priv/parsers/java/parser.java
         priv/parsers/javascript/package.json
         priv/parsers/javascript/package-lock.json
         priv/parsers/javascript/parser.js
