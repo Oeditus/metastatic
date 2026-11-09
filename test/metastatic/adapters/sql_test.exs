@@ -37,6 +37,86 @@ defmodule Metastatic.Adapters.SQLTest do
       assert is_binary(reason)
       assert String.contains?(reason, "ParseError") or String.contains?(reason, "error")
     end
+
+    test "recovers supported statements from a script with unsupported ones" do
+      script = """
+      GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO articleservice;
+      GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO articleservice;
+
+      ALTER DEFAULT PRIVILEGES IN SCHEMA public
+          GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO articleservice;
+      """
+
+      assert {:ok, statements, %{unsupported: unsupported}} =
+               SQL.parse(script, dialect: :postgres)
+
+      assert length(statements) == 2
+      assert [%{"source" => skipped, "reason" => "unsupported_statement"}] = unsupported
+      assert skipped =~ "ALTER DEFAULT PRIVILEGES"
+    end
+
+    test "recovers statements around PostgreSQL DO blocks" do
+      script = """
+      DO $$
+      BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'articleservice') THEN
+              CREATE ROLE articleservice WITH LOGIN PASSWORD 'secret';
+          END IF;
+      END $$;
+
+      GRANT USAGE, CREATE ON SCHEMA public TO articleservice;
+      """
+
+      assert {:ok, statements, %{unsupported: unsupported}} =
+               SQL.parse(script, dialect: :postgres)
+
+      assert length(statements) == 1
+      assert [%{"source" => skipped}] = unsupported
+      assert skipped =~ "DO $$"
+    end
+
+    test "does not split on semicolons inside dollar-quoted bodies" do
+      script = """
+      DO $$
+      BEGIN
+          PERFORM 1;
+          PERFORM 2;
+      END $$;
+      GRANT SELECT ON t TO r;
+      """
+
+      assert {:ok, statements, %{unsupported: [%{"source" => skipped}]}} =
+               SQL.parse(script, dialect: :postgres)
+
+      assert length(statements) == 1
+      assert skipped =~ "PERFORM 2"
+    end
+
+    test "returns a plain ok tuple when every statement parses" do
+      assert {:ok, [_ | _]} = SQL.parse("SELECT 1; SELECT 2;", dialect: :postgres)
+    end
+
+    test "returns an error when no statement can be parsed" do
+      assert {:error, reason} =
+               SQL.parse("ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO r;",
+                 dialect: :postgres
+               )
+
+      assert is_binary(reason)
+    end
+  end
+
+  describe "abstract/3 with partially unsupported scripts" do
+    test "builds a document and records skipped statements in metadata" do
+      script = """
+      GRANT SELECT ON ALL TABLES IN SCHEMA public TO articleservice;
+      ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO articleservice;
+      """
+
+      assert {:ok, %Document{} = doc} = Metastatic.Builder.from_source(script, :sql)
+      assert doc.language == :sql
+      assert [%{"source" => _}] = doc.metadata.unsupported
+    end
   end
 
   describe "to_meta/1" do

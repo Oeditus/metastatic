@@ -331,7 +331,7 @@ defmodule Metastatic.Adapter do
   """
   @spec round_trip(module(), source) :: {:ok, source} | {:error, term()}
   def round_trip(adapter, source) do
-    with {:ok, native_ast} <- adapter.parse(source),
+    with {:ok, native_ast, _parse_metadata} <- parse_with_metadata(adapter, source),
          {:ok, meta_ast, metadata} <- adapter.to_meta(native_ast),
          {:ok, native_ast2} <- adapter.from_meta(meta_ast, metadata) do
       adapter.unparse(native_ast2)
@@ -361,12 +361,25 @@ defmodule Metastatic.Adapter do
         {:ok, doc}
 
       {:error, :not_found} ->
-        with {:ok, native_ast} <- adapter.parse(source),
+        with {:ok, native_ast, parse_metadata} <- parse_with_metadata(adapter, source),
              {:ok, meta_ast, metadata} <- adapter.to_meta(native_ast) do
+          metadata = Map.merge(parse_metadata, metadata)
           Metastatic.Cache.put(adapter, source, meta_ast, metadata)
           doc = Document.new(meta_ast, language, metadata, source)
           {:ok, doc}
         end
+    end
+  end
+
+  # Adapters may report partial parses by returning `{:ok, ast, metadata}`
+  # instead of `{:ok, ast}` (e.g. the SQL adapter skips statements its
+  # underlying parser cannot model and lists them in `:unsupported`).
+  # Normalize both shapes so the pipeline stays uniform.
+  defp parse_with_metadata(adapter, source) do
+    case adapter.parse(source) do
+      {:ok, native_ast, metadata} when is_map(metadata) -> {:ok, native_ast, metadata}
+      {:ok, native_ast} -> {:ok, native_ast, %{}}
+      {:error, _reason} = error -> error
     end
   end
 

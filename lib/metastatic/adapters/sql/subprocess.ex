@@ -23,32 +23,57 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
   Options:
   - `:dialect` - SQL dialect atom or string (e.g., `:generic`, `:postgres`, `:mysql`, `:sqlite`, `:ansi`)
 
+  ## Scripts with unsupported statements
+
+  When a script mixes statements the underlying parser understands with dialect
+  constructs it does not model (for example PostgreSQL `ALTER DEFAULT
+  PRIVILEGES` or `DO $$ ... $$` blocks), the supported statements are still
+  returned. The skipped ones are reported in the `:unsupported` metadata field
+  so callers can surface them instead of silently losing information.
+
   ## Examples
 
       iex> {:ok, [statement]} = Metastatic.Adapters.SQL.Subprocess.parse("SELECT 1")
       iex> is_map(statement)
       true
+
+      iex> script = "GRANT SELECT ON t TO r; ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO r;"
+      iex> {:ok, [_ | _] = statements, %{unsupported: [_ | _]}} =
+      ...>   Metastatic.Adapters.SQL.Subprocess.parse(script, dialect: :postgres)
+      iex> length(statements)
+      1
   """
-  @spec parse(String.t(), keyword()) :: {:ok, term()} | {:error, String.t()}
+  @spec parse(String.t(), keyword()) ::
+          {:ok, term()} | {:ok, term(), map()} | {:error, String.t()}
   def parse(source, opts \\ []) when is_binary(source) do
     dialect = opts |> Keyword.get(:dialect, :generic) |> to_string()
     args = ["parse", "--dialect", dialect]
 
     case run_sql_parser(args, source) do
       {:ok, result} ->
-        case JSON.decode(result) do
-          {:ok, %{"ok" => true, "ast" => ast}} ->
-            {:ok, ast}
-
-          {:ok, %{"ok" => false, "error" => error}} ->
-            {:error, format_error(error)}
-
-          {:error, reason} ->
-            {:error, "JSON decode failed: #{inspect(reason)}"}
-        end
+        decode_parse_result(result)
 
       {:error, reason} ->
         {:error, "SQL parser process failed: #{reason}"}
+    end
+  end
+
+  defp decode_parse_result(result) do
+    case JSON.decode(result) do
+      {:ok, %{"ok" => true, "ast" => ast} = decoded} ->
+        case Map.get(decoded, "unsupported") do
+          unsupported when is_list(unsupported) and unsupported != [] ->
+            {:ok, ast, %{unsupported: unsupported}}
+
+          _ ->
+            {:ok, ast}
+        end
+
+      {:ok, %{"ok" => false, "error" => error}} ->
+        {:error, format_error(error)}
+
+      {:error, reason} ->
+        {:error, "JSON decode failed: #{inspect(reason)}"}
     end
   end
 

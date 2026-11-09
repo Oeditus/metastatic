@@ -28,8 +28,24 @@ defmodule Metastatic.Adapters.SQL do
 
   @doc """
   Parse SQL source code with optional dialect configuration.
+
+  Returns `{:ok, ast}` on full success, or `{:ok, ast, metadata}` when the
+  script contained statements the underlying parser could not model. In the
+  latter case `metadata.unsupported` lists the skipped statements as
+  `%{"source" => sql, "reason" => reason}` maps.
+
+  ## Examples
+
+      iex> {:ok, _ast} = Metastatic.Adapters.SQL.parse("SELECT 1", dialect: :postgres)
+
+      iex> {:ok, _ast, %{unsupported: [_ | _]}} =
+      ...>   Metastatic.Adapters.SQL.parse(
+      ...>     "GRANT SELECT ON t TO r;\nALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO r;",
+      ...>     dialect: :postgres
+      ...>   )
   """
-  @spec parse(String.t(), keyword()) :: {:ok, term()} | {:error, String.t()}
+  @spec parse(String.t(), keyword()) ::
+          {:ok, term()} | {:ok, term(), map()} | {:error, String.t()}
   def parse(source, opts) when is_binary(source) and is_list(opts) do
     Subprocess.parse(source, opts)
   end

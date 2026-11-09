@@ -24,28 +24,197 @@ fn get_dialect(name: &str) -> Box<dyn Dialect> {
     }
 }
 
+/// Split a SQL script into individual statements on top-level semicolons.
+///
+/// Statement boundaries are only recognised when the semicolon sits outside
+/// of string literals, dollar-quoted bodies (`$$ ... $$`, `$tag$ ... $tag$`),
+/// quoted identifiers, and comments. This lets the parser handle scripts that
+/// contain constructs `sqlparser` cannot model (e.g. `ALTER DEFAULT
+/// PRIVILEGES`, `DO $$ ... $$`) by parsing each statement independently and
+/// skipping the ones that are unsupported.
+fn split_statements(sql: &str) -> Vec<String> {
+    let bytes = sql.as_bytes();
+    let mut statements = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            // Line comment: skip to end of line.
+            b'-' if i + 1 < bytes.len() && bytes[i + 1] == b'-' => {
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            // Block comment: skip to closing `*/`.
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                i += 2;
+                while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                    i += 1;
+                }
+                i = (i + 2).min(bytes.len());
+            }
+            // Single-quoted string literal (with `''` escape).
+            b'\'' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\'' {
+                        if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                            i += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    i += 1;
+                }
+                i += 1;
+            }
+            // Double-quoted identifier (with `""` escape).
+            b'"' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'"' {
+                        if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
+                            i += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    i += 1;
+                }
+                i += 1;
+            }
+            // Dollar-quoted string: `$$ ... $$` or `$tag$ ... $tag$`.
+            b'$' => {
+                if let Some(delim_len) = dollar_quote_delimiter_len(&bytes[i..]) {
+                    let delimiter = &sql[i..i + delim_len];
+                    i += delim_len;
+                    match sql[i..].find(delimiter) {
+                        Some(offset) => i += offset + delim_len,
+                        None => i = bytes.len(),
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            // Top-level statement separator.
+            b';' => {
+                statements.push(sql[start..i].to_string());
+                start = i + 1;
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+
+    if start < sql.len() {
+        statements.push(sql[start..].to_string());
+    }
+
+    statements
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Returns the byte length of a dollar-quote opening delimiter at the start of
+/// `bytes` (either `$$` or `$tag$`), or `None` when `bytes` does not start one.
+fn dollar_quote_delimiter_len(bytes: &[u8]) -> Option<usize> {
+    if bytes.first() != Some(&b'$') {
+        return None;
+    }
+
+    let mut idx = 1usize;
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'$' => return Some(idx + 1),
+            // Dollar-quote tags are identifiers: letters, digits, underscores,
+            // and must not start with a digit.
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => idx += 1,
+            b'0'..=b'9' if idx > 1 => idx += 1,
+            _ => return None,
+        }
+    }
+
+    None
+}
+
+/// Serializes a list of parsed statements into the success payload.
+fn statements_payload(statements: &[Statement]) -> serde_json::Value {
+    match serde_json::to_value(statements) {
+        Ok(val) => json!({ "ok": true, "ast": val }),
+        Err(e) => json!({
+            "ok": false,
+            "error": { "type": "SerializationError", "msg": e.to_string() }
+        }),
+    }
+}
+
+/// Parses a script statement-by-statement, keeping the statements that
+/// `sqlparser` understands and reporting the rest as `unsupported`.
+///
+/// This is the fallback for scripts that mix supported statements with
+/// dialect constructs the crate does not model yet.
+fn parse_statement_wise(sql: &str, dialect_ref: &dyn Dialect) -> Option<serde_json::Value> {
+    let chunks = split_statements(sql);
+
+    if chunks.len() < 2 {
+        return None;
+    }
+
+    let mut statements: Vec<Statement> = Vec::new();
+    let mut unsupported: Vec<serde_json::Value> = Vec::new();
+
+    for chunk in chunks {
+        match Parser::parse_sql(dialect_ref, &chunk) {
+            Ok(parsed) if !parsed.is_empty() => statements.extend(parsed),
+            _ => unsupported.push(json!({
+                "source": chunk,
+                "reason": "unsupported_statement"
+            })),
+        }
+    }
+
+    if statements.is_empty() {
+        return None;
+    }
+
+    match serde_json::to_value(&statements) {
+        Ok(val) => {
+            let mut payload = json!({ "ok": true, "ast": val });
+            if !unsupported.is_empty() {
+                if let serde_json::Value::Object(ref mut map) = payload {
+                    map.insert("unsupported".to_string(), json!(unsupported));
+                }
+            }
+            Some(payload)
+        }
+        Err(_) => None,
+    }
+}
+
 fn parse_sql(sql: &str, dialect_name: &str) -> serde_json::Value {
     let dialect = get_dialect(dialect_name);
     let dialect_ref = dialect.as_ref();
 
     // 1. Try statement parsing
     match Parser::parse_sql(dialect_ref, sql) {
-        Ok(statements) if !statements.is_empty() => {
-            match serde_json::to_value(&statements) {
-                Ok(val) => json!({ "ok": true, "ast": val }),
-                Err(e) => json!({
-                    "ok": false,
-                    "error": { "type": "SerializationError", "msg": e.to_string() }
-                }),
-            }
-        }
+        Ok(statements) if !statements.is_empty() => statements_payload(&statements),
         _ => {
-            // 2. Fall back to expression parsing
+            // 2. Retry statement-by-statement so that a single unsupported
+            //    statement (e.g. `ALTER DEFAULT PRIVILEGES`, `DO $$ ... $$`)
+            //    does not discard the rest of the script.
+            if let Some(payload) = parse_statement_wise(sql, dialect_ref) {
+                return payload;
+            }
+
+            // 3. Fall back to expression parsing
             match Parser::new(dialect_ref).try_with_sql(sql) {
                 Ok(mut parser) => match parser.parse_expr() {
                     Ok(expr) => {
                         let next_token = parser.peek_token();
-                        if next_token.token != Token::EOF && next_token != Token::EOF {
+                        if next_token.token != Token::EOF {
                             json!({
                                 "ok": false,
                                 "error": { "type": "ParseError", "msg": format!("Unexpected trailing token: {:?}", next_token) }

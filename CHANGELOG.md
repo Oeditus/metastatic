@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+### Fixed -- SQL adapter no longer rejects scripts with unsupported statements
+
+SQL scripts that mixed statements `sqlparser-rs` understands with dialect
+constructs it does not model (PostgreSQL `ALTER DEFAULT PRIVILEGES`,
+`DO $$ ... $$` blocks) failed with `ParseError: Unexpected trailing token`,
+which aborted analysis for the whole file.
+
+- **Statement-wise recovery** -- when whole-script parsing fails, the parser now
+  splits the script on top-level semicolons (respecting string literals, quoted
+  identifiers, dollar-quoted bodies, and comments), parses each statement
+  independently, and keeps the ones that succeed.
+- **`{:ok, ast, metadata}` partial results** -- skipped statements are reported
+  in `metadata.unsupported` as `%{"source" => sql, "reason" => reason}` instead
+  of being silently dropped. `SQL.parse/2` and
+  `SQL.Subprocess.parse/2` return this shape; full parses still return
+  `{:ok, ast}`.
+- **`Metastatic.Adapter.abstract/3` and `round_trip/2`** now accept the
+  three-element parse result and merge the parse metadata into the document, so
+  callers see `doc.metadata.unsupported`.
+- Genuinely invalid SQL still returns `{:error, reason}` -- recovery only kicks
+  in when at least one statement parses.
+
 ### Changed -- Plug-in language registry (no more hardcoded language list)
 
 `Metastatic.Languages` no longer maintains a hand-written `@adapters` map.
