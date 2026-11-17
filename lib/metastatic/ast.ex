@@ -2545,6 +2545,20 @@ defmodule Metastatic.AST do
     []
   end
 
+  # A `:type_expr` payload is raw Elixir AST kept verbatim for round-tripping
+  # (`{:|, [line: n], [...]}`, `{:"::", ...}`, ...). Those shapes are
+  # indistinguishable from MetaAST nodes to `meta_ast_node?/1`, so descending
+  # into them would hand callers Elixir AST nodes where they expect uniform
+  # MetaAST. Treat that payload as an opaque leaf; every other
+  # `:language_specific` node keeps its normal children.
+  defp child_nodes({:language_specific, meta, children}) when is_list(meta) do
+    if Keyword.get(meta, :hint) == :type_expr do
+      []
+    else
+      if is_list(children), do: Enum.filter(children, &meta_ast_node?/1), else: []
+    end
+  end
+
   defp child_nodes({type, _meta, children})
        when is_atom(type) and is_list(children) do
     Enum.filter(children, &meta_ast_node?/1)

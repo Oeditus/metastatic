@@ -619,6 +619,13 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       {{:@, meta, [{attr_name, _attr_meta, [value | _constraints]}]}, new_ctx}
       when attr_name in [:spec, :type, :typep, :callback, :macrocallback] ->
         {func_name, arity} = extract_type_annotation_info(attr_name, value)
+
+        # The type expression is stored verbatim so it round-trips unchanged.
+        # That means it is still *raw Elixir AST* -- `|` unions in particular
+        # never pass through `post_transform` and arrive as
+        # `{:|, [line: n], [...]}`. `Metastatic.AST.child_nodes/1` treats a
+        # `:language_specific` node with `hint: :type_expr` as opaque, so
+        # walkers stop here instead of descending into Elixir AST.
         type_expr = {:language_specific, [language: :elixir, hint: :type_expr], value}
 
         node_meta =
@@ -627,8 +634,16 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
         {{:type_annotation, node_meta, [type_expr]}, new_ctx}
 
       # Setter: @attr value
+      #
+      # `transform/1` is not a local helper -- it is this module's public
+      # entry point, which returns `{:ok, meta_ast, ctx}`. Binding it to
+      # `{:ok, value_ast, _}` therefore raised a `MatchError` for *every*
+      # module attribute that is not a type annotation, taking the whole
+      # document down with it. Re-enter the traversal on the value instead.
       {{:@, meta, [{attr_name, _attr_meta, [value]}]}, new_ctx} ->
-        {:ok, value_ast, _} = transform(value)
+        {value_ast, _value_ctx} =
+          Macro.traverse(value, new_ctx, &pre_transform/2, &post_transform/2)
+
         var_name = "@#{attr_name}"
         node_meta = [attribute_type: :module_attribute] ++ build_meta(meta)
         target = {:variable, [scope: :module_attribute], var_name}

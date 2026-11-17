@@ -491,4 +491,96 @@ defmodule Metastatic.Adapters.Elixir.MetadataTest do
       end)
     end
   end
+
+  # Module attributes that are neither type annotations nor plain setters used
+  # to be mistyped as `:function_call` nodes, because `ToMeta`'s attribute
+  # handler called the public `transform/1` and pattern-matched its result as
+  # `{:ok, ast, ctx}`. These tests pin the corrected shapes.
+  describe "module attributes" do
+    test "@moduledoc becomes a module_attribute assignment, not a function call" do
+      alias Metastatic.Adapters.Elixir.ToMeta
+      {:ok, ast} = Code.string_to_quoted(~s|defmodule M do\n  @moduledoc "hi"\nend|)
+      {:ok, {:container, _, children}, _} = ToMeta.transform(ast)
+
+      assert [{:assignment, meta, [{:variable, _, "@moduledoc"}, {:literal, _, "hi"}]}] =
+               children
+
+      assert Keyword.get(meta, :attribute_type) == :module_attribute
+    end
+
+    test "@doc, @typedoc, @enforce_keys and @behaviour are not function calls" do
+      alias Metastatic.Adapters.Elixir.ToMeta
+
+      source = """
+      defmodule M do
+        @moduledoc "m"
+        @behaviour GenServer
+        @enforce_keys [:a]
+        @typedoc "t"
+        @doc "d"
+        def f(x), do: x
+      end
+      """
+
+      {:ok, ast} = Code.string_to_quoted(source)
+      {:ok, {:container, _, children}, _} = ToMeta.transform(ast)
+
+      call_names =
+        for {:function_call, meta, _} <- children, do: Keyword.get(meta, :name)
+
+      for attr <- ~w(moduledoc behaviour enforce_keys typedoc doc) do
+        refute attr in call_names, "@#{attr} leaked as a function_call"
+      end
+    end
+
+    test "a module of only attributes and defstruct still yields a container" do
+      alias Metastatic.Adapters.Elixir.ToMeta
+
+      source = """
+      defmodule M do
+        @moduledoc "m"
+        @enforce_keys [:a]
+        defstruct [:a]
+      end
+      """
+
+      {:ok, ast} = Code.string_to_quoted(source)
+      {:ok, {:container, meta, children}, _} = ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :name) == "M"
+
+      assert Enum.any?(children, fn
+               {:language_specific, m, _} -> Keyword.get(m, :hint) == :defstruct
+               _ -> false
+             end)
+    end
+  end
+
+  # Type expressions are stored verbatim (raw Elixir AST) so they round-trip.
+  # Walkers must treat that payload as opaque rather than descending into it.
+  describe "type expressions" do
+    test "union payloads do not leak raw Elixir AST into postwalker output" do
+      alias Metastatic.Adapters.Elixir.ToMeta
+      source = "defmodule M do\n  @type t :: :a | :b\nend"
+      {:ok, ast} = Code.string_to_quoted(source)
+      {:ok, meta_ast, _} = ToMeta.transform(ast)
+
+      types = meta_ast |> Metastatic.AST.postwalker() |> Enum.map(&elem(&1, 0))
+
+      refute :| in types
+      refute :"::" in types
+      refute :__aliases__ in types
+    end
+
+    test "union type expressions still round-trip verbatim" do
+      for source <- [
+            "@type t :: :a | :b",
+            "@type t :: String.t() | nil",
+            "@spec f(integer()) :: {:ok, term()} | {:error, term()}"
+          ] do
+        assert {:ok, result} = Builder.round_trip(source, :elixir)
+        assert result == source
+      end
+    end
+  end
 end
