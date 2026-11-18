@@ -85,9 +85,12 @@ defmodule Metastatic.NL.Adapters.EnglishTest do
       end
     end
 
-    test "prints warning and falls back to pure Elixir rule-based tokenizer/parser when unavailable" do
-      output =
-        capture_io(:stderr, fn ->
+    test "logs one warning (no stacktrace) and falls back when tree-sitter is unavailable" do
+      # The fallback used to emit both `Logger.warning/1` and `IO.warn/1`, so
+      # the message appeared twice and once with a stacktrace. It now logs
+      # exactly once, through `Logger`.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
           assert {:ok, cst} =
                    English.parse("Simple sentence.",
                      tree_sitter_bin: "nonexistent-ts-bin-123",
@@ -97,8 +100,20 @@ defmodule Metastatic.NL.Adapters.EnglishTest do
           assert %{"type" => "document", "children" => _} = cst
         end)
 
-      assert output =~ "tree-sitter is not available"
-      assert output =~ "Falling back to Pure Elixir rule-based tokenizer/parser"
+      assert log =~ "tree-sitter is not available"
+      assert log =~ "Falling back to the pure-Elixir rule-based tokenizer/parser"
+    end
+
+    test "does not warn on stderr" do
+      stderr =
+        capture_io(:stderr, fn ->
+          English.parse("Simple sentence.",
+            tree_sitter_bin: "nonexistent-ts-bin-123",
+            warn: true
+          )
+        end)
+
+      refute stderr =~ "tree-sitter is not available"
     end
   end
 end

@@ -127,10 +127,18 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
 
     if should_warn do
       msg =
-        "[Metastatic.NL] tree-sitter is not available (configured: '#{bin}'). Falling back to Pure Elixir rule-based tokenizer/parser."
+        "[Metastatic.NL] tree-sitter is not available (configured: '#{bin}'). " <>
+          "Falling back to the pure-Elixir rule-based tokenizer/parser."
 
-      Logger.warning(msg)
-      IO.warn(msg, [])
+      # One channel only. `IO.warn/1` prints a stacktrace, which is pure noise
+      # for an expected fallback; `Logger` respects the host's log level.
+      # When tree-sitter was never configured (the default), the fallback is
+      # normal operation, so log at :debug instead of :warning.
+      if Keyword.get(opts, :configured?, bin != "tree-sitter") do
+        Logger.warning(msg)
+      else
+        Logger.debug(msg)
+      end
     end
   end
 

@@ -69,6 +69,9 @@ defmodule Mix.Tasks.Metastatic.Translate do
   def run(args) do
     Mix.Task.run("app.start")
 
+    if Metastatic.CLI.help_requested?(args),
+      do: Metastatic.CLI.help(Mix.Tasks.Metastatic.Translate)
+
     {opts, paths, _invalid} = OptionParser.parse(args, strict: @switches)
 
     case validate_args(opts, paths) do
@@ -76,7 +79,7 @@ defmodule Mix.Tasks.Metastatic.Translate do
         translate(from_lang, to_lang, source_path, output_path)
 
       {:error, message} ->
-        CLI.fatal(message)
+        CLI.fatal(message, 2)
     end
   end
 
@@ -144,9 +147,13 @@ defmodule Mix.Tasks.Metastatic.Translate do
       {:ok, lang} ->
         {:ok, lang}
 
-      _ ->
-        {:error,
-         "Invalid --#{opt_name} language: #{lang_str}. Supported: #{Metastatic.Languages.supported_languages_string()}"}
+      # `Languages.parse_language/1` already produces a good message naming the
+      # supported set; surface it instead of replacing it with a near-duplicate.
+      {:error, reason} ->
+        {:error, "Invalid --#{opt_name} value. #{reason}"}
+
+      :none ->
+        {:error, "Missing value for --#{opt_name}"}
     end
   end
 
@@ -212,8 +219,10 @@ defmodule Mix.Tasks.Metastatic.Translate do
       {:ok, files} ->
         Mix.shell().info(CLI.format_success("Translated #{length(files)} files"))
 
+        # `→` is reserved for *input* lines (see `CLI.format_info/1`); a plain
+        # bullet marks the produced files.
         Enum.each(files, fn file ->
-          Mix.shell().info("  → #{file}")
+          Mix.shell().info("  • #{file}")
         end)
 
         exit({:shutdown, 0})

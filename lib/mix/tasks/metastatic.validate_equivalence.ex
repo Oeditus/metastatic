@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
   @dialyzer {:no_return, run: 1}
   @dialyzer :no_opaque
 
-  alias Metastatic.{Builder, CLI}
+  alias Metastatic.{AST, Builder, CLI}
 
   @switches [
     lang1: :string,
@@ -75,6 +75,9 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
   def run(args) do
     Mix.Task.run("app.start")
 
+    if Metastatic.CLI.help_requested?(args),
+      do: Metastatic.CLI.help(Mix.Tasks.Metastatic.ValidateEquivalence)
+
     {opts, paths, _invalid} = OptionParser.parse(args, strict: @switches)
 
     case validate_args(opts, paths) do
@@ -82,7 +85,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
         validate_equivalence(file1, file2, options)
 
       {:error, message} ->
-        CLI.fatal(message)
+        CLI.fatal(message, 2)
     end
   end
 
@@ -153,86 +156,79 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
     end
   end
 
-  # AST equivalence (ignoring location metadata)
-  # For 3-tuple format: {type, meta_keyword_list, children_or_value}
-  # We strip location-related keys from the metadata keyword list
-
-  @location_keys ~w[line end_line col end_col column end_column original_meta]a
+  # AST equivalence.
+  #
+  # Delegates to `Metastatic.AST.canonicalize/1`, the single source of truth
+  # for "semantically equivalent" used by `Document.equivalent?/2` and the
+  # cross-language conformance suite. A hand-rolled metadata strip used to
+  # keep `:original_meta`, `:origin`, `:desugar` and other adapter bookkeeping,
+  # so two files the library itself considers equivalent were reported as
+  # different.
 
   @spec ast_equivalent?(term(), term(), keyword()) :: boolean()
   defp ast_equivalent?(ast1, ast2, options) do
-    stripped1 = strip_locations(ast1)
-    stripped2 = strip_locations(ast2)
+    alpha? = Keyword.get(options, :alpha, false)
 
-    if Keyword.get(options, :alpha, false) do
-      canonicalize_variables(stripped1) == canonicalize_variables(stripped2)
-    else
-      stripped1 == stripped2
-    end
+    canonical1 = ast1 |> AST.canonicalize() |> maybe_alpha(alpha?)
+    canonical2 = ast2 |> AST.canonicalize() |> maybe_alpha(alpha?)
+
+    canonical1 == canonical2
   end
 
-  defp canonicalize_variables(ast) do
-    {new_ast, _acc} = canonicalize_vars(ast, %{})
-    new_ast
+  # `--alpha` renames variables to `v_0`, `v_1`, ... in first-appearance order,
+  # so two files that differ only in variable names compare equal.
+  defp maybe_alpha(ast, false), do: ast
+  defp maybe_alpha(ast, true), do: ast |> alpha_rename_vars(%{}) |> elem(0)
+
+  defp alpha_rename_vars(list, acc) when is_list(list) do
+    Enum.map_reduce(list, acc, &alpha_rename_vars/2)
   end
 
-  defp canonicalize_vars(list, acc) when is_list(list) do
-    Enum.map_reduce(list, acc, &canonicalize_vars/2)
-  end
-
-  defp canonicalize_vars({:variable, meta, name}, acc) when is_binary(name) do
+  defp alpha_rename_vars({:variable, meta, name}, acc) when is_binary(name) do
     {canonical_name, new_acc} = get_or_create_var(name, acc)
     {{:variable, meta, canonical_name}, new_acc}
   end
 
-  defp canonicalize_vars({:param, meta, name}, acc) when is_binary(name) do
+  defp alpha_rename_vars({:param, meta, name}, acc) when is_binary(name) do
     {canonical_name, new_acc} = get_or_create_var(name, acc)
     {{:param, meta, canonical_name}, new_acc}
   end
 
-  defp canonicalize_vars({:function_def, meta, body}, acc) when is_list(meta) do
+  defp alpha_rename_vars({:function_def, meta, body}, acc) when is_list(meta) do
     params = Keyword.get(meta, :params, [])
-    {new_params, acc2} = canonicalize_vars(params, acc)
-    {new_body, acc3} = canonicalize_vars(body, acc2)
-    new_meta = Keyword.put(meta, :params, new_params)
-    {{:function_def, new_meta, new_body}, acc3}
+    {new_params, acc2} = alpha_rename_vars(params, acc)
+    {new_body, acc3} = alpha_rename_vars(body, acc2)
+    {{:function_def, Keyword.put(meta, :params, new_params), new_body}, acc3}
   end
 
-  defp canonicalize_vars({:lambda, meta, body}, acc) when is_list(meta) do
+  defp alpha_rename_vars({:lambda, meta, body}, acc) when is_list(meta) do
     params = Keyword.get(meta, :params, [])
-    {new_params, acc2} = canonicalize_vars(params, acc)
-    {new_body, acc3} = canonicalize_vars(body, acc2)
-    new_meta = Keyword.put(meta, :params, new_params)
-    {{:lambda, new_meta, new_body}, acc3}
+    {new_params, acc2} = alpha_rename_vars(params, acc)
+    {new_body, acc3} = alpha_rename_vars(body, acc2)
+    {{:lambda, Keyword.put(meta, :params, new_params), new_body}, acc3}
   end
 
-  defp canonicalize_vars({type, meta, children}, acc) when is_atom(type) and is_list(meta) do
-    {new_children, new_acc} = canonicalize_vars(children, acc)
+  defp alpha_rename_vars({type, meta, children}, acc) when is_atom(type) and is_list(meta) do
+    {new_children, new_acc} = alpha_rename_vars(children, acc)
     {{type, meta, new_children}, new_acc}
   end
 
-  defp canonicalize_vars(map, acc) when is_map(map) do
-    {list, acc_o} =
-      Enum.map_reduce(map, acc, fn {k, v}, acc_i ->
-        {new_v, acc_o} = canonicalize_vars(v, acc_i)
-        {{k, new_v}, acc_o}
+  defp alpha_rename_vars(map, acc) when is_map(map) do
+    {list, acc_out} =
+      Enum.map_reduce(map, acc, fn {k, v}, acc_in ->
+        {new_v, acc_next} = alpha_rename_vars(v, acc_in)
+        {{k, new_v}, acc_next}
       end)
 
-    {Map.new(list), acc_o}
+    {Map.new(list), acc_out}
   end
 
-  defp canonicalize_vars(tuple, acc) when is_tuple(tuple) do
-    {list, acc_o} =
-      tuple
-      |> Tuple.to_list()
-      |> canonicalize_vars(acc)
-
-    {List.to_tuple(list), acc_o}
+  defp alpha_rename_vars(tuple, acc) when is_tuple(tuple) do
+    {list, acc_out} = tuple |> Tuple.to_list() |> alpha_rename_vars(acc)
+    {List.to_tuple(list), acc_out}
   end
 
-  defp canonicalize_vars(other, acc) do
-    {other, acc}
-  end
+  defp alpha_rename_vars(other, acc), do: {other, acc}
 
   defp get_or_create_var(name, acc) do
     case Map.fetch(acc, name) do
@@ -243,43 +239,6 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
         canonical = "v_#{map_size(acc)}"
         {canonical, Map.put(acc, name, canonical)}
     end
-  end
-
-  # Strip location metadata from AST nodes for comparison
-  # Handle 3-tuple format: {type, meta, children}
-  defp strip_locations({type, meta, children}) when is_atom(type) and is_list(meta) do
-    stripped_meta = strip_location_keys(meta)
-    stripped_children = strip_locations(children)
-    {type, stripped_meta, stripped_children}
-  end
-
-  defp strip_locations(ast) when is_tuple(ast) do
-    tuple_map_elements(ast, &strip_locations/1)
-  end
-
-  defp strip_locations(list) when is_list(list) do
-    Enum.map(list, &strip_locations/1)
-  end
-
-  defp strip_locations(map) when is_map(map) do
-    Map.new(map, fn {k, v} -> {k, strip_locations(v)} end)
-  end
-
-  defp strip_locations(other), do: other
-
-  # Strip location keys from metadata keyword list
-  defp strip_location_keys(meta) when is_list(meta) do
-    meta
-    |> Keyword.drop(@location_keys)
-    |> Enum.map(fn {k, v} -> {k, strip_locations(v)} end)
-  end
-
-  # Helper to map over tuple elements
-  defp tuple_map_elements(tuple, fun) do
-    tuple
-    |> Tuple.to_list()
-    |> Enum.map(fun)
-    |> List.to_tuple()
   end
 
   # Equivalence validation
@@ -321,7 +280,7 @@ defmodule Mix.Tasks.Metastatic.ValidateEquivalence do
       end
     else
       {:error, reason} ->
-        CLI.fatal("Comparison failed: #{inspect(reason)}")
+        CLI.fatal("Comparison failed: #{CLI.format_reason(reason)}")
     end
   end
 

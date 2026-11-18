@@ -146,8 +146,8 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     :pin,
     :assert_type,
     :cons_pattern,
-    # v0.20.0 bitstring grammar and trivia
-    :bin_segment,
+    # Wildcard pattern (`_`); distinct from the atom `:_` and from `nil`.
+    :wildcard,
     :comment
   ]
 
@@ -363,18 +363,15 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
         {{:..//, elixir_meta, args}, acc}
 
       _ ->
-        case String.split(name, ".") do
-          [single_name] ->
-            # Local call
-            func_atom = String.to_atom(single_name)
-            {{func_atom, elixir_meta, args}, acc}
+        call = build_call(name, elixir_meta, args)
 
-          parts when length(parts) > 1 ->
-            # Remote call
-            {func_name, module_parts} = List.pop_at(parts, -1)
-            module_ast = build_module_alias(module_parts)
-            func_atom = String.to_atom(func_name)
-            {{{:., [], [module_ast, func_atom]}, elixir_meta, args}, acc}
+        # `ToMeta` desugars `x |> f(a)` into `f(x, a)` and tags the node with
+        # `pipe: true`. Restore the pipe so the round-trip is structural, not
+        # just semantic.
+        if Keyword.get(meta, :pipe, false) do
+          {restore_pipe(call, args, elixir_meta), acc}
+        else
+          {call, acc}
         end
     end
   end
@@ -417,35 +414,40 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
     {{:case, elixir_meta, [scrutinee, [do: arms_ex]]}, acc}
   end
 
-  # ----- Match Arms -----
-
   defp transform_node(:match_arm, meta, body, acc) do
-    pattern = Keyword.get(meta, :pattern)
     _guard = Keyword.get(meta, :guard)
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
 
     # Pattern is stored in metadata and not traversed by AST.traverse,
     # so we must transform it manually here.
+    #
+    # `nil` is a legitimate MetaAST leaf (`{:literal, [subtype: :null], nil}`)
+    # and a legitimate Elixir pattern (`case x do nil -> ... end`). It must
+    # therefore be distinguished from "no pattern at all" — a previous
+    # version used `if pattern, do: ..., else: :_`, which collapsed `nil`
+    # into the wildcard `:_` and silently changed the program's meaning.
     pattern_ex =
-      if pattern do
-        {:ok, transformed} = __MODULE__.transform(pattern, acc)
-        transformed
-      else
-        :_
+      case Keyword.fetch(meta, :pattern) do
+        {:ok, pattern} -> transform_pattern(pattern, acc)
+        :error -> :_
       end
 
-    body_ex =
-      case body do
-        [single] -> single
-        multiple -> {:__block__, [], multiple}
-      end
-
+    body_ex = body_to_elixir(body)
     # Return the clause format {:->, meta, [[pattern], body]}
     {{:->, elixir_meta, [[pattern_ex], body_ex]}, acc}
   end
 
-  # ----- Lambda (anonymous functions) -----
+  # ----- Wildcard Pattern -----
 
+  # `_` in a pattern position. Elixir's own AST spells the wildcard
+  # `{:_, meta, nil}` — *not* the bare atom `:_`, which `Macro.to_string/1`
+  # renders as `:_ -> ...` (an atom pattern that matches only the atom `:_`).
+  defp transform_node(:wildcard, meta, _value, acc) do
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    {{:_, elixir_meta, nil}, acc}
+  end
+
+  # ----- Lambda (anonymous functions) -----
   defp transform_node(:lambda, meta, body, acc) when is_list(body) do
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
     multi_clause = Keyword.get(meta, :multi_clause, false)
@@ -555,8 +557,11 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
       :module ->
         module_alias = name_to_alias(name)
 
+        # A multi-clause `def` reifies to `{:__block__, [], [def, def, ...]}`;
+        # flatten it so the module body holds the `def`s directly rather than
+        # a parenthesised group.
         body_ex =
-          case body do
+          case Enum.flat_map(body, &flatten_def_block/1) do
             [] -> nil
             [single] -> single
             multiple -> {:__block__, [], multiple}
@@ -572,51 +577,12 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   # ----- Function Definitions -----
 
   defp transform_node(:function_def, meta, body, acc) when is_list(body) do
-    name = Keyword.get(meta, :name, "unknown")
-    params = Keyword.get(meta, :params, [])
-    visibility = Keyword.get(meta, :visibility, :public)
-    guards = Keyword.get(meta, :guards)
-    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
-
-    func_atom = String.to_atom(name)
-    def_type = if visibility == :private, do: :defp, else: :def
-
-    params_ex =
-      Enum.map(params, fn
-        {:param, _meta, param_name} when is_binary(param_name) ->
-          {String.to_atom(param_name), [], nil}
-
-        param_name when is_binary(param_name) ->
-          {String.to_atom(param_name), [], nil}
-
-        other ->
-          other
-      end)
-
-    body_ex =
-      case body do
-        [] -> nil
-        [single] -> single
-        multiple -> {:__block__, [], multiple}
-      end
-
-    signature = {func_atom, elixir_meta, params_ex}
-
-    # Wrap signature with guard clause if present.
-    # Guards are stored in metadata and not traversed by AST.traverse,
-    # so we must transform them manually here.
-    signature =
-      if guards do
-        {:ok, guards_ex} = __MODULE__.transform(guards, acc)
-        {:when, elixir_meta, [signature, guards_ex]}
-      else
-        signature
-      end
-
-    {{def_type, elixir_meta, [signature, [do: body_ex]]}, acc}
+    if Keyword.has_key?(meta, :clauses) do
+      reify_multi_clause_function(meta, acc)
+    else
+      reify_single_clause_function(meta, body, acc)
+    end
   end
-
-  # ----- Assignment -----
 
   defp transform_node(:assignment, meta, [target, value], acc) do
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
@@ -718,18 +684,23 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   defp transform_node(:language_specific, meta, native_ast, acc) do
     language = Keyword.get(meta, :language)
+    hint = Keyword.get(meta, :hint)
 
-    case language do
-      :elixir ->
-        {native_ast, acc}
+    case {language, hint} do
+      # `%{map | key: value}` — preserved verbatim by `ToMeta.pre_transform/2`
+      # so the update semantics (keys must already exist) survive the trip.
+      # The original `{:|, ...}` tuple travels in metadata, never in children;
+      # it is re-wrapped in the surrounding `%{}` here.
+      {:elixir, :map_update} ->
+        elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+        {{:%{}, elixir_meta, [Keyword.get(meta, :update)]}, acc}
 
       _ ->
-        throw({:unsupported, "Cannot reify #{language} language-specific construct to Elixir"})
+        {native_ast, acc}
     end
   end
 
   # ----- Loops -----
-
   defp transform_node(:loop, meta, children, acc) do
     loop_type = Keyword.get(meta, :loop_type)
     elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
@@ -1008,10 +979,38 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
   # are already transformed to {:<-, meta, [pattern, expr]}.
   # The remaining statements form the body.
   defp reconstruct_with(statements, elixir_meta, acc) do
-    # Split: `<-` clauses are with clauses, everything after is body
+    # `ToMeta.transform_with/2` emits, in order:
+    #   * one `:inline_match` per `<-` / `=` clause (reified to `<-` / `=`)
+    #   * the body statements
+    #   * optionally a trailing `:pattern_match` tagged `original_form: :with_else`
+    #     carrying the `else` clauses
+    #
+    # The `else` node must be lifted back into the `with` keyword list rather
+    # than left in the body, otherwise the round-trip produces
+    # `with ... do <body>; case _with_result do ... end end` — a different
+    # program that also references a variable that does not exist.
+    # The trailing `else` clause arrives already reified, because children are
+    # transformed before the enclosing block. `ToMeta` emits it as a
+    # `:pattern_match` over the synthetic scrutinee `_with_result`, which
+    # reifies to `{:_with_result, [], nil}`.
+    {else_arms, statements} =
+      case List.last(statements) do
+        {:case, _meta, [{name, _, ctx}, [do: arms]]}
+        when (is_atom(name) and is_atom(ctx)) or is_nil(ctx) ->
+          if Atom.to_string(name) == "_with_result" do
+            {arms, Enum.drop(statements, -1)}
+          else
+            {nil, statements}
+          end
+
+        _ ->
+          {nil, statements}
+      end
+
     {with_clauses, body_stmts} =
       Enum.split_while(statements, fn
         {:<-, _meta, _args} -> true
+        {:inline_match, _meta, _args} -> true
         _ -> false
       end)
 
@@ -1022,8 +1021,14 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
         multiple -> {:__block__, [], multiple}
       end
 
-    with_args = with_clauses ++ [[do: body]]
-    {{:with, elixir_meta, with_args}, acc}
+    # `with` takes a single trailing keyword list: `[do: body, else: arms]`.
+    opts =
+      case else_arms do
+        nil -> [do: body]
+        arms -> [do: body, else: arms]
+      end
+
+    {{:with, elixir_meta, with_clauses ++ [opts]}, acc}
   end
 
   # ----- Helper Functions -----
@@ -1059,18 +1064,176 @@ defmodule Metastatic.Adapters.Elixir.FromMeta do
 
   # Convert match arm to Elixir clause
   defp match_arm_to_elixir({:match_arm, meta, body}) do
-    pattern = Keyword.get(meta, :pattern)
     elixir_meta = Keyword.get(meta, :original_meta, [])
 
-    body_ex =
-      case body do
-        [single] -> single
-        multiple -> {:__block__, [], multiple}
+    pattern =
+      case Keyword.fetch(meta, :pattern) do
+        {:ok, {:wildcard, wmeta, _}} -> {:_, Keyword.get(wmeta, :original_meta, []), nil}
+        {:ok, pattern} -> pattern
+        :error -> {:_, [], nil}
       end
 
-    {:->, elixir_meta, [[pattern], body_ex]}
+    {:->, elixir_meta, [[pattern], body_to_elixir(body)]}
   end
 
   defp match_arm_to_elixir({:->, meta, args}), do: {:->, meta, args}
   defp match_arm_to_elixir(other), do: other
+
+  # Reify a single `:param` entry.
+  # Flatten a multi-clause `def` block into its individual `def`s.
+  defp flatten_def_block({:__block__, _meta, defs}) when is_list(defs), do: defs
+  defp flatten_def_block(other), do: [other]
+
+  defp param_to_elixir({:param, _meta, param_name}) when is_binary(param_name) do
+    {String.to_atom(param_name), [], nil}
+  end
+
+  defp param_to_elixir(param_name) when is_binary(param_name) do
+    {String.to_atom(param_name), [], nil}
+  end
+
+  defp param_to_elixir(other), do: other
+
+  # ----- Match Arm Helpers -----
+
+  # Reify a stored pattern into Elixir AST.
+  #
+  # `:wildcard` is the MetaAST node for Elixir's `_`; it is *not* an atom
+  # pattern. `nil` reifies to `nil` (a real pattern), never to `:_`.
+  defp transform_pattern({:wildcard, meta, _}, _acc) do
+    {:_, Keyword.get(meta, :original_meta, extract_elixir_meta(meta)), nil}
+  end
+
+  defp transform_pattern(pattern, acc) do
+    {:ok, transformed} = __MODULE__.transform(pattern, acc)
+    transformed
+  end
+
+  # Reify a clause body. An empty body means the arm produced no value, which
+  # Elixir spells `nil`; emitting `{:__block__, [], []}` instead produced
+  # `_ ->` with nothing on the right-hand side (a compile warning and a
+  # different program).
+  defp body_to_elixir([]), do: nil
+  defp body_to_elixir([single]), do: single
+  defp body_to_elixir(multiple) when is_list(multiple), do: {:__block__, [], multiple}
+  defp body_to_elixir(other), do: other
+
+  defp reify_single_clause_function(meta, body, acc) do
+    name = Keyword.get(meta, :name, "unknown")
+    params = Keyword.get(meta, :params, [])
+    visibility = Keyword.get(meta, :visibility, :public)
+    guards = Keyword.get(meta, :guards)
+    elixir_meta = Keyword.get(meta, :original_meta, extract_elixir_meta(meta))
+    func_atom = String.to_atom(name)
+    def_type = if visibility == :private, do: :defp, else: :def
+
+    params_ex =
+      Enum.map(params, fn
+        # A non-variable pattern (`def f(0)`, `def f([])`, `def f({a, b})`).
+        # `ToMeta` stores the original pattern node under `:pattern` so the
+        # head can be restored verbatim instead of degrading to `_`.
+        {:param, param_meta, _name} = param when is_list(param_meta) ->
+          case Keyword.fetch(param_meta, :pattern) do
+            {:ok, pattern} ->
+              {:ok, reified} = __MODULE__.transform(pattern, acc)
+              reified
+
+            :error ->
+              param_to_elixir(param)
+          end
+
+        other ->
+          param_to_elixir(other)
+      end)
+
+    body_ex =
+      case body do
+        [] -> nil
+        [single] -> single
+        multiple -> {:__block__, [], multiple}
+      end
+
+    signature = {func_atom, elixir_meta, params_ex}
+    # Wrap signature with guard clause if present.
+    # Guards are stored in metadata and not traversed by AST.traverse,
+    # so we must transform them manually here.
+    signature =
+      if guards do
+        {:ok, guards_ex} = __MODULE__.transform(guards, acc)
+        {:when, elixir_meta, [signature, guards_ex]}
+      else
+        signature
+      end
+
+    {{def_type, elixir_meta, [signature, [do: body_ex]]}, acc}
+  end
+
+  # ----- Multi-clause function definitions -----
+  #
+  # `ToMeta.group_function_clauses/1` collapses consecutive `:function_def`
+  # nodes that share a name and arity into a single node carrying a `:clauses`
+  # list, keeping only the first clause body in `children`. Without this
+  # handler, reification emitted *only* that first clause and silently dropped
+  # every other one — `def factorial(0)` survived, `def factorial(n) when n > 0`
+  # vanished.
+  #
+  # Each clause is emitted as its own `def`/`defp`; Elixir groups them again
+  # at compile time.
+  defp reify_multi_clause_function(meta, acc) do
+    clauses = Keyword.get(meta, :clauses, [])
+    base_meta = Keyword.delete(meta, :clauses)
+
+    defs =
+      Enum.map(clauses, fn clause ->
+        clause_meta =
+          base_meta
+          |> Keyword.put(:params, Map.get(clause, :params, []))
+          |> then(fn m ->
+            case Map.get(clause, :guard) do
+              nil -> Keyword.delete(m, :guards)
+              guard -> Keyword.put(m, :guards, guard)
+            end
+          end)
+
+        {:ok, def_ast} =
+          __MODULE__.transform({:function_def, clause_meta, Map.get(clause, :body, [])}, acc)
+
+        def_ast
+      end)
+
+    case defs do
+      [single] -> {single, acc}
+      multiple -> {{:__block__, [], multiple}, acc}
+    end
+  end
+
+  # ----- Assignment -----
+  defp build_call(name, elixir_meta, args) do
+    case String.split(name, ".") do
+      [single_name] ->
+        # Local call
+        func_atom = String.to_atom(single_name)
+        {func_atom, elixir_meta, args}
+
+      parts when length(parts) > 1 ->
+        # Remote call
+        {func_name, module_parts} = List.pop_at(parts, -1)
+        module_ast = build_module_alias(module_parts)
+        func_atom = String.to_atom(func_name)
+        {{:., [], [module_ast, func_atom]}, elixir_meta, args}
+    end
+  end
+
+  # `f(x, a)` tagged `pipe: true` came from `x |> f(a)`; rebuild the pipe.
+  #
+  # `ToMeta` prepends the piped value as the first argument, so the inverse
+  # pops it back off and re-wraps the call in `|>`.
+  defp restore_pipe(call, [piped | rest], elixir_meta) do
+    rhs =
+      case call do
+        {func, call_meta, _args} -> {func, call_meta, rest}
+      end
+
+    {:|>, elixir_meta, [piped, rhs]}
+  end
 end

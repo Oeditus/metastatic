@@ -53,7 +53,17 @@ defmodule Metastatic.Cache do
         Metastatic.Cache.DLLB
 
       mod when is_atom(mod) ->
-        mod
+        # A bare atom is accepted as a module name, but a typo such as
+        # `config :metastatic, :cache, :dll` would otherwise surface as an
+        # `UndefinedFunctionError` at application boot. Fail here instead,
+        # with the same message as any other bad configuration.
+        if Code.ensure_loaded?(mod) and function_exported?(mod, :get, 2) do
+          mod
+        else
+          raise ArgumentError,
+                "Invalid cache configuration: #{inspect(mod)}. Expected :ets, :dllb, " <>
+                  "or a module implementing Metastatic.Cache"
+        end
 
       other ->
         raise ArgumentError,

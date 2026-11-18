@@ -46,6 +46,9 @@ defmodule Mix.Tasks.Metastatic.SupplementalCheck do
     # Start the application to ensure registry is running
     Mix.Task.run("app.start")
 
+    if Metastatic.CLI.help_requested?(args),
+      do: Metastatic.CLI.help(Mix.Tasks.Metastatic.SupplementalCheck)
+
     {opts, files, _invalid} =
       OptionParser.parse(args,
         strict: [format: :string, language: :string, target: :string],
@@ -87,7 +90,7 @@ defmodule Mix.Tasks.Metastatic.SupplementalCheck do
         end
 
       {:error, reason} ->
-        Mix.shell().error("Parse error: #{inspect(reason)}")
+        Mix.shell().error("Parse error: #{CLI.format_reason(reason)}")
         exit({:shutdown, 2})
     end
   end

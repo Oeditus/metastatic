@@ -96,15 +96,19 @@ defmodule Metastatic.Adapters.CureTest do
     end
 
     test "subprocesses fallback returns unavailable error when no binary or CLI is present" do
-      assert CureSubProcess.parse("let x = 1", cure_cli: nil, parser_bin: "nonexistent") ==
-               {:error, "Cure subprocess parser unavailable"}
+      assert {:error, reason} =
+               CureSubProcess.parse("let x = 1", cure_cli: nil, parser_bin: "nonexistent")
+
+      assert reason =~ "Cure subprocess parser unavailable"
     end
   end
 
   describe "Cure availability modes (cure-as-escript-only vs no-cure-whatsoever)" do
     test "no-cure-whatsoever mode returns unavailable error" do
-      assert CureSubProcess.parse("let x = 1", cure_cli: nil, parser_bin: "nonexistent") ==
-               {:error, "Cure subprocess parser unavailable"}
+      assert {:error, reason} =
+               CureSubProcess.parse("let x = 1", cure_cli: nil, parser_bin: "nonexistent")
+
+      assert reason =~ "Cure subprocess parser unavailable"
 
       if not ToMeta.available?() do
         assert ToMeta.from_source("let x = 1", cure_cli: nil, parser_bin: "nonexistent") ==

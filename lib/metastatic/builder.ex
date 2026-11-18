@@ -40,13 +40,13 @@ defmodule Metastatic.Builder do
       # (Once those adapters are implemented)
   """
 
-  alias Metastatic.{Adapter, Document}
+  alias Metastatic.{Adapter, Document, Languages}
 
   @doc """
   Build a MetaAST document from source code.
 
   Performs the full Source → M1 → M2 pipeline:
-  1. Detects or uses specified language
+  1. Looks up the adapter for `language`
   2. Parses source to M1 (native AST)
   3. Abstracts M1 to M2 (MetaAST)
   4. Returns Document with M2 AST and metadata
@@ -54,9 +54,9 @@ defmodule Metastatic.Builder do
   ## Parameters
 
   - `source` - Source code string
-  - `language` - Language atom (`:python`, `:javascript`, `:elixir`, etc.)
-    If not provided, attempts to detect from source (not yet implemented)
-
+  - `language` - Language atom (`:python`, `:javascript`, `:elixir`, etc.).
+    A language is always required; use `from_file/2` for extension-based
+    auto-detection.
   ## Returns
 
   - `{:ok, document}` - Successfully parsed and abstracted
@@ -227,25 +227,23 @@ defmodule Metastatic.Builder do
   @doc """
   Get information about available language adapters.
 
-  Returns a list of supported languages with their adapters.
+  Returns a list of supported languages with their adapters, derived from the
+  compile-time registry in `Metastatic.Languages` (the single source of truth).
 
   ## Examples
 
-      iex> Metastatic.Builder.supported_languages()
-      [
-        %{language: :python, adapter: Metastatic.Adapters.Python, extensions: [".py"]},
-        %{language: :javascript, adapter: Metastatic.Adapters.JavaScript, extensions: [".js", ".jsx"]}
-      ]
+      iex> Metastatic.Builder.supported_languages() |> Enum.map(& &1.language) |> Enum.take(3)
+      [:agda, :cure, :elixir]
   """
   @spec supported_languages() :: [map()]
   def supported_languages do
-    # Get all registered adapters from the registry
-    Adapter.Registry.list()
-    |> Enum.map(fn {lang, adapter} ->
+    Enum.map(Languages.all(), fn %Metastatic.Language{} = lang ->
       %{
-        language: lang,
-        adapter: adapter,
-        extensions: adapter.file_extensions(),
+        language: lang.language,
+        adapter: lang.adapter,
+        extensions: lang.extensions,
+        experimental: lang.experimental?,
+        documentation: lang.documentation?,
         loaded: true
       }
     end)

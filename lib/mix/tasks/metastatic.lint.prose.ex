@@ -20,6 +20,9 @@ defmodule Mix.Tasks.Metastatic.Lint.Prose do
 
   @impl Mix.Task
   def run(args) do
+    if Metastatic.CLI.help_requested?(args),
+      do: Metastatic.CLI.help(Mix.Tasks.Metastatic.Lint.Prose)
+
     {opts, files, _} =
       OptionParser.parse(args,
         strict: [
@@ -31,6 +34,12 @@ defmodule Mix.Tasks.Metastatic.Lint.Prose do
     target_files =
       case files do
         [] ->
+          # No argument is almost always a mistake, so say what we are doing
+          # rather than silently linting one file.
+          Mix.shell().info(
+            Metastatic.CLI.format_info("No path given; linting README.md by default")
+          )
+
           ["README.md"]
 
         paths ->
@@ -51,6 +60,7 @@ defmodule Mix.Tasks.Metastatic.Lint.Prose do
 
     if target_files == [] do
       Mix.shell().info("No files to lint.")
+      exit({:shutdown, 2})
     else
       total_issues =
         Enum.reduce(target_files, 0, fn file, acc ->
@@ -61,8 +71,13 @@ defmodule Mix.Tasks.Metastatic.Lint.Prose do
         Mix.shell().error(
           "\nFound #{total_issues} issue(s) across #{length(target_files)} file(s)."
         )
+
+        # Non-zero so the task can gate CI, matching
+        # `mix metastatic.supplemental_check`'s documented exit codes.
+        exit({:shutdown, 1})
       else
         Mix.shell().info("\nAll #{length(target_files)} file(s) passed prose linting cleanly!")
+        exit({:shutdown, 0})
       end
     end
   end

@@ -95,7 +95,7 @@ defmodule Metastatic.BuilderTest do
     end
 
     test "returns error for unknown language" do
-      assert {:error, :no_adapter_found} = Builder.from_source("code", :unknown_language)
+      assert {:error, {:unsupported_language, _}} = Builder.from_source("code", :unknown_language)
     end
 
     test "preserves metadata from adapter" do
@@ -184,7 +184,7 @@ defmodule Metastatic.BuilderTest do
         original_source: "42"
       }
 
-      assert {:error, :no_adapter_found} = Builder.to_source(doc)
+      assert {:error, {:unsupported_language, _}} = Builder.to_source(doc)
     end
 
     test "supports explicit target language" do
@@ -282,7 +282,7 @@ defmodule Metastatic.BuilderTest do
     end
 
     test "returns error for unknown language" do
-      assert {:error, :no_adapter_found} = Builder.round_trip("code", :unknown)
+      assert {:error, {:unsupported_language, _}} = Builder.round_trip("code", :unknown)
     end
   end
 
@@ -301,16 +301,32 @@ defmodule Metastatic.BuilderTest do
   end
 
   describe "supported_languages/0" do
-    test "lists registered adapters" do
+    test "lists every language from the compile-time registry" do
       languages = Builder.supported_languages()
 
       assert is_list(languages)
-      assert Enum.any?(languages, fn lang -> lang.language == :python end)
 
-      python_info = Enum.find(languages, fn lang -> lang.language == :python end)
-      assert python_info.adapter == MockPythonAdapter
-      assert python_info.extensions == [".py"]
+      # Derived from `Metastatic.Languages.all/0`, the single source of truth,
+      # not from the runtime adapter registry.
+      assert Enum.map(languages, & &1.language) == Metastatic.Languages.supported_languages()
+    end
+
+    test "reports the real adapter and extensions for a language" do
+      python_info =
+        Builder.supported_languages() |> Enum.find(fn lang -> lang.language == :python end)
+
+      assert python_info.adapter == Metastatic.Adapters.Python
+      assert python_info.extensions == [".py", ".pyw"]
       assert python_info.loaded == true
+      assert python_info.experimental == false
+    end
+
+    test "flags experimental and documentation languages" do
+      by_language = Map.new(Builder.supported_languages(), &{&1.language, &1})
+
+      assert by_language[:haskell].experimental == true
+      assert by_language[:markdown].documentation == true
+      assert by_language[:elixir].experimental == false
     end
 
     test "only includes actually loaded adapters" do
@@ -370,7 +386,7 @@ defmodule Metastatic.BuilderTest do
 
     test "handles missing adapter gracefully" do
       result = Builder.from_source("code", :nonexistent)
-      assert {:error, :no_adapter_found} = result
+      assert {:error, {:unsupported_language, _}} = result
     end
 
     test "handles file I/O errors gracefully" do

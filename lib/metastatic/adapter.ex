@@ -321,19 +321,21 @@ defmodule Metastatic.Adapter do
   @doc """
   Full round-trip: Source → M1 → M2 → M1 → Source.
 
-  Useful for testing adapter fidelity.
+  Useful for testing adapter fidelity. Any metadata the adapter's `parse/1`
+  reports (for adapters that return `{:ok, ast, metadata}`) is merged into the
+  metadata handed to `from_meta/2`, so a partial parse is not silently
+  discarded on the way back.
 
   ## Examples
 
-      iex> source = "x + 5"
-      iex> Metastatic.Adapter.round_trip(MyAdapter, source)
-      {:ok, "x + 5"}  # May have normalized formatting
+      iex> Metastatic.Adapter.round_trip(Metastatic.Adapters.Elixir, "x + 5")
+      {:ok, "x + 5"}
   """
   @spec round_trip(module(), source) :: {:ok, source} | {:error, term()}
   def round_trip(adapter, source) do
-    with {:ok, native_ast, _parse_metadata} <- parse_with_metadata(adapter, source),
+    with {:ok, native_ast, parse_metadata} <- parse_with_metadata(adapter, source),
          {:ok, meta_ast, metadata} <- adapter.to_meta(native_ast),
-         {:ok, native_ast2} <- adapter.from_meta(meta_ast, metadata) do
+         {:ok, native_ast2} <- adapter.from_meta(meta_ast, Map.merge(parse_metadata, metadata)) do
       adapter.unparse(native_ast2)
     end
   end
@@ -440,22 +442,30 @@ defmodule Metastatic.Adapter do
 
   Returns the appropriate adapter module for a given language atom.
 
+  The error shape matches `Metastatic.adapter_for_language/1` and
+  `Metastatic.Languages.get_adapter/1`, so callers only need to handle one.
+
   ## Examples
 
       iex> Metastatic.Adapter.for_language(:python)
       {:ok, Metastatic.Adapters.Python}
 
-      iex> Metastatic.Adapter.for_language(:unknown)
-      {:error, :no_adapter_found}
+      iex> {:error, {:unsupported_language, message}} = Metastatic.Adapter.for_language(:unknown)
+      iex> message =~ "unknown"
+      true
   """
-  @spec for_language(atom()) :: {:ok, module()} | {:error, :no_adapter_found}
+  @spec for_language(atom()) :: {:ok, module()} | {:error, {:unsupported_language, String.t()}}
   def for_language(language) do
     case Metastatic.Languages.get_adapter(language) do
       {:ok, adapter} ->
-        if valid_adapter?(adapter), do: {:ok, adapter}, else: {:error, :no_adapter_found}
+        if valid_adapter?(adapter) do
+          {:ok, adapter}
+        else
+          {:error, {:unsupported_language, "Adapter for #{language} is not a valid adapter"}}
+        end
 
-      {:error, _} ->
-        {:error, :no_adapter_found}
+      {:error, message} ->
+        {:error, {:unsupported_language, message}}
     end
   end
 

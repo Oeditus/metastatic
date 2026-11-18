@@ -25,9 +25,11 @@ defmodule Metastatic.Adapters.Java.Subprocess do
 
   Every failure mode -- missing bridge, missing JDK, non-zero exit -- is
   reported as `{:error, reason}`; nothing raises and nothing hangs.
+
+  Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
-  alias Metastatic.Priv
+  alias Metastatic.{Priv, Subprocess}
 
   @parser_path "parsers/java/parser.java"
 
@@ -46,7 +48,7 @@ defmodule Metastatic.Adapters.Java.Subprocess do
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
     with :ok <- bridge_available?(),
-         {:ok, output} <- run_bridge("parse", source),
+         {:ok, output} <- run_bridge("parse", source, ".java"),
          {:ok, decoded} <- decode(output) do
       case decoded do
         %{"ok" => true, "ast" => ast} -> {:ok, ast}
@@ -70,7 +72,7 @@ defmodule Metastatic.Adapters.Java.Subprocess do
   def unparse(ast) when is_map(ast) do
     with :ok <- bridge_available?(),
          {:ok, json} <- encode(ast),
-         {:ok, output} <- run_bridge("unparse", json),
+         {:ok, output} <- run_bridge("unparse", json, ".json"),
          {:ok, decoded} <- decode(output) do
       case decoded do
         %{"ok" => true, "source" => source} -> {:ok, source}
@@ -148,39 +150,17 @@ defmodule Metastatic.Adapters.Java.Subprocess do
     end
   end
 
-  defp run_bridge(mode, input) do
-    java = java_executable()
-    script = bridge_path()
-    ext = if mode == "parse", do: ".java", else: ".json"
-
-    temp_path =
-      Path.join(
-        System.tmp_dir!(),
-        "metastatic_java_#{System.unique_integer([:positive, :monotonic])}#{ext}"
-      )
-
-    File.write!(temp_path, input)
-
-    try do
-      args = [script, mode, temp_path]
-
-      case System.cmd(java, args,
-             env: Priv.subprocess_env(),
-             stderr_to_stdout: true,
-             cd: System.tmp_dir!()
-           ) do
-        {output, 0} ->
-          {:ok, output}
-
-        {error_output, exit_code} ->
-          {:error,
-           "Java bridge exited with code #{exit_code}: #{String.slice(error_output, 0, 500)}"}
-      end
-    after
-      File.rm(temp_path)
-    end
-  rescue
-    e -> {:error, "Exception running Java bridge: #{Exception.message(e)}"}
+  defp run_bridge(mode, input, ext) do
+    # The single-file source launcher resolves sibling files relative to the
+    # *current* directory, so run from the temp dir.
+    Subprocess.run(
+      java_executable(),
+      [bridge_path(), mode],
+      input,
+      ext: ext,
+      prefix: "metastatic_java",
+      cd: System.tmp_dir!()
+    )
   end
 
   defp format_error(%{"type" => type, "msg" => msg, "line" => line}) when is_integer(line) do

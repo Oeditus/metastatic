@@ -11,7 +11,7 @@ defmodule Metastatic.Adapter.RegistryTest do
     def parse(_source), do: {:ok, %{}}
 
     @impl true
-    def to_meta(_native_ast), do: {:ok, {:literal, :integer, 42}, %{}}
+    def to_meta(_native_ast), do: {:ok, {:literal, [subtype: :integer], 42}, %{}}
 
     @impl true
     def from_meta(_meta_ast, _metadata), do: {:ok, %{}}
@@ -30,8 +30,8 @@ defmodule Metastatic.Adapter.RegistryTest do
   end
 
   setup do
-    # Registry is already started by the application
-    # Clear any existing registrations before each test
+    # Registry is already started by the application.
+    # Clear any existing registrations before each test.
     Registry.list()
     |> Map.keys()
     |> Enum.each(&Registry.unregister/1)
@@ -49,18 +49,25 @@ defmodule Metastatic.Adapter.RegistryTest do
       assert {:error, :invalid_adapter} = Registry.register(:invalid, InvalidAdapter)
     end
 
-    test "overwrites existing registration" do
+    test "re-registering the same adapter is idempotent" do
       assert :ok = Registry.register(:mock, MockAdapter)
-      assert {:ok, MockAdapter} = Registry.get(:mock)
-
-      # Can re-register with same adapter
       assert :ok = Registry.register(:mock, MockAdapter)
       assert {:ok, MockAdapter} = Registry.get(:mock)
     end
 
-    test "registers file extensions" do
+    test "refuses to silently replace a registered adapter" do
       assert :ok = Registry.register(:mock, MockAdapter)
-      assert {:ok, :mock} = Registry.detect_language("test.mock")
+
+      assert {:error, {:already_registered, :mock, MockAdapter}} =
+               Registry.register(:mock, Metastatic.Adapters.Elixir)
+    end
+
+    test "does not own file extensions (that is Languages' job)" do
+      # The registry stores adapters only; extension -> language detection is
+      # derived at compile time in `Metastatic.Languages`, so there is exactly
+      # one source of truth for it.
+      assert :ok = Registry.register(:mock, MockAdapter)
+      assert {:error, :unknown_extension} = Registry.detect_language("test.mock")
     end
   end
 
@@ -84,12 +91,12 @@ defmodule Metastatic.Adapter.RegistryTest do
       assert {:error, :not_found} = Registry.get(:mock)
     end
 
-    test "removes associated file extensions" do
+    test "unregistering does not affect Languages' extension map" do
       Registry.register(:mock, MockAdapter)
-      assert {:ok, :mock} = Registry.detect_language("test.mock")
-
       Registry.unregister(:mock)
-      assert {:error, :unknown_extension} = Registry.detect_language("test.mock")
+
+      # `.ex` is owned by `Metastatic.Languages`, not by this registry.
+      assert {:ok, :elixir} = Registry.detect_language("app.ex")
     end
 
     test "is idempotent" do
@@ -123,9 +130,9 @@ defmodule Metastatic.Adapter.RegistryTest do
   end
 
   describe "detect_language/1" do
-    test "detects language from extension" do
-      Registry.register(:mock, MockAdapter)
-      assert {:ok, :mock} = Registry.detect_language("script.mock")
+    test "delegates to Languages for known extensions" do
+      assert {:ok, :elixir} = Registry.detect_language("script.ex")
+      assert {:ok, :python} = Registry.detect_language("script.py")
     end
 
     test "returns error for unknown extension" do
@@ -133,29 +140,12 @@ defmodule Metastatic.Adapter.RegistryTest do
     end
 
     test "handles multiple extensions per language" do
-      defmodule MultiExtAdapter do
-        @behaviour Metastatic.Adapter
-
-        @impl true
-        def parse(_), do: {:ok, %{}}
-        @impl true
-        def to_meta(_), do: {:ok, {:literal, :integer, 1}, %{}}
-        @impl true
-        def from_meta(_, _), do: {:ok, %{}}
-        @impl true
-        def unparse(_), do: {:ok, "1"}
-        @impl true
-        def file_extensions, do: [".js", ".jsx"]
-      end
-
-      Registry.register(:javascript, MultiExtAdapter)
       assert {:ok, :javascript} = Registry.detect_language("app.js")
       assert {:ok, :javascript} = Registry.detect_language("component.jsx")
     end
 
     test "uses full filename with path" do
-      Registry.register(:mock, MockAdapter)
-      assert {:ok, :mock} = Registry.detect_language("/path/to/file.mock")
+      assert {:ok, :elixir} = Registry.detect_language("/path/to/file.ex")
     end
   end
 
@@ -212,35 +202,6 @@ defmodule Metastatic.Adapter.RegistryTest do
 
       results = Task.await_many(tasks)
       assert length(results) == 20
-    end
-  end
-
-  describe "integration with real adapters" do
-    test "extension conflict handling" do
-      # Register first adapter with .js extension
-      defmodule JSAdapter do
-        @behaviour Metastatic.Adapter
-
-        @impl true
-        def parse(_), do: {:ok, %{}}
-        @impl true
-        def to_meta(_), do: {:ok, {:literal, :integer, 1}, %{}}
-        @impl true
-        def from_meta(_, _), do: {:ok, %{}}
-        @impl true
-        def unparse(_), do: {:ok, "1"}
-        @impl true
-        def file_extensions, do: [".js"]
-      end
-
-      Registry.register(:javascript, JSAdapter)
-      assert {:ok, :javascript} = Registry.detect_language("app.js")
-
-      # Register second adapter with same .js extension
-      # (This overwrites the extension mapping)
-      Registry.register(:typescript, JSAdapter)
-      # TypeScript now claims .js extension
-      assert {:ok, :typescript} = Registry.detect_language("app.js")
     end
   end
 end

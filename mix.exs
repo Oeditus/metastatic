@@ -81,10 +81,11 @@ defmodule Metastatic.MixProject do
 
   defp aliases do
     [
-      quality: ["format", "credo --strict"],
+      quality: ["format", "credo --strict", "dialyzer"],
       "quality.ci": [
         "format --check-formatted",
-        "credo --strict"
+        "credo --strict",
+        "dialyzer"
       ]
     ]
   end

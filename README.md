@@ -51,8 +51,8 @@ mix metastatic.translate --from elixir --to python lib/module.ex --output py_out
 # AST inspection (tree format)
 mix metastatic.inspect hello.py
 
-# AST inspection (JSON format)
-mix metastatic.inspect --format json hello.py
+# AST inspection (JSON format) — the output is pure JSON, so it pipes
+mix metastatic.inspect --format json hello.py | jq '.type'
 
 # Filter by layer
 mix metastatic.inspect --layer core hello.py
@@ -65,7 +65,22 @@ mix metastatic.validate_equivalence hello.py hello.ex
 
 # Show detailed differences
 mix metastatic.validate_equivalence --verbose file1.py file2.ex
+
+# Every task documents its own options
+mix metastatic.translate --help
 ```
+
+#### Exit codes
+
+Every `mix metastatic.*` task distinguishes a **usage error** from a
+**failed operation**, so a script can react differently:
+
+| Code | Meaning |
+|------|---------|
+| `0`  | success |
+| `1`  | the task ran, but the operation failed (not equivalent, issues found, …) |
+| `2`  | usage error: bad flag, missing argument, unknown language, nothing to lint |
+
 
 ### Using Language Adapters
 

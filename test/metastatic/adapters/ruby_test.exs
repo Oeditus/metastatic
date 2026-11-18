@@ -2378,17 +2378,15 @@ defmodule Metastatic.Adapters.RubyTest do
     end
   end
 
-  describe "Rails Integration - book_shop_rails app" do
-    @describetag :skip
-    @book_shop_path "/home/am/Proyectos/TopTal/book_shop_rails"
+  describe "Rails integration - fixture app" do
+    # Uses the checked-in `test/fixtures/ruby` corpus instead of a path on a
+    # single developer's disk, so the test is runnable everywhere.
+    @fixture_root Path.expand("../../fixtures/ruby", __DIR__)
 
-    @tag :book_shop
-    test "all app Ruby files parse and transform successfully" do
-      files =
-        Path.wildcard(Path.join(@book_shop_path, "app/**/*.rb")) ++
-          Path.wildcard(Path.join(@book_shop_path, "config/**/*.rb"))
+    test "all fixture Ruby files parse and transform successfully" do
+      files = Path.wildcard(Path.join(@fixture_root, "**/*.rb"))
 
-      assert match?([_ | _], files), "Expected to find Ruby files in book_shop_rails"
+      assert match?([_ | _], files), "Expected to find Ruby files in #{@fixture_root}"
 
       results =
         Enum.map(files, fn f ->
@@ -2415,7 +2413,7 @@ defmodule Metastatic.Adapters.RubyTest do
              "Expected 0 to_meta failures, got #{length(fails)}: #{inspect(fails)}"
 
       assert ok_count + skip_count == length(results)
-      assert ok_count >= 50, "Expected at least 50 files to transform, got #{ok_count}"
+      assert ok_count >= 3, "Expected at least 3 files to transform, got #{ok_count}"
     end
   end
 

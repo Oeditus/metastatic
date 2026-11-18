@@ -515,9 +515,11 @@ defmodule Metastatic.AST do
     :range,
     :string_interpolation,
     :bin_segment,
-    :comment
+    :comment,
+    # Wildcard pattern (`_`). Distinct from the atom `:_` and from `nil`:
+    # `case x do _ -> ... end` must not round-trip to `:_ -> ...`.
+    :wildcard
   ]
-
   @extended_types [
     :loop,
     :lambda,
@@ -1007,6 +1009,13 @@ defmodule Metastatic.AST do
       {type, meta, children} when is_atom(type) and is_list(meta) ->
         type in @all_types and valid_node?(type, meta, children)
 
+      # `nil` is the "absent child" of an optional slot (an `if` without an
+      # `else`, a `case` arm with an empty body, a `nil` literal pattern).
+      # Adapters emit it routinely, so treating it as non-conforming made
+      # `Validator.validate/2` reject documents the library itself produces.
+      nil ->
+        true
+
       # Special case: wildcard pattern
       :_ ->
         true
@@ -1168,6 +1177,9 @@ defmodule Metastatic.AST do
 
   defp valid_node?(:comment, _meta, _), do: false
 
+  # Wildcard pattern `_`. The leaf value is unused; `nil` is the canonical
+  # payload, matching every other leaf node in this module.
+  defp valid_node?(:wildcard, _meta, _value), do: true
   # M2.2 Extended types
   defp valid_node?(:loop, meta, children) do
     loop_type = Keyword.get(meta, :loop_type)

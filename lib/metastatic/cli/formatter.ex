@@ -155,10 +155,15 @@ defmodule Metastatic.CLI.Formatter do
   end
 
   def to_map({:conditional, meta, children}) when is_list(meta) and is_list(children) do
+    # Any arity is tolerated: a `case` with a single arm, or a hand-built
+    # conditional, must not crash the renderer. `to_map/1`'s whole contract is
+    # to be total.
     {condition, then_branch, else_branch} =
       case children do
         [c, t, e] -> {c, t, e}
         [c, t] -> {c, t, nil}
+        [c] -> {c, nil, nil}
+        _ -> {nil, nil, nil}
       end
 
     mapped =

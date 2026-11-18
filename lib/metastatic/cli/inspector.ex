@@ -118,16 +118,21 @@ defmodule Metastatic.CLI.Inspector do
 
   defp filter_composite_children(ast, _layer), do: ast
 
-  @node_layers %{
-    core:
-      ~w|literal variable list map binary_op unary_op function_call conditional block early_return|a,
-    extended: ~w|loop lambda collection_op exception_handling|a,
-    native: ~w|language_specific|a
-  }
+  # Layer classification is delegated to `Metastatic.AST.layer/1`, the single
+  # source of truth. A local copy of the type lists used to live here and had
+  # already drifted: it omitted the whole `:structural` layer, so
+  # `container`/`function_def`/`attribute_access` nodes were reported as
+  # `:core` and `--layer structural` could not be offered.
+  #
+  # `:structural` is folded into `:extended` because the CLI's public layer
+  # vocabulary is `core | extended | native`.
   @spec node_layer(AST.meta_ast()) :: layer()
-  # Handle location-aware nodes
-  for {layer, kinds} <- @node_layers do
-    defp node_layer(ast) when is_tuple(ast) and elem(ast, 0) in unquote(kinds), do: unquote(layer)
+  defp node_layer({type, _meta, _children}) when is_atom(type) do
+    case AST.layer(type) do
+      :structural -> :extended
+      :unknown -> :core
+      layer -> layer
+    end
   end
 
   defp node_layer(_), do: :core
@@ -186,7 +191,8 @@ defmodule Metastatic.CLI.Inspector do
       1
     else
       1 +
-        (Enum.flat_map(pairs, fn {k, v} -> [calculate_depth(k), calculate_depth(v)] end)
+        (Enum.flat_map(pairs, &pair_children/1)
+         |> Enum.map(&calculate_depth/1)
          |> Enum.max())
     end
   end
@@ -231,8 +237,20 @@ defmodule Metastatic.CLI.Inspector do
   end
 
   defp calculate_depth({:language_specific, _meta, _content}), do: 1
+
+  defp calculate_depth({:pair, _meta, [key, value]}) do
+    1 + max(calculate_depth(key), calculate_depth(value))
+  end
+
   defp calculate_depth(_), do: 1
 
+  # Map entries are canonical `{:pair, meta, [key, value]}` nodes. A bare
+  # `{k, v}` tuple is also accepted because some adapters emit it directly.
+  # The previous implementation matched only `{k, v}`, so every canonical
+  # `:pair` node was silently skipped and maps were under-counted.
+  defp pair_children({:pair, _meta, [key, value]}), do: [key, value]
+  defp pair_children({key, value}), do: [key, value]
+  defp pair_children(other), do: [other]
   @spec count_nodes(AST.meta_ast()) :: non_neg_integer()
   # 3-tuple format: {type, meta, children_or_value}
   defp count_nodes({:literal, _meta, _value}), do: 1
@@ -263,7 +281,7 @@ defmodule Metastatic.CLI.Inspector do
   end
 
   defp count_nodes({:map, _meta, pairs}) when is_list(pairs) do
-    1 + Enum.sum(Enum.flat_map(pairs, fn {k, v} -> [count_nodes(k), count_nodes(v)] end))
+    1 + Enum.sum(Enum.flat_map(pairs, &pair_children/1) |> Enum.map(&count_nodes/1))
   end
 
   defp count_nodes({:loop, _meta, children}) when is_list(children) do
@@ -279,55 +297,33 @@ defmodule Metastatic.CLI.Inspector do
   end
 
   defp count_nodes({:language_specific, _meta, _content}), do: 1
+
+  defp count_nodes({:pair, _meta, [key, value]}) do
+    1 + count_nodes(key) + count_nodes(value)
+  end
+
   defp count_nodes(_), do: 1
 
+  # Layer detection walks the tree once and folds each node through
+  # `AST.layer/1`, so it can never disagree with the validator or the
+  # conformance suite. `:structural` folds into `:extended` (the CLI vocabulary
+  # is `core | extended | native`).
   @spec detect_layer(AST.meta_ast()) :: layer()
   defp detect_layer(ast) do
-    if contains_native?(ast) do
-      :native
-    else
-      if contains_extended?(ast) do
-        :extended
-      else
-        :core
-      end
-    end
+    {_ast, layer} =
+      AST.traverse(
+        ast,
+        :core,
+        fn node, acc -> {node, max_layer(acc, node_layer(node))} end,
+        fn node, acc -> {node, acc} end
+      )
+
+    layer
   end
 
-  @spec contains_native?(AST.meta_ast()) :: boolean()
-  defp contains_native?({:language_specific, _meta, _content}), do: true
-
-  defp contains_native?({:binary_op, _meta, [left, right]}) do
-    contains_native?(left) || contains_native?(right)
-  end
-
-  defp contains_native?({:block, _meta, statements}) when is_list(statements) do
-    Enum.any?(statements, &contains_native?/1)
-  end
-
-  defp contains_native?({_type, _meta, children}) when is_list(children) do
-    Enum.any?(children, &contains_native?/1)
-  end
-
-  defp contains_native?(_), do: false
-
-  @spec contains_extended?(AST.meta_ast()) :: boolean()
-  defp contains_extended?({:loop, _meta, _children}), do: true
-  defp contains_extended?({:lambda, _meta, _children}), do: true
-  defp contains_extended?({:collection_op, _meta, _children}), do: true
-  defp contains_extended?({:exception_handling, _meta, _children}), do: true
-
-  defp contains_extended?({:binary_op, _meta, [left, right]}) do
-    contains_extended?(left) || contains_extended?(right)
-  end
-
-  defp contains_extended?({:block, _meta, statements}) when is_list(statements) do
-    Enum.any?(statements, &contains_extended?/1)
-  end
-
-  defp contains_extended?({_type, _meta, children}) when is_list(children) do
-    Enum.any?(children, &contains_extended?/1)
-  end
-
-  defp contains_extended?(_), do: false
+  defp max_layer(:native, _), do: :native
+  defp max_layer(_, :native), do: :native
+  defp max_layer(:extended, _), do: :extended
+  defp max_layer(_, :extended), do: :extended
+  defp max_layer(acc, _), do: acc
 end

@@ -348,7 +348,12 @@ defmodule Mix.Tasks.Metastatic.InspectTest do
         end)
 
       assert output =~ ~s("type": "binary_op")
-      assert output =~ "Filtered AST (core layer):"
+
+      # `--format json` must be pipeable: no `→ Language: …` banner, no
+      # "Filtered AST" heading. Assert the whole output parses as JSON.
+      refute output =~ "Filtered AST"
+      refute output =~ "Language:"
+      assert {:ok, _decoded} = Jason.decode(String.trim(output))
     end
 
     test "plain format with explicit language" do

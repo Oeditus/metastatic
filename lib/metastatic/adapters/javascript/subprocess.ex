@@ -2,11 +2,15 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   @moduledoc """
   Subprocess management for JavaScript/TypeScript parser and unparser.
 
-  Handles communication with Node.js scripts via temporary files/stdin with JSON serialization.
-  Automatically ensures npm packages in `priv/parsers/javascript` are installed on demand when needed.
+  Handles communication with Node.js scripts via temporary files with JSON
+  serialization, and installs `priv/parsers/javascript/node_modules` on demand
+  when the Babel packages are missing.
+
+  Temp-file handling, exit-code reporting and error formatting are delegated
+  to `Metastatic.Subprocess`.
   """
 
-  alias Metastatic.Priv
+  alias Metastatic.{Priv, Subprocess}
 
   @parser_path "parsers/javascript/parser.js"
   @unparser_path "parsers/javascript/unparser.js"
@@ -24,27 +28,14 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    script_full_path = Priv.parser_path(@parser_path)
-
-    if File.exists?(script_full_path) and Priv.find_executable("node") != nil do
-      case run_node_script(@parser_path, source) do
-        {:ok, result} ->
-          case Jason.decode(result) do
-            {:ok, %{"ok" => true, "ast" => ast}} ->
-              {:ok, ast}
-
-            {:ok, %{"ok" => false, "error" => error}} ->
-              {:error, format_error(error)}
-
-            {:error, reason} ->
-              {:error, "JSON decode failed: #{inspect(reason)}"}
-          end
-
-        {:error, reason} ->
-          {:error, "Node process failed: #{inspect(reason)}"}
+    with :ok <- available?(),
+         {:ok, result} <- run_node_script(@parser_path, source, ".js"),
+         {:ok, decoded} <- decode(result) do
+      case decoded do
+        %{"ok" => true, "ast" => ast} -> {:ok, ast}
+        %{"ok" => false, "error" => error} -> {:error, Subprocess.format_error(error)}
+        _ -> {:error, "Unexpected JavaScript parser output"}
       end
-    else
-      {:error, "JavaScript parser unavailable"}
     end
   end
 
@@ -59,77 +50,56 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   """
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
-    case Jason.encode(ast) do
-      {:ok, json} ->
-        case run_node_script(@unparser_path, json) do
-          {:ok, result} ->
-            case Jason.decode(result) do
-              {:ok, %{"ok" => true, "source" => source}} ->
-                {:ok, source}
-
-              {:ok, %{"ok" => false, "error" => error}} ->
-                {:error, format_error(error)}
-
-              {:error, reason} ->
-                {:error, "JSON decode failed: #{inspect(reason)}"}
-            end
-
-          {:error, reason} ->
-            {:error, "Node process failed: #{inspect(reason)}"}
-        end
-
-      {:error, reason} ->
-        {:error, "JSON encode failed: #{inspect(reason)}"}
+    with {:ok, json} <- encode(ast),
+         :ok <- available?(),
+         {:ok, result} <- run_node_script(@unparser_path, json, ".json"),
+         {:ok, decoded} <- decode(result) do
+      case decoded do
+        %{"ok" => true, "source" => source} -> {:ok, source}
+        %{"ok" => false, "error" => error} -> {:error, Subprocess.format_error(error)}
+        _ -> {:error, "Unexpected JavaScript unparser output"}
+      end
     end
   end
 
   # Private Functions
 
-  defp run_node_script(script_path, input) do
+  defp available? do
+    cond do
+      not File.exists?(Priv.parser_path(@parser_path)) ->
+        {:error, "JavaScript parser unavailable: #{@parser_path} is missing from the package"}
+
+      Priv.find_executable("node") == nil ->
+        {:error, "JavaScript parser unavailable: no `node` executable found"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp run_node_script(script_path, input, ext) do
     script_full_path = Priv.parser_path(script_path)
     parser_dir = Path.dirname(script_full_path)
 
-    case ensure_node_modules(parser_dir) do
-      :ok ->
-        do_run_node_script(script_full_path, parser_dir, input)
-
-      {:error, _} = err ->
-        err
+    with :ok <- ensure_node_modules(parser_dir) do
+      Subprocess.run(Priv.find_executable("node"), [script_full_path], input,
+        ext: ext,
+        prefix: "metastatic_js",
+        cd: parser_dir
+      )
     end
-  rescue
-    e ->
-      {:error, "Exception: #{Exception.message(e)}"}
   end
 
-  defp do_run_node_script(script_full_path, parser_dir, input) do
-    node_bin = Priv.find_executable("node") || "node"
+  defp encode(ast) do
+    {:ok, Jason.encode!(ast)}
+  rescue
+    error -> {:error, "JSON encode failed: #{Exception.message(error)}"}
+  end
 
-    if File.exists?(script_full_path) do
-      temp_path =
-        Path.join(
-          System.tmp_dir!(),
-          "metastatic_js_#{System.unique_integer([:positive, :monotonic])}.txt"
-        )
-
-      File.write!(temp_path, input)
-
-      try do
-        case System.cmd(node_bin, [script_full_path, temp_path],
-               cd: parser_dir,
-               env: Priv.subprocess_env(),
-               stderr_to_stdout: true
-             ) do
-          {output, 0} ->
-            {:ok, output}
-
-          {error_output, exit_code} ->
-            {:error, "Exit code #{exit_code}: #{error_output}"}
-        end
-      after
-        File.rm(temp_path)
-      end
-    else
-      {:error, "JavaScript script not found: #{script_full_path}"}
+  defp decode(result) do
+    case Jason.decode(result) do
+      {:ok, decoded} -> {:ok, decoded}
+      {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
     end
   end
 
@@ -196,21 +166,5 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
     else
       {:error, "npm executable not found and node_modules is missing"}
     end
-  end
-
-  defp format_error(%{"type" => type, "msg" => msg, "lineno" => line}) when not is_nil(line) do
-    "#{type} at line #{line}: #{msg}"
-  end
-
-  defp format_error(%{"type" => type, "msg" => msg}) do
-    "#{type}: #{msg}"
-  end
-
-  defp format_error(error) when is_binary(error) do
-    error
-  end
-
-  defp format_error(error) do
-    inspect(error)
   end
 end

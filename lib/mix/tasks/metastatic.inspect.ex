@@ -69,6 +69,8 @@ defmodule Mix.Tasks.Metastatic.Inspect do
   def run(args) do
     Mix.Task.run("app.start")
 
+    if Metastatic.CLI.help_requested?(args), do: Metastatic.CLI.help(Mix.Tasks.Metastatic.Inspect)
+
     {opts, paths, _invalid} = OptionParser.parse(args, strict: @switches)
 
     case validate_args(opts, paths) do
@@ -76,7 +78,7 @@ defmodule Mix.Tasks.Metastatic.Inspect do
         inspect_file(file_path, options)
 
       {:error, message} ->
-        CLI.fatal(message)
+        CLI.fatal(message, 2)
     end
   end
 
@@ -170,7 +172,7 @@ defmodule Mix.Tasks.Metastatic.Inspect do
       exit({:shutdown, 0})
     else
       {:error, reason} ->
-        CLI.fatal("Failed to inspect file: #{inspect(reason)}")
+        CLI.fatal("Failed to inspect file: #{CLI.format_reason(reason)}")
     end
   end
 
@@ -195,17 +197,22 @@ defmodule Mix.Tasks.Metastatic.Inspect do
   defp show_ast(doc, format, layer) do
     {:ok, result} = Inspector.inspect_document(doc, layer: layer)
 
-    Mix.shell().info(CLI.format_info("Language: #{doc.language}"))
-    Mix.shell().info(CLI.format_info("Layer: #{result.layer}"))
-    Mix.shell().info(CLI.format_info("Depth: #{result.depth}"))
-    Mix.shell().info(CLI.format_info("Nodes: #{result.node_count}"))
-    Mix.shell().info(CLI.format_info("Variables: #{MapSet.size(result.variables)}"))
-    Mix.shell().info("")
+    # With `--format json` the output must be machine-readable: emitting the
+    # `→ Language: …` summary lines before the JSON made the whole command
+    # impossible to pipe into `jq`. The summary is therefore text-mode only.
+    if format != :json do
+      Mix.shell().info(CLI.format_info("Language: #{doc.language}"))
+      Mix.shell().info(CLI.format_info("Layer: #{result.layer}"))
+      Mix.shell().info(CLI.format_info("Depth: #{result.depth}"))
+      Mix.shell().info(CLI.format_info("Nodes: #{result.node_count}"))
+      Mix.shell().info(CLI.format_info("Variables: #{MapSet.size(result.variables)}"))
+      Mix.shell().info("")
 
-    if layer != :all do
-      Mix.shell().info("Filtered AST (#{layer} layer):")
-    else
-      Mix.shell().info("MetaAST:")
+      if layer != :all do
+        Mix.shell().info("Filtered AST (#{layer} layer):")
+      else
+        Mix.shell().info("MetaAST:")
+      end
     end
 
     output = Formatter.format(result.ast, format)

@@ -667,56 +667,85 @@ defmodule Metastatic.NL.AST do
   Reconstructs readable text from the leaf tokens and punctuation.
 
   Markup structure is rendered structurally: headings become their inline
-  text, list items and table cells are separated, block quotes are kept,
-  and code blocks / inline code are **omitted** so that prose linting and
-  readability metrics never see source code as prose.
+  text, list items and table cells are separated, block quotes are kept.
+
+  ## Options
+
+  - `:include_code` - when `true`, the contents of `:code_block` and
+    `:inline_code` nodes are included in the output. Defaults to `false`,
+    because prose linting and readability metrics must never treat source
+    code as prose. Pass `include_code: true` when you want the full document
+    text (e.g. for a word count or a spell check).
+
+  ## Examples
+
+      iex> doc = Metastatic.NL.AST.document([
+      ...>   Metastatic.NL.AST.paragraph([Metastatic.NL.AST.token("Hello")]),
+      ...>   Metastatic.NL.AST.code_block("IO.puts(1)", language: "elixir")
+      ...> ])
+      iex> Metastatic.NL.AST.text(doc)
+      "Hello"
+
+      iex> Metastatic.NL.AST.text(doc, include_code: true)
+      "Hello\nIO.puts(1)"
   """
-  @spec text(nl_node()) :: String.t()
-  def text(node) do
+  @spec text(nl_node(), keyword()) :: String.t()
+  def text(node, opts \\ []) do
     node
-    |> render_text_nodes()
+    |> render_text_nodes(Keyword.get(opts, :include_code, false))
     |> join_surface_tokens()
   end
 
   # Renders a subtree into a flat list of surface strings. Block-level
-  # markup contributes separators; code is skipped entirely.
-  defp render_text_nodes({type, _meta, children}) when type in [:code_block, :inline_code] do
-    _ = children
-    []
+  # markup contributes separators; code is skipped unless `include_code`.
+  defp render_text_nodes({type, _meta, children}, include_code?)
+       when type in [:code_block, :inline_code] do
+    if include_code? and is_binary(children), do: ["\n", children, "\n"], else: []
   end
 
-  defp render_text_nodes({:token, _meta, val}) when is_binary(val), do: [val]
-  defp render_text_nodes({:punctuation, _meta, val}) when is_binary(val), do: [val]
+  defp render_text_nodes({:token, _meta, val}, _include_code?) when is_binary(val), do: [val]
+
+  defp render_text_nodes({:punctuation, _meta, val}, _include_code?) when is_binary(val),
+    do: [val]
 
   # Inline containers contribute no separator of their own: their surface
   # text flows into the surrounding run (`**bold** text` → `bold text`).
-  defp render_text_nodes({type, _meta, children})
+  defp render_text_nodes({type, _meta, children}, include_code?)
        when type in [:emphasis, :strong, :strikethrough, :link, :image, :reference_link] do
-    render_children(children)
+    render_children(children, include_code?)
   end
 
-  defp render_text_nodes({:line_break, _meta, _children}), do: ["\n"]
-  defp render_text_nodes({:thematic_break, _meta, _children}), do: ["\n"]
+  defp render_text_nodes({:line_break, _meta, _children}, _include_code?), do: ["\n"]
+  defp render_text_nodes({:thematic_break, _meta, _children}, _include_code?), do: ["\n"]
 
-  defp render_text_nodes({:heading, _meta, children}),
-    do: ["\n"] ++ render_children(children) ++ ["\n"]
+  defp render_text_nodes({:heading, _meta, children}, include_code?),
+    do: ["\n"] ++ render_children(children, include_code?) ++ ["\n"]
 
-  defp render_text_nodes({:block_quote, _meta, children}),
-    do: ["\n"] ++ render_children(children) ++ ["\n"]
+  defp render_text_nodes({:block_quote, _meta, children}, include_code?),
+    do: ["\n"] ++ render_children(children, include_code?) ++ ["\n"]
 
-  defp render_text_nodes({:list_item, _meta, children}), do: ["\n"] ++ render_children(children)
-  defp render_text_nodes({:task_item, _meta, children}), do: ["\n"] ++ render_children(children)
-  defp render_text_nodes({:table_row, _meta, children}), do: ["\n"] ++ render_children(children)
-  defp render_text_nodes({:table_cell, _meta, children}), do: [" "] ++ render_children(children)
-  defp render_text_nodes({:paragraph, _meta, children}), do: ["\n"] ++ render_children(children)
+  defp render_text_nodes({:list_item, _meta, children}, include_code?),
+    do: ["\n"] ++ render_children(children, include_code?)
 
-  defp render_text_nodes({_type, _meta, children}) when is_list(children),
-    do: render_children(children)
+  defp render_text_nodes({:task_item, _meta, children}, include_code?),
+    do: ["\n"] ++ render_children(children, include_code?)
 
-  defp render_text_nodes(_other), do: []
+  defp render_text_nodes({:table_row, _meta, children}, include_code?),
+    do: ["\n"] ++ render_children(children, include_code?)
 
-  defp render_children(children) when is_list(children),
-    do: Enum.flat_map(children, &render_text_nodes/1)
+  defp render_text_nodes({:table_cell, _meta, children}, include_code?),
+    do: [" "] ++ render_children(children, include_code?)
+
+  defp render_text_nodes({:paragraph, _meta, children}, include_code?),
+    do: ["\n"] ++ render_children(children, include_code?)
+
+  defp render_text_nodes({_type, _meta, children}, include_code?) when is_list(children),
+    do: render_children(children, include_code?)
+
+  defp render_text_nodes(_other, _include_code?), do: []
+
+  defp render_children(children, include_code?) when is_list(children),
+    do: Enum.flat_map(children, &render_text_nodes(&1, include_code?))
 
   defp join_surface_tokens(tokens) do
     tokens

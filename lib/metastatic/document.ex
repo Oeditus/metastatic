@@ -213,11 +213,11 @@ defmodule Metastatic.Document do
       iex> Metastatic.Document.normalize(doc)
       {:ok, doc}
 
-      # {lang, native_ast} tuple - converts using adapter
-      # (Python adapter doctest skipped until adapter is updated to 3-tuple format)
-      # python_ast = %{"_type" => "Constant", "value" => 42}
-      # {:ok, doc} = Metastatic.Document.normalize({:python, python_ast})
-      # doc.ast => {:literal, [subtype: :integer], 42}
+      # {lang, native_ast} tuple - converts using the language's adapter
+      iex> python_ast = %{"_type" => "Constant", "value" => 42}
+      iex> {:ok, doc} = Metastatic.Document.normalize({:python, python_ast})
+      iex> doc.ast
+      {:literal, [subtype: :integer], 42}
   """
   @spec normalize(t() | {atom(), term()}) :: {:ok, t()} | {:error, term()}
   def normalize(%__MODULE__{} = doc), do: {:ok, doc}

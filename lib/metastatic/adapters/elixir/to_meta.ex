@@ -38,8 +38,6 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
        [{:variable, [scope: :local, original_meta: [line: 1]], "x"},
         {:literal, [subtype: :integer], 5}]}
   """
-  require Logger
-
   # Arithmetic operators
   @arithmetic_ops [:+, :-, :*, :/, :rem, :div]
   # Comparison operators
@@ -83,9 +81,12 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     :comprehension,
     :generator,
     :filter,
-    :type_annotation
+    :type_annotation,
+    # Wildcard pattern (`_`). Must be listed here so `meta_ast_node?/1`
+    # recognises it and `ensure_meta_ast/1` does not re-wrap it as a
+    # symbol literal.
+    :wildcard
   ]
-
   @map {:__aliases__, [alias: false], [:Map]}
 
   # True when the AST node denotes a module alias (`String`, `My.Mod`).
@@ -186,15 +187,25 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {ast, %{ctx | function: Atom.to_string(name), arity: arity, visibility: visibility}}
   end
 
-  # Map update syntactic sugar → Map.merge/2
-  defp pre_transform({:%{}, meta, [{:|, inner_meta, [name, values]}]}, ctx) do
-    ast =
-      {{:., meta, [@map, :merge]}, inner_meta,
-       [name, {{:., inner_meta, [@map, :new]}, inner_meta, [values]}]}
-
-    {ast, ctx}
+  # Map update syntax: `%{map | key: value}`.
+  #
+  # Elixir's compiler desugars this into `Map.merge(map, Map.new(key: value))`,
+  # but that desugaring is *lossy*: the update form requires every key to
+  # already exist, while `Map.merge/2` silently adds new keys. Rewriting here
+  # therefore changed the meaning of the program and could not be undone by
+  # `from_meta/2`.
+  #
+  # The map is replaced by a leaf marker and stashed in the traversal context,
+  # exactly like `try`/`with`/`quote` above. That is required because
+  # `Macro.traverse/4` would otherwise descend into the `{:|, ...}` update
+  # tuple and rewrite the `|` operator as a `:function_call`, turning
+  # `%{s | a: 1}` into `s | [a: 1]`. `post_transform/2` turns the marker into
+  # the `:language_specific` node that `FromMeta` restores verbatim.
+  defp pre_transform({:%{}, _meta, [{:|, _, _}]} = ast, ctx) do
+    {{:__map_update_marker__, [], nil}, Map.put(ctx, :pending_map_update, ast)}
   end
 
+  # Map field access: `map.field` desugars to `Map.fetch!(map, :field)`.
   # Map field access: `map.field` desugars to `Map.fetch!(map, :field)`.
   #
   # This rewrite MUST stay narrowly scoped to genuine field access. A previous
@@ -681,11 +692,32 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {{:import, node_meta, []}, ctx}
   end
 
-  # Already transformed nodes - pass through
+  # ----- Maps -----
+
+  # Handle __map_update_marker__ - retrieve the original map and preserve it
+  # as a `:language_specific` escape hatch.
   #
-  # `:function_call` is deliberately excluded here: a transformed inner call can
-  # still be the *receiver* of a field access (`a.b.c` becomes
-  # `{{:function_call, ...}, :c}`), and swallowing it here would bypass the
+  # The original map's `{:|, ...}` update tuple is kept in metadata (not in the
+  # children) because children are traversed and would be rewritten.
+  defp post_transform({:__map_update_marker__, [], nil}, ctx) do
+    case Map.pop(ctx, :pending_map_update) do
+      {{:%{}, meta, [{:|, _, _} = update]}, new_ctx} ->
+        node_meta =
+          [language: :elixir, hint: :map_update, update: update] ++ build_meta(meta)
+
+        {{:language_specific, node_meta, []}, new_ctx}
+
+      {nil, ctx} ->
+        {{:literal, [subtype: :null], nil}, ctx}
+    end
+  end
+
+  # Map literal - after traversal, pairs become {:tuple, [], [key_ast, value_ast]}
+  defp post_transform({:%{}, meta, pairs}, ctx) when is_list(pairs) do
+    map_to_meta(meta, pairs, ctx)
+  end
+
+  # Already transformed nodes - pass through
   # `:attribute_access` clause below.
   defp post_transform({type, meta, _children} = ast, ctx)
        when is_atom(type) and is_list(meta) and type in @meta_ast_types and
@@ -750,6 +782,17 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
        when is_atom(name) and is_atom(context) and not is_nil(context) do
     node_meta = [scope: :local] ++ build_meta(meta)
     {{:variable, node_meta, Atom.to_string(name)}, ctx}
+  end
+
+  # The wildcard pattern `_`.
+  #
+  # `_` is an atom in Elixir's AST, so without this clause it fell through to
+  # `special_form?/1` and became `{:literal, [subtype: :symbol], :_}` — which
+  # reifies to the *atom* `:_`, a pattern that only matches the atom `:_`.
+  # It gets its own node type so it can never be confused with a symbol
+  # literal or with `nil`.
+  defp post_transform({:_, meta, context}, ctx) when is_atom(context) or is_nil(context) do
+    {{:wildcard, build_meta(meta), nil}, ctx}
   end
 
   # Variable with nil context
@@ -839,43 +882,8 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
 
   # ----- Maps -----
 
-  # Map literal - after traversal, pairs become {:tuple, [], [key_ast, value_ast]}
-  defp post_transform({:%{}, meta, pairs}, ctx) when is_list(pairs) do
-    # Transform pairs to {:pair, [], [key, value]} format
-    pair_nodes =
-      Enum.map(pairs, fn
-        # Map update
-        {:function_call, [{:name, "|"} | _], [struct, list]} ->
-          Logger.warning("Unexpected struct update: (#{inspect(struct)} with #{inspect(list)})")
-
-        # Already transformed as tuple: {:tuple, [], [key_ast, value_ast]}
-        {:tuple, _, [key_ast, value_ast]} ->
-          {:pair, [], [key_ast, value_ast]}
-
-        # Already a pair node
-        {:pair, _, _} = pair ->
-          pair
-
-        # Keyword-style pair {atom, value} - shouldn't happen after traversal but handle anyway
-        {key, value} when is_atom(key) ->
-          key_ast = {:literal, [subtype: :symbol], key}
-          {:pair, [], [key_ast, ensure_meta_ast(value)]}
-
-        # Other tuple - treat as key-value pair
-        {key, value} ->
-          {:pair, [], [ensure_meta_ast(key), ensure_meta_ast(value)]}
-
-        # Non-tuple element (e.g. already-transformed 3-tuple AST node) -- wrap as-is
-        other ->
-          ensure_meta_ast(other)
-      end)
-
-    node_meta = build_meta(meta)
-    {{:map, node_meta, pair_nodes}, ctx}
-  end
-
   # ----- Tuples -----
-
+  # 2-element tuple shorthand
   # 2-element tuple shorthand
   defp post_transform({left, right}, ctx)
        when not is_atom(left) or left not in @meta_ast_types do
@@ -1095,8 +1103,10 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
           node_meta = [params: param_names] ++ build_meta(meta)
           {{:lambda, node_meta, flatten_body_ast(body)}, ctx}
         else
-          # Unexpected structure - pass through
-          {{{:fn, meta, clauses}}, ctx}
+          # Unexpected structure - pass through unchanged.
+          # (A previous version returned `{{{:fn, ...}}, ctx}`, a 1-tuple
+          # wrapping the AST, which broke every downstream consumer.)
+          {{:fn, meta, clauses}, ctx}
         end
 
       # Original format (shouldn't happen after traversal but handle for safety)
@@ -1315,8 +1325,45 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
     {ast, ctx}
   end
 
-  # ----- Helper Functions -----
+  # ----- Map construction (helper; see `post_transform/2` for `%{}`) -----
 
+  defp map_to_meta(meta, pairs, ctx) when is_list(pairs) do
+    pair_nodes =
+      Enum.map(pairs, fn
+        # A `|` pair reaching this point is a genuine anomaly (map-update
+        # syntax is diverted earlier). Keep it representable rather than
+        # returning `Logger.warning/1`'s `:ok`, which used to become a bogus
+        # `{:literal, :symbol, :ok}` child.
+        {:function_call, [{:name, "|"} | _], [struct, list]} ->
+          {:pair, [], [struct, ensure_meta_ast(list)]}
+
+        # Already transformed as tuple: {:tuple, [], [key_ast, value_ast]}
+        {:tuple, _, [key_ast, value_ast]} ->
+          {:pair, [], [key_ast, value_ast]}
+
+        # Already a pair node
+        {:pair, _, _} = pair ->
+          pair
+
+        # Keyword-style pair {atom, value} - shouldn't happen after traversal but handle anyway
+        {key, value} when is_atom(key) ->
+          key_ast = {:literal, [subtype: :symbol], key}
+          {:pair, [], [key_ast, ensure_meta_ast(value)]}
+
+        # Other tuple - treat as key-value pair
+        {key, value} ->
+          {:pair, [], [ensure_meta_ast(key), ensure_meta_ast(value)]}
+
+        # Non-tuple element (e.g. already-transformed 3-tuple AST node) -- wrap as-is
+        other ->
+          ensure_meta_ast(other)
+      end)
+
+    node_meta = build_meta(meta)
+    {{:map, node_meta, pair_nodes}, ctx}
+  end
+
+  # ----- Helper Functions -----
   defp handle_remote_call(module, func, args, meta, ctx) when is_atom(func) do
     module_name = extract_module_name(module)
     func_name = "#{module_name}.#{func}"
@@ -1448,9 +1495,7 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
       :__ENV__,
       :__CALLER__,
       :__STACKTRACE__,
-      :_,
       :^,
-      :when,
       :%{},
       :{}
     ]
@@ -1688,16 +1733,35 @@ defmodule Metastatic.Adapters.Elixir.ToMeta do
   # Fallback
   defp extract_signature_from_meta_ast(_), do: {"anonymous", [], nil}
 
+  # Build the `:params` list for a `:function_def` node.
+  #
+  # A parameter is not always a variable: `def factorial(0)`, `def f([])`,
+  # `def f(%{} = m)` and `def f({a, b})` all bind non-variable patterns. The
+  # previous implementation mapped every non-variable to `{:param, [], "_"}`,
+  # which silently turned `def factorial(0)` into `def factorial(_)` — a
+  # different function with different dispatch semantics.
+  #
+  # The parameter's own MetaAST node is kept in the `:param` metadata under
+  # `:pattern` so `FromMeta` can reify it verbatim.
   defp extract_signature_as_call(meta, params) do
     func_name = Keyword.get(meta, :name, "anonymous")
 
-    param_list =
-      Enum.map(params, fn
-        {:variable, _, name} -> {:param, [], name}
-        _ -> {:param, [], "_"}
-      end)
+    param_list = Enum.map(params, &param_from_meta_ast/1)
 
     {func_name, param_list, nil}
+  end
+
+  defp param_from_meta_ast({:variable, _, name}) when is_binary(name) do
+    {:param, [], name}
+  end
+
+  defp param_from_meta_ast({:wildcard, _, _}) do
+    {:param, [], "_"}
+  end
+
+  defp param_from_meta_ast(pattern) do
+    # A non-variable pattern. Keep the whole node so it can be reified.
+    {:param, [pattern: pattern], "_"}
   end
 
   # Extract module name from transformed MetaAST

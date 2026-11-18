@@ -125,7 +125,7 @@ defmodule Mix.Tasks.Metastatic.TranslateTest do
           catch_exit(Translate.run(args))
         end)
 
-      assert output =~ "Invalid --from language"
+      assert output =~ "Invalid --from value"
     end
 
     test "errors with invalid target language", %{python_file: python_file} do
@@ -136,7 +136,7 @@ defmodule Mix.Tasks.Metastatic.TranslateTest do
           catch_exit(Translate.run(args))
         end)
 
-      assert output =~ "Invalid --to language"
+      assert output =~ "Invalid --to value"
     end
 
     test "supports case-insensitive language names", %{

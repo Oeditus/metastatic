@@ -24,8 +24,9 @@ defmodule Metastatic.CLI do
       iex> Metastatic.CLI.get_adapter(:python)
       {:ok, Metastatic.Adapters.Python}
 
-      iex> Metastatic.CLI.get_adapter(:unknown)
-      {:error, "Unsupported language: unknown. Supported: elixir, erlang, haskell, python, ruby"}
+      iex> {:error, message} = Metastatic.CLI.get_adapter(:unknown)
+      iex> message =~ "Unsupported language: unknown"
+      true
   """
   @spec get_adapter(language()) :: {:ok, module()} | {:error, String.t()}
   defdelegate get_adapter(language), to: Languages
@@ -68,8 +69,9 @@ defmodule Metastatic.CLI do
       iex> Metastatic.CLI.parse_language(nil)
       :none
 
-      iex> Metastatic.CLI.parse_language("brainfuck")
-      {:error, "Invalid language: brainfuck. Supported: elixir, erlang, haskell, python, ruby"}
+      iex> {:error, message} = Metastatic.CLI.parse_language("brainfuck")
+      iex> message =~ "Invalid language: brainfuck"
+      true
   """
   @spec parse_language(String.t() | nil) :: {:ok, atom()} | {:error, String.t()} | :none
   defdelegate parse_language(lang_str), to: Languages
@@ -79,11 +81,16 @@ defmodule Metastatic.CLI do
 
   ## Examples
 
-      iex> Metastatic.CLI.read_file("test.py")
+      iex> path = Path.join(System.tmp_dir!(), "cli_read_file_doc.py")
+      iex> File.write!(path, "print('hello')")
+      iex> Metastatic.CLI.read_file(path)
       {:ok, "print('hello')"}
+      iex> File.rm!(path)
+      :ok
 
-      iex> Metastatic.CLI.read_file("nonexistent.py")
-      {:error, "Cannot read file test.py: enoent"}
+      iex> {:error, message} = Metastatic.CLI.read_file("nonexistent.py")
+      iex> message =~ "Cannot read file nonexistent.py"
+      true
   """
   @spec read_file(file_path()) :: {:ok, String.t()} | {:error, String.t()}
   def read_file(path) do
@@ -98,8 +105,14 @@ defmodule Metastatic.CLI do
 
   ## Examples
 
-      iex> Metastatic.CLI.write_file("output/test.py", "print('hello')")
+      iex> base = Path.join(System.tmp_dir!(), "cli_write_file_doc")
+      iex> path = Path.join(base, "nested/test.py")
+      iex> Metastatic.CLI.write_file(path, "print('hello')")
       :ok
+      iex> File.read!(path)
+      "print('hello')"
+      iex> File.rm_rf!(base) |> is_list()
+      true
   """
   @spec write_file(file_path(), String.t()) :: :ok | {:error, String.t()}
   def write_file(path, content) do
@@ -146,14 +159,92 @@ defmodule Metastatic.CLI do
   end
 
   @doc """
+  Print a task's `@moduledoc` (its usage block) and abort with status 0.
+
+  Every `mix metastatic.*` task accepts `--help`/`-h`; without this the only way
+  to read the option list was to open the source or run the task with bad
+  arguments and read the resulting error.
+
+  """
+  @spec help(module()) :: no_return()
+  def help(task_module) do
+    {:docs_v1, _, _, _, moduledoc, _, _} = Code.fetch_docs(task_module)
+    text = Map.get(moduledoc, "en", "No documentation available.")
+
+    Mix.shell().info(text)
+    exit({:shutdown, 0})
+  end
+
+  @doc """
+  Returns true when the argv contains `--help` or `-h`.
+
+  ## Examples
+
+      iex> Metastatic.CLI.help_requested?(["--help"])
+      true
+
+      iex> Metastatic.CLI.help_requested?(["file.py"])
+      false
+  """
+  @spec help_requested?([String.t()]) :: boolean()
+  def help_requested?(args), do: Enum.any?(args, &(&1 in ["--help", "-h"]))
+
+  @doc """
+  Render an error reason for human consumption.
+
+  Adapters report errors as plain strings, as `{:error, string}` tuples, or as
+  structured terms. Wrapping a readable string in `inspect/1` produced
+  `{:error, "Syntax error at line 1"}` in CLI output — Erlang term syntax
+  around an already-human message. This unwraps the common shapes and only
+  falls back to `inspect/1` for genuinely opaque terms.
+
+  ## Examples
+
+      iex> Metastatic.CLI.format_reason("boom")
+      "boom"
+
+      iex> Metastatic.CLI.format_reason({:error, "boom"})
+      "boom"
+
+      iex> Metastatic.CLI.format_reason({:error, :enoent})
+      ":enoent"
+
+      iex> Metastatic.CLI.format_reason(%{code: 1})
+      "%{code: 1}"
+  """
+  @spec format_reason(term()) :: String.t()
+  def format_reason(reason) when is_binary(reason), do: reason
+  def format_reason({:error, reason}), do: format_reason(reason)
+  def format_reason(reason) when is_atom(reason), do: inspect(reason)
+  def format_reason(reason), do: inspect(reason)
+
+  @doc """
   Print an error and abort the current Mix task with a non-zero exit status.
 
-  Uses `exit({:shutdown, 1})` so that callers and tests can observe the
+  Uses `exit({:shutdown, code})` so that callers and tests can observe the
   failure via `catch_exit/1`, matching Mix's own task-failure convention.
+
+  ## Exit codes
+
+    * `1` (default) — the task ran but the operation failed
+    * `2` — usage error: a bad flag, a missing argument, an unknown language
+
+  Distinguishing the two lets a script tell "your input was wrong" from
+  "the input was fine but the work failed".
+
+  ## Examples
+
+      iex> catch_exit(Metastatic.CLI.fatal("boom"))
+      {:shutdown, 1}
+
+      iex> catch_exit(Metastatic.CLI.fatal("boom", 2))
+      {:shutdown, 2}
   """
+
   @spec fatal(String.t()) :: no_return()
-  def fatal(message) do
+  @spec fatal(String.t(), pos_integer()) :: no_return()
+  def fatal(message, code \\ 1) do
     Mix.shell().error(format_error(message))
-    exit({:shutdown, 1})
+    exit({:shutdown, code})
   end
 end

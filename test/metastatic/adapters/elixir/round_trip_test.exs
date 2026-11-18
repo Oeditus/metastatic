@@ -353,4 +353,67 @@ defmodule Metastatic.Adapters.Elixir.RoundTripTest do
       assert_round_trip("prefix <> suffix")
     end
   end
+
+  # ---- Regressions: wildcard, nil, and map-update fidelity ----
+  #
+  # These three shapes used to be silently *rewritten* on the way back from
+  # MetaAST, producing code that compiled but meant something different.
+
+  describe "wildcard and nil patterns" do
+    test "`_` stays a wildcard, not the atom :_" do
+      result = assert_round_trip("case x do\n  _ -> 2\nend")
+      refute result =~ ":_ ->"
+    end
+
+    test "`nil` stays a nil pattern, not a wildcard" do
+      result = assert_round_trip("case x do\n  nil -> 2\nend")
+      assert result =~ "nil ->"
+      refute result =~ ":_ ->"
+    end
+
+    test "`_` nested in a tuple pattern stays a wildcard" do
+      result = assert_round_trip("case x do\n  {:ok, _} -> 2\nend")
+      assert result =~ "{:ok, _}"
+      refute result =~ ":_"
+    end
+
+    test "a nil body is preserved as nil, not an empty clause body" do
+      result = assert_round_trip("case x do\n  _ -> nil\nend")
+      assert result =~ "nil"
+      refute result =~ ~r/->\s*\n\s*end/
+    end
+
+    test "wildcard in a function head round-trips" do
+      assert_round_trip("def f(_), do: 1")
+    end
+
+    test "wildcard inside a module round-trips" do
+      assert_round_trip(
+        "defmodule A do\n  def f(x) do\n    case x do\n      _ -> 2\n    end\n  end\nend"
+      )
+    end
+  end
+
+  describe "map update syntax" do
+    test "`%{map | key: value}` keeps its update semantics" do
+      result = assert_round_trip("defmodule A do\n  def f(s) do\n    %{s | a: 1}\n  end\nend")
+      assert result =~ "%{s | a: 1}"
+      refute result =~ "Map.merge"
+    end
+
+    test "multi-key map update round-trips" do
+      result =
+        assert_round_trip("defmodule A do\n  def f(s) do\n    %{s | a: 1, b: 2}\n  end\nend")
+
+      assert result =~ "%{s | a: 1, b: 2}"
+    end
+
+    test "plain map literals are unaffected" do
+      assert_round_trip("%{a: 1, b: 2}")
+    end
+
+    test "Map.merge/2 calls are not rewritten" do
+      assert_round_trip("Map.merge(s, %{a: 1})")
+    end
+  end
 end

@@ -181,43 +181,21 @@ defmodule Metastatic.Validator do
   # AST analysis - single-pass traversal collecting all metrics at once.
   # Previous implementation used 7+ separate traversals; this collects
   # level, native count, variables, depth, and node count in one pass.
-
-  # Extended layer types (M2.2 + M2.2s)
-  @extended_types [
-    # M2.2: Extended (most languages)
-    :loop,
-    :lambda,
-    :collection_op,
-    :pattern_match,
-    :match_arm,
-    :exception_handling,
-    :async_operation,
-    :yield,
-    :comprehension,
-    :generator,
-    :filter,
-    :pipe,
-    :pin,
-    :assert_type,
-    # M2.2s: Structural/Organizational layer
-    :container,
-    :function_def,
-    :param,
-    :attribute_access,
-    :augmented_assignment,
-    :property,
-    :import,
-    :type_annotation,
-    :decorator,
-    :record_update,
-    :child_spec,
-    :macro_def,
-    :precedencegroup,
-    :fixity
-  ]
-
-  # Native layer types (M2.3)
-  @native_types [:language_specific]
+  # Node-type classification delegates to `Metastatic.AST.layer/1`, the single
+  # source of truth. A local copy of the type lists used to live here and had
+  # already drifted: it classified `:container` and friends as `:extended`
+  # while `AST.layer/1` calls them `:structural`.
+  #
+  # For validation purposes `:structural` counts as `:extended` (both are
+  # "above core"), and `:unknown` counts as core so adapter-specific nodes do
+  # not accidentally raise the reported level.
+  defp layer_of(type) do
+    case AST.layer(type) do
+      :structural -> :extended
+      :unknown -> :core
+      layer -> layer
+    end
+  end
 
   defp analyze_ast(ast) do
     initial_acc = %{
@@ -266,8 +244,8 @@ defmodule Metastatic.Validator do
     # Classify node type
     acc =
       cond do
-        type in @native_types -> Map.update!(acc, :native_count, &(&1 + 1))
-        type in @extended_types -> Map.put(acc, :has_extended, true)
+        layer_of(type) == :native -> Map.update!(acc, :native_count, &(&1 + 1))
+        layer_of(type) == :extended -> Map.put(acc, :has_extended, true)
         true -> acc
       end
 

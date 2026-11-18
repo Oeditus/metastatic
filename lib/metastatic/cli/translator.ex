@@ -70,8 +70,9 @@ defmodule Metastatic.CLI.Translator do
   """
   @spec translate_with_auto_output(file_path(), language(), language()) :: translate_result()
   def translate_with_auto_output(source_path, from_lang, to_lang) do
-    output_path = generate_output_path(source_path, to_lang)
-    translate(source_path, from_lang, to_lang, output_path)
+    with {:ok, output_path} <- generate_output_path(source_path, to_lang) do
+      translate(source_path, from_lang, to_lang, output_path)
+    end
   end
 
   @doc """
@@ -96,13 +97,14 @@ defmodule Metastatic.CLI.Translator do
   @spec translate_directory(file_path(), language(), language(), file_path()) ::
           {:ok, [file_path()]} | {:error, String.t()}
   def translate_directory(source_dir, from_lang, to_lang, output_dir) do
-    with {:ok, files} <- list_source_files(source_dir, from_lang) do
+    with {:ok, files} <- list_source_files(source_dir, from_lang),
+         {:ok, to_ext} <- extension_for_language(to_lang) do
       results =
         files
         |> Task.async_stream(
           fn source_path ->
             relative_path = Path.relative_to(source_path, source_dir)
-            output_path = Path.join(output_dir, change_extension(relative_path, to_lang))
+            output_path = Path.join(output_dir, Path.rootname(relative_path) <> to_ext)
             translate(source_path, from_lang, to_lang, output_path)
           end,
           max_concurrency: System.schedulers_online(),
@@ -143,35 +145,33 @@ defmodule Metastatic.CLI.Translator do
     end
   end
 
-  @spec generate_output_path(file_path(), language()) :: file_path()
+  @spec generate_output_path(file_path(), language()) ::
+          {:ok, file_path()} | {:error, String.t()}
   defp generate_output_path(source_path, target_lang) do
-    base = Path.rootname(source_path)
-    ext = extension_for_language(target_lang)
-    base <> ext
+    with {:ok, ext} <- extension_for_language(target_lang) do
+      {:ok, Path.rootname(source_path) <> ext}
+    end
   end
 
-  @spec change_extension(file_path(), language()) :: file_path()
-  defp change_extension(path, target_lang) do
-    base = Path.rootname(path)
-    ext = extension_for_language(target_lang)
-    base <> ext
-  end
-
-  @spec extension_for_language(language()) :: String.t()
+  # Returns an error tuple instead of raising: every other lookup in the
+  # library reports "no extension" the same way, and this path is reachable
+  # from `translate_directory/4` for any language whose adapter declares no
+  # extension.
+  @spec extension_for_language(language()) :: {:ok, String.t()} | {:error, String.t()}
   defp extension_for_language(lang) do
     case Metastatic.Languages.extension_for_language(lang) do
-      {:ok, ext} -> ext
-      {:error, _} -> raise "No extension known for language: #{lang}"
+      {:ok, ext} -> {:ok, ext}
+      {:error, _} -> {:error, "No file extension known for language: #{lang}"}
     end
   end
 
   @spec list_source_files(file_path(), language()) :: {:ok, [file_path()]} | {:error, String.t()}
   defp list_source_files(dir, language) do
-    pattern = Path.join(dir, "**/*" <> extension_for_language(language))
-
-    case Path.wildcard(pattern) do
-      [] -> {:error, "No source files found in #{dir}"}
-      files -> {:ok, Enum.filter(files, &File.regular?/1)}
+    with {:ok, ext} <- extension_for_language(language) do
+      case Path.wildcard(Path.join(dir, "**/*" <> ext)) do
+        [] -> {:error, "No source files found in #{dir}"}
+        files -> {:ok, Enum.filter(files, &File.regular?/1)}
+      end
     end
   end
 

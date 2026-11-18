@@ -101,5 +101,72 @@ defmodule Mix.Tasks.Metastatic.Gen.SupplementalTest do
 
       assert {:ok, _ast} = Code.string_to_quoted(content)
     end
+
+    test "generated test file is syntactically valid Elixir", %{dir: dir} do
+      generate!(dir, ["python.requests", "--language", "python"])
+
+      content =
+        File.read!(Path.join(dir, "test/metastatic/supplemental/python/requests_test.exs"))
+
+      assert {:ok, _ast} = Code.string_to_quoted(content)
+    end
+  end
+
+  # Defects 8 and 9: the scaffold used to emit `target_language:`/`dependencies:`
+  # (fields that do not exist on `Metastatic.Supplemental.Info`, so the module
+  # did not compile) and tests whose bodies were comments only, so a freshly
+  # generated scaffold turned the suite green while doing nothing.
+  describe "generated scaffold correctness" do
+    test "info/0 uses the real Info field names", %{dir: dir} do
+      generate!(dir, ["python.requests", "--language", "python"])
+
+      content = File.read!(Path.join(dir, "lib/metastatic/supplemental/python/requests.ex"))
+
+      assert content =~ "language: :python"
+      assert content =~ "requires:"
+      assert content =~ "description:"
+      refute content =~ "target_language:"
+      refute content =~ "dependencies:"
+    end
+
+    test "info/0 includes the required :name field", %{dir: dir} do
+      generate!(dir, ["python.requests", "--language", "python"])
+
+      content = File.read!(Path.join(dir, "lib/metastatic/supplemental/python/requests.ex"))
+
+      assert content =~ "name: :requests"
+    end
+
+    test "generated transform/3 matches the behaviour's arity and language argument", %{dir: dir} do
+      generate!(dir, ["python.requests", "--language", "python"])
+
+      content = File.read!(Path.join(dir, "lib/metastatic/supplemental/python/requests.ex"))
+
+      # transform(meta_ast, language, metadata) -- the language, not :from_meta.
+      refute content =~ ":from_meta"
+      refute content =~ ":to_meta"
+      assert content =~ "def transform(_ast, _language, _metadata), do: :error"
+    end
+
+    test "generated tests fail loudly instead of passing silently", %{dir: dir} do
+      generate!(dir, ["python.requests", "--language", "python"])
+
+      content =
+        File.read!(Path.join(dir, "test/metastatic/supplemental/python/requests_test.exs"))
+
+      assert content =~ "flunk("
+      refute content =~ "# TODO: Implement test"
+    end
+
+    test "generated tests assert against a real Info struct", %{dir: dir} do
+      generate!(dir, ["python.requests", "--language", "python"])
+
+      content =
+        File.read!(Path.join(dir, "test/metastatic/supplemental/python/requests_test.exs"))
+
+      assert content =~ "assert info.language == :python"
+      assert content =~ "Info.valid?(info)"
+      refute content =~ "info.target_language"
+    end
   end
 end

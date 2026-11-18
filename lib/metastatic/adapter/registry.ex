@@ -181,17 +181,18 @@ defmodule Metastatic.Adapter.Registry do
 
   @impl true
   def init(:ok) do
-    # Seed the registry from the compile-time language list so that the
-    # registry and `Metastatic.Languages` agree out of the box. Dynamic
-    # `register/2` calls can still add adapters at runtime.
-    {adapters, extensions} =
-      Enum.reduce(Metastatic.Languages.all(), {%{}, %{}}, fn lang, {acc_a, acc_e} ->
-        acc_a = Map.put(acc_a, lang.language, lang.adapter)
-        acc_e = Enum.reduce(lang.extensions, acc_e, &Map.put(&2, &1, lang.language))
-        {acc_a, acc_e}
-      end)
+    # Seed from the compile-time language list so the registry and
+    # `Metastatic.Languages` agree out of the box. Dynamic `register/2` calls
+    # can still add adapters at runtime.
+    #
+    # Only the *overrides* live here. Extension -> language detection is
+    # delegated to `Metastatic.Languages`, whose map is derived at compile
+    # time -- keeping a runtime copy meant two sources of truth for the same
+    # fact.
+    adapters =
+      Map.new(Metastatic.Languages.all(), fn lang -> {lang.language, lang.adapter} end)
 
-    {:ok, %{adapters: adapters, extensions: extensions}}
+    {:ok, %{adapters: adapters}}
   end
 
   @impl true
@@ -206,7 +207,7 @@ defmodule Metastatic.Adapter.Registry do
         {:reply, {:error, {:already_registered, language, existing}}, state}
 
       :error ->
-        register_new(language, adapter, state)
+        {:reply, :ok, %{state | adapters: Map.put(state.adapters, language, adapter)}}
     end
   end
 
@@ -220,15 +221,7 @@ defmodule Metastatic.Adapter.Registry do
 
   @impl true
   def handle_call({:unregister, language}, _from, state) do
-    new_adapters = Map.delete(state.adapters, language)
-
-    # Remove all extensions associated with this language
-    new_extensions =
-      Enum.reject(state.extensions, fn {_ext, lang} -> lang == language end)
-      |> Map.new()
-
-    new_state = %{state | adapters: new_adapters, extensions: new_extensions}
-    {:reply, :ok, new_state}
+    {:reply, :ok, %{state | adapters: Map.delete(state.adapters, language)}}
   end
 
   @impl true
@@ -238,11 +231,10 @@ defmodule Metastatic.Adapter.Registry do
 
   @impl true
   def handle_call({:detect_language, filename}, _from, state) do
-    extension = Path.extname(filename)
-
-    case Map.fetch(state.extensions, extension) do
+    # Delegate to the compile-time extension map in `Metastatic.Languages`.
+    case Metastatic.Languages.detect_language(filename) do
       {:ok, language} -> {:reply, {:ok, language}, state}
-      :error -> {:reply, {:error, :unknown_extension}, state}
+      {:error, _} -> {:reply, {:error, :unknown_extension}, state}
     end
   end
 
@@ -261,21 +253,5 @@ defmodule Metastatic.Adapter.Registry do
       [] -> {:reply, {:ok, []}, state}
       errors -> {:reply, {:error, Enum.reverse(errors)}, state}
     end
-  end
-
-  defp register_new(language, adapter, state) do
-    # Update adapters map
-    new_adapters = Map.put(state.adapters, language, adapter)
-
-    # Update extensions map
-    extensions = adapter.file_extensions()
-
-    new_extensions =
-      Enum.reduce(extensions, state.extensions, fn ext, acc ->
-        Map.put(acc, ext, language)
-      end)
-
-    new_state = %{state | adapters: new_adapters, extensions: new_extensions}
-    {:reply, :ok, new_state}
   end
 end

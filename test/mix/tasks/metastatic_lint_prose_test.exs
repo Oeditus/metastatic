@@ -22,13 +22,19 @@ defmodule Mix.Tasks.Metastatic.Lint.ProseTest do
     path
   end
 
+  # The task reports summaries and errors via Mix.shell().error/1, which
+  # writes to stderr; capture both streams and concatenate so assertions see
+  # everything regardless of which stream it went to.
+  #
+  # The task now exits with a status code (0 clean, 1 issues, 2 nothing to
+  # lint), so the exit is caught here and returned alongside the output.
   defp run(args) do
-    # The task reports summaries and errors via Mix.shell().error/1, which
-    # writes to stderr; capture both streams and concatenate so assertions
-    # see everything regardless of which stream it went to.
+    parent = self()
+
     stderr =
       capture_io(:stderr, fn ->
-        send(self(), {:stdout, capture_io(fn -> Prose.run(args) end)})
+        stdout = capture_io(fn -> send(parent, {:exit, catch_exit(Prose.run(args))}) end)
+        send(parent, {:stdout, stdout})
       end)
 
     stdout =
@@ -38,21 +44,29 @@ defmodule Mix.Tasks.Metastatic.Lint.ProseTest do
         0 -> ""
       end
 
-    stdout <> stderr
+    exit_status =
+      receive do
+        {:exit, status} -> status
+      after
+        0 -> :no_exit
+      end
+
+    {stdout <> stderr, exit_status}
   end
 
   describe "clean prose" do
-    test "reports a clean file", %{dir: dir} do
+    test "reports a clean file and exits 0", %{dir: dir} do
       path = write!(dir, "clean.md", "The cat sat on the mat. It was warm.")
-      out = run([path])
+      {out, status} = run([path])
 
       assert out =~ "clean"
       assert out =~ "passed prose linting cleanly"
+      assert status == {:shutdown, 0}
     end
   end
 
   describe "prose with issues" do
-    test "reports issues and a summary count", %{dir: dir} do
+    test "reports issues and exits 1 so it can gate CI", %{dir: dir} do
       # A long, passive, weasel-laden sentence trips several rules.
       content =
         "It was decided by the committee that the report should possibly be " <>
@@ -60,10 +74,11 @@ defmodule Mix.Tasks.Metastatic.Lint.ProseTest do
           "and then perhaps forwarded to the various stakeholders for comments."
 
       path = write!(dir, "messy.md", content)
-      out = run([path])
+      {out, status} = run([path])
 
       assert out =~ "issue(s)"
       assert out =~ "Found"
+      assert status == {:shutdown, 1}
     end
   end
 
@@ -74,7 +89,7 @@ defmodule Mix.Tasks.Metastatic.Lint.ProseTest do
       # Non-prose files must be ignored by the wildcard.
       write!(dir, "c.ex", "defmodule X do end")
 
-      out = run([dir])
+      {out, _status} = run([dir])
 
       assert out =~ "a.md"
       assert out =~ "b.txt"
@@ -83,36 +98,41 @@ defmodule Mix.Tasks.Metastatic.Lint.ProseTest do
   end
 
   describe "edge cases" do
-    test "reports a missing path and finds nothing to lint" do
-      out = run([Path.join(@tmp_dir, "definitely_missing_#{:rand.uniform(1_000_000)}.md")])
+    test "reports a missing path and exits 2" do
+      {out, status} =
+        run([Path.join(@tmp_dir, "definitely_missing_#{:rand.uniform(1_000_000)}.md")])
 
       assert out =~ "Path not found"
       assert out =~ "No files to lint"
+      assert status == {:shutdown, 2}
     end
 
     test "reports no files when given an empty directory", %{dir: dir} do
-      out = run([dir])
+      {out, status} = run([dir])
       assert out =~ "No files to lint"
+      assert status == {:shutdown, 2}
     end
 
-    test "handles an unreadable file gracefully", %{dir: dir} do
-      path = write!(dir, "gone.md", "temporary")
-      File.rm!(path)
-      # File exists check passes only if it exists, so pass the dir instead and
-      # rely on the directory branch; here we assert the read-error branch by
-      # pointing at a file that is removed between checks is racy, so instead
-      # assert the no-files path stays clean.
-      out = run([dir])
-      assert out =~ "No files to lint"
+    test "says which file it lints when given no argument" do
+      # Runs from the project root, where README.md exists.
+      {out, _status} = run([])
+      assert out =~ "README.md"
     end
   end
 
   describe "options" do
     test "accepts --max-words and --format options", %{dir: dir} do
       path = write!(dir, "opt.md", "A short sentence.")
-      out = run([path, "--max-words", "5", "--format", "text"])
+      {out, _status} = run([path, "--max-words", "5", "--format", "text"])
 
       assert is_binary(out)
+    end
+
+    test "--help prints the usage block and exits 0" do
+      {out, status} = run(["--help"])
+
+      assert out =~ "mix metastatic.lint.prose"
+      assert status == {:shutdown, 0}
     end
   end
 end

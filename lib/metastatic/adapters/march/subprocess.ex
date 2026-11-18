@@ -1,123 +1,79 @@
 defmodule Metastatic.Adapters.March.Subprocess do
   @moduledoc """
-  Subprocess management for native OCaml March parser and unparser.
+  Subprocess management for the native OCaml March parser and unparser.
 
-  Handles communication with OCaml binaries via stdin/stdout with JSON serialization.
+  Handles communication with OCaml binaries via temporary files with JSON
+  serialization. Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
-  alias Metastatic.Priv
+  alias Metastatic.{Priv, Subprocess}
 
   @parser_bin "parsers/march/_build/default/bin/parser.exe"
   @unparser_bin "parsers/march/_build/default/bin/unparser.exe"
   @parser_rel_dir "parsers/march"
 
   @doc """
-  Parse March source code to AST JSON map using native OCaml parser.
+  Parse March source code to AST JSON map using the native OCaml parser.
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    bin_full_path = Priv.parser_path(@parser_bin)
-    global_bin = Priv.find_executable("metastatic-march-parser")
-    dune_bin = Priv.find_executable("dune")
-
-    cond do
-      File.exists?(bin_full_path) ->
-        run_binary(bin_full_path, source, &extract_ast/1)
-
-      global_bin != nil ->
-        run_binary(global_bin, source, &extract_ast/1)
-
-      dune_bin != nil ->
-        parser_dir = Priv.parser_path(@parser_rel_dir)
-        run_dune_cmd(dune_bin, parser_dir, ["exec", "parser"], source, &extract_ast/1)
-
-      true ->
-        {:error, "March OCaml parser binary unavailable"}
+    with {:ok, output} <- run(source, @parser_bin, "metastatic-march-parser", "parser") do
+      extract_ast(output)
     end
   end
 
   @doc """
-  Unparse AST JSON map back to March source code using native OCaml unparser.
+  Unparse AST JSON map back to March source code using the native OCaml unparser.
   """
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
-    case Jason.encode(ast) do
-      {:ok, json} ->
-        bin_full_path = Priv.parser_path(@unparser_bin)
-        global_bin = Priv.find_executable("metastatic-march-unparser")
-        dune_bin = Priv.find_executable("dune")
-
-        cond do
-          File.exists?(bin_full_path) ->
-            run_binary(bin_full_path, json, &extract_source/1)
-
-          global_bin != nil ->
-            run_binary(global_bin, json, &extract_source/1)
-
-          dune_bin != nil ->
-            parser_dir = Priv.parser_path(@parser_rel_dir)
-            run_dune_cmd(dune_bin, parser_dir, ["exec", "unparser"], json, &extract_source/1)
-
-          true ->
-            {:error, "March OCaml unparser binary unavailable"}
-        end
-
-      {:error, reason} ->
-        {:error, "JSON encode failed: #{inspect(reason)}"}
+    with {:ok, json} <- encode(ast),
+         {:ok, output} <- run(json, @unparser_bin, "metastatic-march-unparser", "unparser") do
+      extract_source(output)
     end
   end
 
   # Helpers
 
-  defp run_binary(bin_path, input, decoder) do
-    temp_path =
-      Path.join(
-        System.tmp_dir!(),
-        "metastatic_march_#{System.unique_integer([:positive, :monotonic])}.txt"
-      )
-
-    File.write!(temp_path, input)
-
-    try do
-      case System.cmd(bin_path, [temp_path],
-             env: Priv.subprocess_env(),
-             stderr_to_stdout: true
-           ) do
-        {output, 0} -> decoder.(output)
-        {output, _code} -> {:error, output}
-      end
-    after
-      File.rm(temp_path)
-    end
+  defp encode(ast) do
+    {:ok, Jason.encode!(ast)}
+  rescue
+    error -> {:error, "JSON encode failed: #{Exception.message(error)}"}
   end
 
-  defp run_dune_cmd(dune_bin, dir, args, input, decoder) do
-    temp_path =
-      Path.join(
-        System.tmp_dir!(),
-        "metastatic_march_#{System.unique_integer([:positive, :monotonic])}.txt"
-      )
+  defp run(input, bin_rel_path, global_name, dune_target) do
+    bin_full_path = Priv.parser_path(bin_rel_path)
+    global_bin = Priv.find_executable(global_name)
+    dune_bin = Priv.find_executable("dune")
 
-    File.write!(temp_path, input)
+    cond do
+      File.exists?(bin_full_path) ->
+        Subprocess.run(bin_full_path, [], input, ext: ".march", prefix: "metastatic_march")
 
-    try do
-      case System.cmd(dune_bin, args ++ ["--", temp_path],
-             cd: dir,
-             env: Priv.subprocess_env(),
-             stderr_to_stdout: true
-           ) do
-        {output, 0} -> decoder.(output)
-        {output, _code} -> {:error, output}
-      end
-    after
-      File.rm(temp_path)
+      global_bin != nil ->
+        Subprocess.run(global_bin, [], input, ext: ".march", prefix: "metastatic_march")
+
+      dune_bin != nil ->
+        Subprocess.run(
+          dune_bin,
+          ["exec", dune_target, "--"],
+          input,
+          ext: ".march",
+          prefix: "metastatic_march",
+          cd: Priv.parser_path(@parser_rel_dir)
+        )
+
+      true ->
+        {:error,
+         "March OCaml #{dune_target} unavailable: no compiled binary, no `#{global_name}` " <>
+           "on PATH, and no `dune`"}
     end
   end
 
   defp extract_ast(json_str) do
     case Jason.decode(json_str) do
       {:ok, %{"ok" => true, "ast" => ast}} -> {:ok, ast}
-      {:ok, %{"ok" => false, "error" => err}} -> {:error, inspect(err)}
+      {:ok, %{"ok" => false, "error" => err}} -> {:error, Subprocess.format_error(err)}
       {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
     end
   end
@@ -125,7 +81,7 @@ defmodule Metastatic.Adapters.March.Subprocess do
   defp extract_source(json_str) do
     case Jason.decode(json_str) do
       {:ok, %{"ok" => true, "source" => source}} -> {:ok, source}
-      {:ok, %{"ok" => false, "error" => err}} -> {:error, inspect(err)}
+      {:ok, %{"ok" => false, "error" => err}} -> {:error, Subprocess.format_error(err)}
       {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
     end
   end

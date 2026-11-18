@@ -2,10 +2,12 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   @moduledoc """
   Manages subprocess communication with the Haskell parser.
 
-  Uses Stack to execute the parser binary built from `priv/parsers/haskell/`.
+  Uses the compiled parser binary built from `priv/parsers/haskell/`, or a
+  `metastatic-haskell-parser` on `PATH`, or `stack exec parser`. Temp-file
+  handling is delegated to `Metastatic.Subprocess`.
   """
 
-  alias Metastatic.Priv
+  alias Metastatic.{Priv, Subprocess}
 
   @parser_rel_dir "parsers/haskell"
   @bin_rel_path "parsers/haskell/bin/parser"
@@ -30,41 +32,25 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
 
     cond do
       File.exists?(bin_path) ->
-        run_cmd(bin_path, [], source)
+        run_parser(bin_path, [], source, [])
 
       global_bin != nil ->
-        run_cmd(global_bin, [], source)
+        run_parser(global_bin, [], source, [])
 
       File.dir?(parser_dir) and stack_bin != nil ->
-        run_cmd(stack_bin, ["exec", "parser", "--"], source, cd: parser_dir)
+        run_parser(stack_bin, ["exec", "parser", "--"], source, cd: parser_dir)
 
       true ->
-        {:error, "Haskell parser unavailable"}
+        {:error,
+         "Haskell parser unavailable: no compiled parser, no `metastatic-haskell-parser` " <>
+           "on PATH, and no `stack` to build priv/parsers/haskell"}
     end
   end
 
-  defp run_cmd(executable, args, source, opts \\ []) do
-    temp_path =
-      Path.join(
-        System.tmp_dir!(),
-        "metastatic_hs_#{System.unique_integer([:positive, :monotonic])}.txt"
-      )
-
-    File.write!(temp_path, source)
-
-    try do
-      cmd_args = args ++ [temp_path]
-      default_opts = [stderr_to_stdout: true, env: Priv.subprocess_env()]
-
-      case System.cmd(executable, cmd_args, Keyword.merge(default_opts, opts)) do
-        {output, 0} ->
-          handle_parser_output(output)
-
-        {error_output, _exit_code} ->
-          {:error, "Haskell parser failed: #{inspect(error_output)}"}
-      end
-    after
-      File.rm(temp_path)
+  defp run_parser(executable, args, source, opts) do
+    with {:ok, output} <-
+           Subprocess.run(executable, args, source, [ext: ".hs", prefix: "metastatic_hs"] ++ opts) do
+      handle_parser_output(output)
     end
   end
 

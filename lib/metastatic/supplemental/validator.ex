@@ -93,11 +93,25 @@ defmodule Metastatic.Supplemental.Validator do
     |> Enum.sort()
   end
 
-  # A construct needs supplemental support when it is not a recognised
-  # MetaAST layer type (i.e. `AST.layer/1` returns `:unknown`). This reuses
-  # the single source of truth in `Metastatic.AST` instead of maintaining a
-  # second, drift-prone copy of the core/extended type lists.
+  # A construct needs supplemental support only when a registered supplemental
+  # actually claims it. The previous implementation used
+  # `AST.layer(type) == :unknown`, which flagged *every* adapter-specific node
+  # the core registry has not learned about — so `mix metastatic.supplemental_check`
+  # reported missing supplementals for perfectly ordinary code.
   defp supplemental_construct?(type) do
-    AST.layer(type) == :unknown
+    AST.layer(type) == :unknown and registered_construct?(type)
+  end
+
+  # True when at least one registered supplemental declares `type`.
+  defp registered_construct?(type) do
+    Registry.list_all()
+    |> Enum.any?(fn module ->
+      case module.info() do
+        %{constructs: constructs} -> type in constructs
+        _ -> false
+      end
+    end)
+  rescue
+    _ -> false
   end
 end

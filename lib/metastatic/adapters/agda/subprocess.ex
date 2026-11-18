@@ -2,10 +2,12 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
   @moduledoc """
   Manages subprocess communication with the Agda parser.
 
-  Uses the compiled parser binary built from `priv/parsers/agda/`.
+  Uses the compiled parser binary built from `priv/parsers/agda/`, or a
+  `metastatic-agda-parser` on `PATH`, or compiles the bundled source with GHC
+  on first use. Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
-  alias Metastatic.Priv
+  alias Metastatic.{Priv, Subprocess}
 
   @parser_rel_dir "parsers/agda"
   @bin_rel_path "parsers/agda/bin/parser"
@@ -30,16 +32,18 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
 
     cond do
       File.exists?(bin_path) ->
-        run_cmd(bin_path, [], source)
+        run_parser(bin_path, source)
 
       global_bin != nil ->
-        run_cmd(global_bin, [], source)
+        run_parser(global_bin, source)
 
       File.dir?(parser_dir) and ghc_bin != nil ->
         ensure_compiled_and_run(source, parser_dir, bin_path, ghc_bin)
 
       true ->
-        {:error, "Agda parser unavailable"}
+        {:error,
+         "Agda parser unavailable: no compiled parser, no `metastatic-agda-parser` on PATH, " <>
+           "and no `ghc` to build priv/parsers/agda"}
     end
   end
 
@@ -52,35 +56,20 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
            stderr_to_stdout: true
          ) do
       {_, 0} ->
-        run_cmd(bin_path, [], source)
+        run_parser(bin_path, source)
 
       {error_output, _} ->
         {:error, "Failed to compile Agda parser: #{inspect(error_output)}"}
     end
   end
 
-  defp run_cmd(executable, args, source, opts \\ []) do
-    temp_path =
-      Path.join(
-        System.tmp_dir!(),
-        "metastatic_agda_#{System.unique_integer([:positive, :monotonic])}.agda"
-      )
-
-    File.write!(temp_path, preprocess_literate(source))
-
-    try do
-      cmd_args = args ++ [temp_path]
-      default_opts = [stderr_to_stdout: true, env: Priv.subprocess_env()]
-
-      case System.cmd(executable, cmd_args, Keyword.merge(default_opts, opts)) do
-        {output, 0} ->
-          handle_parser_output(output)
-
-        {error_output, _exit_code} ->
-          {:error, "Agda parser failed: #{inspect(error_output)}"}
-      end
-    after
-      File.rm(temp_path)
+  defp run_parser(executable, source) do
+    with {:ok, output} <-
+           Subprocess.run(executable, [], preprocess_literate(source),
+             ext: ".agda",
+             prefix: "metastatic_agda"
+           ) do
+      handle_parser_output(output)
     end
   end
 
