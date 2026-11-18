@@ -359,6 +359,41 @@ defmodule Metastatic.Semantic.Domains.Database do
         # Transactions
         {"$transaction", %{operation: :transaction, framework: :prisma, extract_target: :none}}
       ]
+
+    # ----- Rust Database Patterns -----
+
+    def rust_patterns,
+      do: [
+        # sqlx
+        {"sqlx::query", %{operation: :query, framework: :sqlx, extract_target: :none}},
+        {"sqlx::query_as", %{operation: :query, framework: :sqlx, extract_target: :none}},
+        {"sqlx::query_scalar", %{operation: :query, framework: :sqlx, extract_target: :none}},
+        {"sqlx::query!", %{operation: :query, framework: :sqlx, extract_target: :none}},
+        {"sqlx::query_as!", %{operation: :query, framework: :sqlx, extract_target: :none}},
+        # Diesel
+        {"diesel::insert_into", %{operation: :create, framework: :diesel, extract_target: :none}},
+        {"diesel::update", %{operation: :update, framework: :diesel, extract_target: :none}},
+        {"diesel::delete", %{operation: :delete, framework: :diesel, extract_target: :none}},
+        {"diesel::select", %{operation: :query, framework: :diesel, extract_target: :none}},
+        {"diesel::find", %{operation: :retrieve, framework: :diesel, extract_target: :none}},
+        {"diesel::load", %{operation: :retrieve_all, framework: :diesel, extract_target: :none}},
+        {"diesel::get_result",
+         %{operation: :retrieve, framework: :diesel, extract_target: :none}},
+        {"diesel::execute", %{operation: :update, framework: :diesel, extract_target: :none}},
+        # SeaORM
+        {~r/::find$/, %{operation: :retrieve_all, framework: :sea_orm, extract_target: :none}},
+        {~r/::find_by_id$/, %{operation: :retrieve, framework: :sea_orm, extract_target: :none}},
+        {~r/::insert$/, %{operation: :create, framework: :sea_orm, extract_target: :none}},
+        {~r/::update$/, %{operation: :update, framework: :sea_orm, extract_target: :none}},
+        {~r/::delete$/, %{operation: :delete, framework: :sea_orm, extract_target: :none}},
+        # rusqlite
+        {"rusqlite::query", %{operation: :query, framework: :rusqlite, extract_target: :none}},
+        {"rusqlite::execute", %{operation: :update, framework: :rusqlite, extract_target: :none}},
+        # Transactions
+        {"*.begin", %{operation: :transaction, framework: :sqlx, extract_target: :none}},
+        {"*.commit", %{operation: :transaction, framework: :sqlx, extract_target: :none}},
+        {"*.rollback", %{operation: :transaction, framework: :sqlx, extract_target: :none}}
+      ]
   end
 
   # ----- Registration -----
@@ -387,6 +422,9 @@ defmodule Metastatic.Semantic.Domains.Database do
       R.javascript_sequelize_patterns() ++
         R.javascript_typeorm_patterns() ++ R.javascript_prisma_patterns()
     )
+
+    # Rust patterns (sqlx + diesel + sea-orm + rusqlite)
+    Patterns.register(:db, :rust, R.rust_patterns())
 
     :ok
   end

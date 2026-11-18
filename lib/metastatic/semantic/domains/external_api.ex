@@ -280,6 +280,20 @@ defmodule Metastatic.Semantic.Domains.ExternalApi do
          %{operation: :send, framework: :sendgrid, extract_target: :first_arg}},
         {"client.send", %{operation: :send, framework: :sendgrid, extract_target: :first_arg}}
       ]
+
+    # ----- Rust External API Patterns -----
+
+    def rust_patterns,
+      do: [
+        {~r/^stripe::/, %{operation: :call, framework: :stripe_rs, extract_target: :none}},
+        {"*.create", %{operation: :charge, framework: :stripe_rs, extract_target: :none}},
+        {~r/^aws_sdk_s3::/, %{operation: :upload, framework: :aws_sdk_s3, extract_target: :none}},
+        {"*.put_object", %{operation: :upload, framework: :aws_sdk_s3, extract_target: :none}},
+        {"*.get_object", %{operation: :download, framework: :aws_sdk_s3, extract_target: :none}},
+        {~r/^aws_sdk_ses::/, %{operation: :send, framework: :aws_sdk_ses, extract_target: :none}},
+        {~r/^twilio::/, %{operation: :send, framework: :twilio_rs, extract_target: :none}},
+        {~r/^sendgrid::/, %{operation: :send, framework: :sendgrid_rs, extract_target: :none}}
+      ]
   end
 
   # ----- Registration -----
@@ -323,6 +337,9 @@ defmodule Metastatic.Semantic.Domains.ExternalApi do
         R.javascript_stripe_patterns() ++
         R.javascript_twilio_patterns() ++ R.javascript_sendgrid_patterns()
     )
+
+    # Rust patterns
+    Patterns.register(:external_api, :rust, R.rust_patterns())
 
     :ok
   end

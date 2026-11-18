@@ -51,3 +51,6 @@ metastatic-*.tar
 # Third-party plug-in example: its own Mix project, so its own build dirs.
 /examples/third_party_plugin/_build/
 /examples/third_party_plugin/deps/
+
+# Rust parser build artifacts
+/priv/parsers/rust/target/

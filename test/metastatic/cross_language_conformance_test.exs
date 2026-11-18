@@ -33,10 +33,10 @@ defmodule Metastatic.CrossLanguageConformanceTest do
   # across the listed languages. All use literals so that no identifier-scope
   # ambiguity (see moduledoc) can affect the result.
   @matrix [
-    {"1 + 2", [:python, :elixir, :erlang, :ruby, :javascript]},
-    {"3 * 4", [:python, :elixir, :erlang, :ruby, :javascript]},
-    {"10 - 7", [:python, :elixir, :erlang, :ruby, :javascript]},
-    {"8 / 2", [:python, :elixir, :erlang, :ruby, :javascript]}
+    {"1 + 2", [:python, :elixir, :erlang, :ruby, :javascript, :rust]},
+    {"3 * 4", [:python, :elixir, :erlang, :ruby, :javascript, :rust]},
+    {"10 - 7", [:python, :elixir, :erlang, :ruby, :javascript, :rust]},
+    {"8 / 2", [:python, :elixir, :erlang, :ruby, :javascript, :rust]}
   ]
 
   describe "cross-language MetaAST equivalence" do

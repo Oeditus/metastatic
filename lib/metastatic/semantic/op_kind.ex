@@ -296,6 +296,40 @@ defmodule Metastatic.Semantic.OpKind do
           | :stripe
           | :twilio
           | :sendgrid
+          # Rust DB
+          | :sqlx
+          | :diesel
+          | :sea_orm
+          | :rusqlite
+          # Rust HTTP
+          | :reqwest
+          | :hyper
+          | :ureq
+          | :surf
+          | :axum
+          | :actix_web
+          # Rust cache
+          | :redis_rs
+          | :moka
+          | :cached
+          # Rust queue
+          | :lapin
+          | :rdkafka
+          | :aws_sdk_sqs
+          # Rust file
+          | :rust_std_fs
+          | :tokio_fs
+          # Rust external API
+          | :stripe_rs
+          | :aws_sdk_s3
+          | :aws_sdk_ses
+          | :twilio_rs
+          | :sendgrid_rs
+          # Rust auth
+          | :jsonwebtoken
+          | :argon2
+          | :bcrypt_rs
+          | :oauth2_rs
           # General
           | :unknown
 

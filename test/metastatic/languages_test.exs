@@ -38,6 +38,7 @@ defmodule Metastatic.LanguagesTest do
         :markdown,
         :python,
         :ruby,
+        :rust,
         :sql,
         :typescript
       ]

@@ -346,6 +346,31 @@ defmodule Metastatic.Semantic.Domains.Auth do
         {"auth0.handleRedirectCallback",
          %{operation: :oauth, framework: :auth0, extract_target: :none}}
       ]
+
+    # ----- Rust Auth Patterns -----
+
+    def rust_patterns,
+      do: [
+        {"jsonwebtoken::encode",
+         %{operation: :generate_token, framework: :jsonwebtoken, extract_target: :none}},
+        {"jsonwebtoken::decode",
+         %{operation: :verify_token, framework: :jsonwebtoken, extract_target: :none}},
+        {"jsonwebtoken::decode_header",
+         %{operation: :verify_token, framework: :jsonwebtoken, extract_target: :none}},
+        {~r/^argon2::/, %{operation: :hash_password, framework: :argon2, extract_target: :none}},
+        {"*.hash_password",
+         %{operation: :hash_password, framework: :argon2, extract_target: :none}},
+        {"*.verify_password",
+         %{operation: :verify_password, framework: :argon2, extract_target: :none}},
+        {"bcrypt::hash",
+         %{operation: :hash_password, framework: :bcrypt_rs, extract_target: :none}},
+        {"bcrypt::verify",
+         %{operation: :verify_password, framework: :bcrypt_rs, extract_target: :none}},
+        {~r/^oauth2::/, %{operation: :oauth, framework: :oauth2_rs, extract_target: :none}},
+        {"*.authorize_url",
+         %{operation: :authorize, framework: :oauth2_rs, extract_target: :none}},
+        {"*.exchange_code", %{operation: :oauth, framework: :oauth2_rs, extract_target: :none}}
+      ]
   end
 
   # ----- Registration -----
@@ -389,6 +414,9 @@ defmodule Metastatic.Semantic.Domains.Auth do
         R.javascript_jwt_patterns() ++
         R.javascript_bcrypt_patterns() ++ R.javascript_auth0_patterns()
     )
+
+    # Rust patterns
+    Patterns.register(:auth, :rust, R.rust_patterns())
 
     :ok
   end
