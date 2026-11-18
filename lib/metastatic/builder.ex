@@ -228,7 +228,13 @@ defmodule Metastatic.Builder do
   Get information about available language adapters.
 
   Returns a list of supported languages with their adapters, derived from the
-  compile-time registry in `Metastatic.Languages` (the single source of truth).
+  runtime registry in `Metastatic.Languages` (the single source of truth).
+  Runtime-registered plug-ins are included, so this reflects what the pipeline
+  can actually parse right now.
+
+  `:loaded` reports whether the adapter module is currently loadable, which is
+  the honest answer for a plug-in whose module failed to compile or was not
+  shipped.
 
   ## Examples
 
@@ -244,7 +250,7 @@ defmodule Metastatic.Builder do
         extensions: lang.extensions,
         experimental: lang.experimental?,
         documentation: lang.documentation?,
-        loaded: true
+        loaded: Code.ensure_loaded?(lang.adapter)
       }
     end)
   end
@@ -252,18 +258,15 @@ defmodule Metastatic.Builder do
   # Private helpers
 
   defp get_adapter(language) do
-    # Try registry first, then fallback to hard-coded module lookup
-    case Adapter.Registry.get(language) do
-      {:ok, adapter} -> {:ok, adapter}
-      {:error, :not_found} -> Adapter.for_language(language)
-    end
+    # The registry reads the same store `Languages` does, so one lookup is
+    # enough; `Adapter.for_language/1` remains the error-shape adapter.
+    Adapter.for_language(language)
   end
 
   defp detect_or_use_language(file_path, nil) do
-    # Try registry first for file extension detection
-    case Adapter.Registry.detect_language(file_path) do
+    case Languages.detect_language(file_path) do
       {:ok, language} -> {:ok, language}
-      {:error, :unknown_extension} -> Adapter.detect_language(file_path)
+      {:error, _} -> Adapter.detect_language(file_path)
     end
   end
 

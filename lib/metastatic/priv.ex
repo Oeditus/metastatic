@@ -3,6 +3,27 @@ defmodule Metastatic.Priv do
   Utilities for resolving parser assets in `priv/` and locating runtime executables
   (including `mise` shims and global tool installations) across development,
   dependency, and OTP release environments.
+
+  ## Third-party adapters
+
+  A language adapter shipped from a *host* application (rather than compiled
+  into Metastatic) keeps its parser scripts in **its own** `priv/` directory.
+  `parser_path/1` therefore searches the host application's `priv` as well:
+
+    * the `:metastatic` application `priv`
+    * the compile-time source `priv` (so the library works from `deps/`)
+    * any directory listed in `config :metastatic, :priv_dirs`
+    * the `:ragex` application `priv`, when Ragex is loaded
+    * **the host application's `priv`**, when `:metastatic` is a dependency
+    * the current working directory's `priv`
+
+  The host application is discovered from the `:metastatic` dependency's
+  `mix.exs`-recorded parent, so an adapter can call
+  `Priv.parser_path("parsers/rust/parser")` and get
+  `my_app/priv/parsers/rust/parser` with no configuration.
+
+  Hosts that need to point at a non-standard location (a release, a mounted
+  volume, a build artefact) can always set `config :metastatic, :priv_dirs`.
   """
 
   @compile_time_priv Path.expand("../../priv", __DIR__)
@@ -11,8 +32,10 @@ defmodule Metastatic.Priv do
   Resolves a path relative to `priv/` (such as `"parsers/javascript/parser.js"`
   or `"priv/parsers/javascript/parser.js"`).
 
-  Searches `:metastatic`'s application `priv` directory, compile-time source `priv`,
-  `:ragex`'s `priv` directory (when present), and the current working directory's `priv`.
+  Searches the candidate `priv` directories documented in the module
+  documentation and returns the first existing match. When nothing exists,
+  returns the first candidate anyway so that the caller's `File.exists?/1`
+  check produces an error message naming a real, predictable path.
   """
   @spec parser_path(String.t()) :: String.t()
   def parser_path(relative_path) when is_binary(relative_path) do
@@ -119,12 +142,45 @@ defmodule Metastatic.Priv do
   end
 
   defp priv_dir_candidates do
-    configured = Application.get_env(:metastatic, :priv_dirs, [])
+    # `Application.get_env/2` can legitimately return `nil` (a config file that
+    # sets the key to nil, or a test that restores a previous nil), so this
+    # must not assume a list.
+    configured =
+      case Application.get_env(:metastatic, :priv_dirs) do
+        dirs when is_list(dirs) -> dirs
+        _ -> []
+      end
 
     ([app_priv_dir(:metastatic), @compile_time_priv] ++
-       configured ++ [Path.join(File.cwd!(), "priv")])
+       configured ++
+       [app_priv_dir(:ragex), host_app_priv_dir(), Path.join(File.cwd!(), "priv")])
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
+  end
+
+  # The `priv` directory of the application that depends on `:metastatic`.
+  #
+  # `:code.priv_dir/1` needs an *application* name, and a third-party adapter
+  # has no way to tell us which application it belongs to. Instead we read the
+  # `:metastatic` dependency entry that Mix records in the host's own
+  # application spec: `Application.spec(:my_app, :applications)` lists
+  # `:metastatic` exactly when `my_app` depends on it. The first such
+  # application (excluding Metastatic and Ragex themselves) is the host.
+  #
+  # This is deliberately best-effort: in a release, an escript, or a bare
+  # `elixir -pa` invocation there may be no host application at all, in which
+  # case we simply contribute no candidate and the other directories win.
+  defp host_app_priv_dir do
+    :metastatic
+    |> Application.spec(:applications)
+    |> List.wrap()
+    |> Enum.reject(&(&1 in [:kernel, :stdlib, :elixir, :metastatic, :ragex]))
+    |> Enum.find_value(fn app ->
+      case app_priv_dir(app) do
+        nil -> nil
+        dir -> if File.dir?(dir), do: dir, else: nil
+      end
+    end)
   end
 
   defp app_priv_dir(app) do

@@ -59,17 +59,14 @@ defmodule Metastatic.BuilderTest do
   end
 
   setup do
-    original = Adapter.Registry.get(:python)
-    :ok = Adapter.Registry.unregister(:python)
-    :ok = Adapter.Registry.register(:python, MockPythonAdapter)
+    # `replace/3` is the explicit "shadow a built-in" operation; `register/3`
+    # refuses to overwrite an occupied language. The mock keeps the real
+    # adapter's extensions so `detect_language/1` still resolves `.py`.
+    {:ok, original} = Adapter.Registry.get(:python)
+    :ok = Adapter.Registry.replace(:python, MockPythonAdapter)
 
     on_exit(fn ->
-      :ok = Adapter.Registry.unregister(:python)
-
-      case original do
-        {:ok, adapter} -> Adapter.Registry.register(:python, adapter)
-        {:error, :not_found} -> :ok
-      end
+      Adapter.Registry.replace(:python, original)
     end)
 
     :ok
@@ -312,13 +309,25 @@ defmodule Metastatic.BuilderTest do
     end
 
     test "reports the real adapter and extensions for a language" do
+      # The module-level `setup` swaps `:python` for `MockPythonAdapter`, so
+      # this reads the built-in descriptor rather than the live one — that is
+      # exactly the distinction `Languages.builtin/0` exists for.
       python_info =
-        Builder.supported_languages() |> Enum.find(fn lang -> lang.language == :python end)
+        Metastatic.Languages.builtin()
+        |> Enum.find(fn lang -> lang.language == :python end)
 
       assert python_info.adapter == Metastatic.Adapters.Python
       assert python_info.extensions == [".py", ".pyw"]
+      assert python_info.experimental? == false
+    end
+
+    test "reports the live adapter for a language" do
+      python_info =
+        Builder.supported_languages() |> Enum.find(fn lang -> lang.language == :python end)
+
+      # The mock installed by `setup` is what the pipeline actually uses.
+      assert python_info.adapter == MockPythonAdapter
       assert python_info.loaded == true
-      assert python_info.experimental == false
     end
 
     test "flags experimental and documentation languages" do

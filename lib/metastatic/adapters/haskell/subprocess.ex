@@ -7,6 +7,7 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   handling is delegated to `Metastatic.Subprocess`.
   """
 
+  alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
   @parser_rel_dir "parsers/haskell"
@@ -50,24 +51,7 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   defp run_parser(executable, args, source, opts) do
     with {:ok, output} <-
            Subprocess.run(executable, args, source, [ext: ".hs", prefix: "metastatic_hs"] ++ opts) do
-      handle_parser_output(output)
-    end
-  end
-
-  # Handle parser JSON output
-  defp handle_parser_output(output) do
-    case Jason.decode(output) do
-      {:ok, %{"status" => "ok", "ast" => ast}} when not is_nil(ast) ->
-        {:ok, ast}
-
-      {:ok, %{"status" => "error", "errorMessage" => message}} ->
-        {:error, "Parse error: #{message}"}
-
-      {:ok, %{"status" => "ok", "ast" => nil}} ->
-        {:error, "Parse error: empty AST returned"}
-
-      {:error, _} = error ->
-        {:error, "Failed to decode parser output: #{inspect(error)}"}
+      Bridge.decode(output)
     end
   end
 end

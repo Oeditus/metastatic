@@ -9,7 +9,6 @@ defmodule Metastatic.Adapters.TypeScript do
   @behaviour Metastatic.Adapter
 
   alias Metastatic.Adapters.JavaScript.{FromMeta, Subprocess, ToMeta}
-  alias Metastatic.Semantic.Enricher
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -18,14 +17,9 @@ defmodule Metastatic.Adapters.TypeScript do
 
   @impl true
   def to_meta(ts_ast) do
-    case ToMeta.transform(ts_ast) do
-      {:ok, meta_ast, metadata} ->
-        enriched_ast = Enricher.enrich_tree(meta_ast, :typescript)
-        {:ok, enriched_ast, metadata}
-
-      error ->
-        error
-    end
+    ts_ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:typescript)
   end
 
   @impl true

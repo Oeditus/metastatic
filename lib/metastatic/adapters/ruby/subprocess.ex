@@ -7,6 +7,7 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   `Metastatic.Subprocess`.
   """
 
+  alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
   @parser_path "parsers/ruby/parser.rb"
@@ -26,14 +27,19 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
     with :ok <- available?(),
-         {:ok, result} <- run_ruby_script(@parser_path, source, ".rb"),
-         {:ok, decoded} <- decode(result) do
-      case decoded do
-        %{"status" => "ok", "ast" => nil} -> {:error, "Parse error: syntax error"}
-        %{"status" => "ok", "ast" => ast} -> {:ok, ast}
-        %{"status" => "error", "error" => error} -> {:error, format_error(error)}
-        _ -> {:error, "Unexpected Ruby parser output"}
-      end
+         {:ok, result} <- run_ruby_script(@parser_path, source, ".rb") do
+      decode_parse(result)
+    end
+  end
+
+  # The Ruby bridge reports a *syntax error* as `{"status": "ok", "ast": null}`
+  # rather than an error envelope, so that shape is translated here before
+  # `Bridge.decode/1` sees it. Every other shape (including the legacy
+  # `status` envelope) is handled by the shared decoder.
+  defp decode_parse(result) do
+    case Jason.decode(result) do
+      {:ok, %{"status" => "ok", "ast" => nil}} -> {:error, "Parse error: syntax error"}
+      _ -> Bridge.decode(result)
     end
   end
 
@@ -48,7 +54,10 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   """
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
-    with {:ok, json} <- encode(ast),
+    # The Ruby unparser expects the AST *wrapped* as `{"ast": ...}`, unlike
+    # the other bridges which take the bare AST. `Bridge.encode/1` encodes the
+    # value as given, so the wrapper is applied here.
+    with {:ok, json} <- Bridge.encode(%{ast: ast}),
          :ok <- available?(),
          {:ok, result} <- run_ruby_script(@unparser_path, json, ".json") do
       # The unparser emits source directly, not JSON.
@@ -72,19 +81,6 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   end
 
   defp ruby_bin, do: Priv.find_executable("ruby")
-
-  defp encode(ast) do
-    {:ok, Jason.encode!(%{ast: ast})}
-  rescue
-    error -> {:error, "JSON encode failed: #{Exception.message(error)}"}
-  end
-
-  defp decode(result) do
-    case Jason.decode(result) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
-    end
-  end
 
   defp run_ruby_script(script_path, input, ext) do
     script_full_path = Priv.parser_path(script_path)
@@ -125,14 +121,6 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
       {:error, _} = error -> error
     end
   end
-
-  defp format_error(error) when is_binary(error), do: "Parse error: #{error}"
-
-  defp format_error(%{"error" => error, "line" => line}) do
-    "Parse error at line #{line}: #{error}"
-  end
-
-  defp format_error(error), do: "Parse error: #{inspect(error)}"
 
   defp filter_warnings(output) do
     output

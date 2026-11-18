@@ -21,9 +21,10 @@ defmodule Metastatic.Adapters.Cure do
 
   @impl true
   def to_meta(cure_ast) do
+    # `ToMeta.from_ast/1` returns the meta tree directly (not an
+    # `{:ok, ast, metadata}` tuple), so the enrichment is applied inline.
     meta_ast = ToMeta.from_ast(cure_ast)
-    enriched_ast = Enricher.enrich_tree(meta_ast, :cure)
-    {:ok, enriched_ast, %{language: :cure}}
+    {:ok, Enricher.enrich_tree(meta_ast, :cure), %{language: :cure}}
   end
 
   @impl true

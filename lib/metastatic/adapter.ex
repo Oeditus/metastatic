@@ -99,6 +99,7 @@ defmodule Metastatic.Adapter do
   """
 
   alias Metastatic.{AST, Document}
+  alias Metastatic.Semantic.Enricher
 
   @typedoc """
   Native AST in the language-specific format (M1 level).
@@ -319,6 +320,57 @@ defmodule Metastatic.Adapter do
   # ----- Helper Functions -----
 
   @doc """
+  Runs an adapter's M1 → M2 transformation and applies semantic enrichment.
+
+  Every built-in adapter had the same four lines in `to_meta/1`:
+
+      case ToMeta.transform(ast) do
+        {:ok, meta_ast, metadata} ->
+          enriched = Enricher.enrich_tree(meta_ast, :python)
+          {:ok, enriched, metadata}
+
+        error ->
+          error
+      end
+
+  Repeating that per adapter meant a third-party adapter could silently omit
+  enrichment, and a typo in the language atom degraded to a no-op with no
+  diagnostic. This helper is the single implementation.
+
+  Enrichment is skipped (without traversing) when `opts[:enrich]` is `false`,
+  and is a no-op for a language with no registered patterns — so the cost for
+  an unrecognised language is one traversal, not a wrong answer.
+
+  ## Parameters
+
+    * `result` — the adapter's `to_meta` result: `{:ok, meta_ast, metadata}`
+      or `{:error, reason}`
+    * `language` — the language atom used for pattern lookup
+    * `opts` — forwarded to `Metastatic.Semantic.Enricher.enrich_tree/3`
+
+  ## Examples
+
+      iex> ast = {:function_call, [name: "Repo.get"], [{:variable, [], "User"}]}
+      iex> {:ok, enriched, %{}} = Metastatic.Adapter.enrich({:ok, ast, %{}}, :elixir)
+      iex> Keyword.get(elem(enriched, 1), :op_kind)[:operation]
+      :retrieve
+
+      iex> Metastatic.Adapter.enrich({:error, "boom"}, :elixir)
+      {:error, "boom"}
+  """
+  @spec enrich({:ok, meta_ast, metadata} | {:error, term()}, atom(), keyword()) ::
+          {:ok, meta_ast, metadata} | {:error, term()}
+  def enrich(result, language, opts \\ [])
+
+  def enrich({:ok, meta_ast, metadata}, language, opts) when is_atom(language) do
+    {:ok, Enricher.enrich_tree(meta_ast, language, opts), metadata}
+  end
+
+  def enrich({:error, _reason} = error, _language, _opts), do: error
+
+  # ----- Helper Functions -----
+
+  @doc """
   Full round-trip: Source → M1 → M2 → M1 → Source.
 
   Useful for testing adapter fidelity. Any metadata the adapter's `parse/1`
@@ -357,6 +409,17 @@ defmodule Metastatic.Adapter do
   """
   @spec abstract(module(), source, atom()) :: {:ok, Document.t()} | {:error, term()}
   def abstract(adapter, source, language) do
+    # Enrichment tables live in `:persistent_term` and can be wiped by
+    # `Patterns.clear_all/0` (tests) or never populated (a VM that loaded the
+    # adapter before the domain modules). Re-registering is cheap and
+    # idempotent, and it keeps the failure mode from being a silently
+    # un-annotated AST.
+    #
+    # `ensure_registered_if_empty/0` (not `ensure_registered/0`) because a test
+    # may have deliberately narrowed the registry before parsing; the lazy path
+    # must recover an empty table without overwriting a populated one.
+    Metastatic.Semantic.ensure_registered_if_empty()
+
     case Metastatic.Cache.get(adapter, source) do
       {:ok, meta_ast, metadata} ->
         doc = Document.new(meta_ast, language, metadata, source)

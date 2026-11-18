@@ -30,13 +30,23 @@ defmodule Metastatic.Adapter.RegistryTest do
   end
 
   setup do
-    # Registry is already started by the application.
-    # Clear any existing registrations before each test.
-    Registry.list()
-    |> Map.keys()
-    |> Enum.each(&Registry.unregister/1)
+    # The registry now shares one store with `Metastatic.Languages`, so wiping
+    # it would also remove the built-in languages for every other test in the
+    # VM. Isolation is achieved by unregistering only what this test module
+    # registers: each test uses `:mock`/`:mockN` atoms, and `on_exit` removes
+    # them.
+    on_exit(fn ->
+      Registry.list()
+      |> Map.keys()
+      |> Enum.reject(&builtin?/1)
+      |> Enum.each(&Registry.unregister/1)
+    end)
 
     :ok
+  end
+
+  defp builtin?(language) do
+    Enum.any?(Metastatic.Languages.Builtin.all(), &(&1.language == language))
   end
 
   describe "register/2" do
@@ -62,11 +72,14 @@ defmodule Metastatic.Adapter.RegistryTest do
                Registry.register(:mock, Metastatic.Adapters.Elixir)
     end
 
-    test "does not own file extensions (that is Languages' job)" do
-      # The registry stores adapters only; extension -> language detection is
-      # derived at compile time in `Metastatic.Languages`, so there is exactly
-      # one source of truth for it.
+    test "owns file extensions once a language is registered" do
+      # Extensions are stored alongside the language so `detect_language/1`
+      # stays a single ETS lookup. Registering `:mock` therefore makes
+      # `.mock` resolvable — the same table the built-ins populate.
       assert :ok = Registry.register(:mock, MockAdapter)
+      assert {:ok, :mock} = Registry.detect_language("test.mock")
+
+      assert :ok = Registry.unregister(:mock)
       assert {:error, :unknown_extension} = Registry.detect_language("test.mock")
     end
   end
@@ -107,8 +120,11 @@ defmodule Metastatic.Adapter.RegistryTest do
   end
 
   describe "list/0" do
-    test "returns empty map when no adapters registered" do
-      assert %{} = Registry.list()
+    test "includes the built-in languages" do
+      adapters = Registry.list()
+
+      assert adapters.python == Metastatic.Adapters.Python
+      assert adapters.elixir == Metastatic.Adapters.Elixir
     end
 
     test "returns all registered adapters" do
@@ -123,7 +139,6 @@ defmodule Metastatic.Adapter.RegistryTest do
       Registry.register(:mock2, MockAdapter)
 
       adapters = Registry.list()
-      assert map_size(adapters) == 2
       assert adapters.mock1 == MockAdapter
       assert adapters.mock2 == MockAdapter
     end
@@ -167,6 +182,8 @@ defmodule Metastatic.Adapter.RegistryTest do
     end
 
     test "returns ok when no adapters registered" do
+      # The built-ins are always present, so this asserts the empty-error
+      # shape rather than an empty registry.
       assert {:ok, []} = Registry.validate_all()
     end
   end
@@ -184,7 +201,10 @@ defmodule Metastatic.Adapter.RegistryTest do
       assert Enum.all?(results, &(&1 == :ok))
 
       adapters = Registry.list()
-      assert map_size(adapters) == 10
+
+      for i <- 1..10 do
+        assert adapters[:"mock#{i}"] == MockAdapter
+      end
     end
 
     test "handles concurrent reads and writes" do

@@ -25,7 +25,6 @@ defmodule Metastatic.Adapters.Agda do
   @behaviour Metastatic.Adapter
 
   alias Metastatic.Adapters.Agda.{FromMeta, Subprocess, ToMeta, Unparser}
-  alias Metastatic.Semantic.Enricher
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -34,14 +33,9 @@ defmodule Metastatic.Adapters.Agda do
 
   @impl true
   def to_meta(agda_ast) do
-    case ToMeta.transform(agda_ast) do
-      {:ok, meta_ast, metadata} ->
-        enriched_ast = Enricher.enrich_tree(meta_ast, :agda)
-        {:ok, enriched_ast, metadata}
-
-      error ->
-        error
-    end
+    agda_ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:agda)
   end
 
   @impl true

@@ -5,29 +5,46 @@ defmodule Metastatic.Languages do
   All language detection, validation, and adapter lookup throughout the
   codebase goes through this module.
 
-  ## Plug-in discovery
+  ## Hybrid registry
 
-  The registry is **discovered at compile time** rather than hand-maintained.
-  Every module under `lib/metastatic/adapters/` that declares
-  `@behaviour Metastatic.Adapter` is picked up automatically and registered
-  under the language atom derived from its name (`Metastatic.Adapters.Python`
-  becomes `:python`, `Metastatic.Adapters.TypeScript` becomes `:typescript`).
+  The set of languages is the union of two sources:
 
-  Adding a language therefore requires **only** dropping a new adapter module
-  into `lib/metastatic/adapters/` -- no edit to this file is needed.
+    1. **Built-ins** — the adapters compiled into Metastatic, discovered at
+       compile time by `Metastatic.Languages.Builtin`.
+    2. **Plug-ins** — adapters registered at runtime by the host application,
+       through `Metastatic.Adapter.Registry.register/2`, the registry's
+       `:plugins` child-spec option, or `register/2` below.
 
-  ### Exclusions
+  Both are stored in `Metastatic.Languages.Store` (ETS). This module is a
+  façade over that store: every function here is a lookup, not a compile-time
+  constant, so a language registered at boot is visible to
+  `supported_languages/0`, `detect_language/1` and `get_adapter/1` immediately.
+
+  ### Adding a language
+
+  Inside Metastatic, drop a module into `lib/metastatic/adapters/` that
+  declares `@behaviour Metastatic.Adapter`; `Languages.Builtin` picks it up on
+  the next compile.
+
+  From a host application, register it at boot — no edit to Metastatic and no
+  recompile:
+
+      # my_app/lib/my_app/application.ex
+      children = [
+        {Metastatic.Adapter.Registry, plugins: [MyApp.Adapters.Rust]}
+      ]
+
+  or, if the registry is already running:
+
+      Metastatic.Languages.register(:rust, MyApp.Adapters.Rust)
+
+  ### Exclusions and config
 
   Some adapter modules are language adapters only in the structural sense but
-  are not *source languages* for the code pipeline. These are listed in
-  `@excluded` and skipped by discovery:
+  are not *source languages* for the code pipeline (`english`, `spanish`, the
+  NL adapters). `Metastatic.Languages.Builtin` excludes them.
 
-    * `english`, `spanish` -- NL adapters (natural-language prose), reachable
-      through `Metastatic.NL.Adapters.*` instead.
-
-  ### Config overrides
-
-  Discovery can be adjusted at compile time through application config:
+  Compile-time config still works for the built-ins:
 
       config :metastatic, :languages,
         exclude: [:spanish],
@@ -35,17 +52,8 @@ defmodule Metastatic.Languages do
         experimental: [:mylang],
         documentation: [:markdown]
 
-  * `:exclude` -- language atoms to drop from the discovered set
-  * `:include` -- extra `%{language: atom, adapter: module}` entries to add
-    (useful for adapters living outside this library)
-  * `:experimental` -- language atoms to flag as experimental
-  * `:documentation` -- language atoms to flag as document languages
-
-  ## Compile-Time Derivation
-
-  Extension maps, supported language lists, and display strings are all
-  derived at compile time from the discovered descriptors, so they stay in sync
-  automatically.
+  Prefer runtime registration for host adapters: `:include` requires
+  recompiling Metastatic, while `register/2` does not.
 
   ## Examples
 
@@ -60,95 +68,71 @@ defmodule Metastatic.Languages do
       iex> {:ok, Metastatic.Adapters.Python} = Metastatic.Languages.get_adapter(:python)
   """
 
-  alias Metastatic.Language
+  alias Metastatic.{Language, Languages.Builtin, Languages.Store}
 
-  # Adapters that are structurally `Metastatic.Adapter` implementations but are
-  # not source languages for the code pipeline. Kept here (not in the adapter
-  # modules) so that discovery stays purely name-driven.
-  @excluded [:english, :spanish]
+  # ── Registration ────────────────────────────────────────────────────
 
-  # Languages whose adapters are not exercised by the default CI matrix
-  # (they require an external toolchain: GHC/Agda). They remain usable but
-  # are advertised as experimental so the support matrix stays honest.
-  @default_experimental [:agda, :haskell]
+  @doc """
+  Registers a language adapter at runtime.
 
-  # Languages that describe documents rather than executable code. They are
-  # fully parseable and analyzable, but carry no callable entities.
-  @default_documentation [:markdown]
+  The adapter must implement `Metastatic.Adapter` (see
+  `Metastatic.Adapter.valid_adapter?/1`). Extensions are read from its
+  `file_extensions/0`.
 
-  # ── Discovery ───────────────────────────────────────────────────────
+  Refuses to replace a language that is already registered with a *different*
+  adapter — silently shadowing `:python` would make the whole pipeline depend
+  on boot order. Re-registering the same adapter is idempotent.
 
-  # Discover `{language_atom, adapter_module}` pairs at compile time. See
-  # `Metastatic.Languages.Discovery` for the scanning logic.
-  @discovered_modules Metastatic.Languages.Discovery.discover()
+  ## Options
 
-  @adapter_sources Path.wildcard(Path.join(__DIR__, "adapters/*.ex"))
-  for source <- @adapter_sources do
-    @external_resource source
+    * `:experimental?` — flag the language as experimental (default `false`)
+    * `:documentation?` — flag it as a document language (default `false`)
+    * `:extensions` — override the adapter's declared extensions
+
+  When `adapter` was built with `Metastatic.Adapter.Plugin`, its declared
+  descriptor (extensions and flags) is used automatically; explicit options
+  still win.
+
+  ## Examples
+
+      iex> Metastatic.Languages.register(:demo_lang, Metastatic.Adapters.Elixir, extensions: [".demo"])
+      :ok
+      iex> Metastatic.Languages.supported?(:demo_lang)
+      true
+      iex> Metastatic.Languages.unregister(:demo_lang)
+      :ok
+
+      iex> Metastatic.Languages.register(:invalid, String)
+      {:error, :invalid_adapter}
+  """
+  @spec register(atom(), module(), keyword()) ::
+          :ok | {:error, :invalid_adapter} | {:error, {:already_registered, atom(), module()}}
+  def register(language, adapter, opts \\ []) when is_atom(language) and is_atom(adapter) do
+    Metastatic.Adapter.Registry.register(language, adapter, opts)
   end
 
-  @doc false
-  @spec __mix_recompile__?() :: boolean()
-  def __mix_recompile__? do
-    Path.wildcard(Path.join(__DIR__, "adapters/*.ex")) != @adapter_sources
+  @doc """
+  Removes a runtime-registered language.
+
+  Built-in languages cannot be unregistered: they are re-seeded at boot, so
+  removing one would only desynchronise the store from the library's own
+  contract. Returns `{:error, :builtin}` for those.
+
+  ## Examples
+
+      iex> Metastatic.Languages.register(:demo_lang, Metastatic.Adapters.Elixir, extensions: [".demo"])
+      iex> Metastatic.Languages.unregister(:demo_lang)
+      :ok
+
+      iex> Metastatic.Languages.unregister(:python)
+      {:error, :builtin}
+  """
+  @spec unregister(atom()) :: :ok | {:error, :builtin}
+  def unregister(language) when is_atom(language) do
+    Metastatic.Adapter.Registry.unregister(language)
   end
 
-  # Config-driven overrides. `Application.compile_env/3` is evaluated at compile
-  # time so the registry stays a compile-time constant.
-  @config_overrides Application.compile_env(:metastatic, :languages, [])
-  @config_exclude Keyword.get(@config_overrides, :exclude, [])
-  @config_include Keyword.get(@config_overrides, :include, [])
-  @config_experimental Keyword.get(@config_overrides, :experimental, [])
-  @config_documentation Keyword.get(@config_overrides, :documentation, [])
-
-  @experimental Enum.uniq(@default_experimental ++ @config_experimental)
-  @documentation Enum.uniq(@default_documentation ++ @config_documentation)
-
-  # Build the final list of `%Metastatic.Language{}` descriptors.
-  @languages (
-               discovered =
-                 @discovered_modules
-                 |> Enum.reject(fn {lang, _mod} ->
-                   lang in @excluded or lang in @config_exclude
-                 end)
-
-               included =
-                 Enum.map(@config_include, fn
-                   %{language: lang, adapter: mod} -> {lang, mod}
-                   {lang, mod} -> {lang, mod}
-                 end)
-
-               (discovered ++ included)
-               |> Enum.uniq_by(fn {lang, _mod} -> lang end)
-               |> Enum.sort_by(fn {lang, _mod} -> lang end)
-               |> Enum.map(fn {lang, mod} ->
-                 Language.new(lang, mod,
-                   experimental?: lang in @experimental,
-                   documentation?: lang in @documentation
-                 )
-               end)
-             )
-
-  # ── Derived at compile time ─────────────────────────────────────────
-
-  @by_language Map.new(@languages, fn %Language{language: lang} = l -> {lang, l} end)
-
-  @extension_map for %Language{language: lang, extensions: exts} <- @languages,
-                     ext <- exts,
-                     into: %{},
-                     do: {ext, lang}
-
-  @primary_extensions for %Language{language: lang, extensions: [first | _]} <- @languages,
-                          into: %{},
-                          do: {lang, first}
-
-  @supported_languages @languages |> Enum.map(& &1.language) |> Enum.sort()
-
-  @supported_languages_string @supported_languages |> Enum.map_join(", ", &Atom.to_string/1)
-
-  @supported_extensions @extension_map |> Map.keys() |> Enum.sort()
-
-  # ── Public API ──────────────────────────────────────────────────────
+  # ── Queries ─────────────────────────────────────────────────────────
 
   @doc """
   Returns the list of supported language atoms, sorted alphabetically.
@@ -159,12 +143,15 @@ defmodule Metastatic.Languages do
       true
   """
   @spec supported_languages() :: [atom()]
-  def supported_languages, do: @supported_languages
+  def supported_languages do
+    Store.all() |> Enum.map(& &1.language)
+  end
 
   @doc """
   Returns a comma-separated string of supported language names.
 
-  Useful for error messages and help text.
+  Useful for error messages and help text. Computed on demand (it is only
+  reached on an error path), so runtime-registered languages appear in it.
 
   ## Examples
 
@@ -172,7 +159,9 @@ defmodule Metastatic.Languages do
       true
   """
   @spec supported_languages_string() :: String.t()
-  def supported_languages_string, do: @supported_languages_string
+  def supported_languages_string do
+    supported_languages() |> Enum.map_join(", ", &Atom.to_string/1)
+  end
 
   @doc """
   Returns all supported file extensions.
@@ -183,7 +172,7 @@ defmodule Metastatic.Languages do
       true
   """
   @spec supported_extensions() :: [String.t()]
-  def supported_extensions, do: @supported_extensions
+  def supported_extensions, do: Store.extensions()
 
   @doc """
   Checks whether a language atom is supported.
@@ -197,7 +186,9 @@ defmodule Metastatic.Languages do
       false
   """
   @spec supported?(atom()) :: boolean()
-  def supported?(language), do: Map.has_key?(@by_language, language)
+  def supported?(language) when is_atom(language) do
+    Store.get(language) != nil
+  end
 
   @doc """
   Returns the list of languages whose adapters are considered experimental.
@@ -211,7 +202,9 @@ defmodule Metastatic.Languages do
       false
   """
   @spec experimental_languages() :: [atom()]
-  def experimental_languages, do: @experimental
+  def experimental_languages do
+    Store.all() |> Enum.filter(& &1.experimental?) |> Enum.map(& &1.language)
+  end
 
   @doc """
   Checks whether a language is experimental.
@@ -225,7 +218,12 @@ defmodule Metastatic.Languages do
       false
   """
   @spec experimental?(atom()) :: boolean()
-  def experimental?(language), do: language in @experimental
+  def experimental?(language) when is_atom(language) do
+    case Store.get(language) do
+      nil -> false
+      descriptor -> descriptor.experimental?
+    end
+  end
 
   @doc """
   Returns the list of documentation languages.
@@ -236,7 +234,9 @@ defmodule Metastatic.Languages do
       true
   """
   @spec documentation_languages() :: [atom()]
-  def documentation_languages, do: @documentation
+  def documentation_languages do
+    Store.all() |> Enum.filter(& &1.documentation?) |> Enum.map(& &1.language)
+  end
 
   @doc """
   Checks whether a language describes documents rather than executable code.
@@ -250,7 +250,12 @@ defmodule Metastatic.Languages do
       false
   """
   @spec documentation?(atom()) :: boolean()
-  def documentation?(language), do: language in @documentation
+  def documentation?(language) when is_atom(language) do
+    case Store.get(language) do
+      nil -> false
+      descriptor -> descriptor.documentation?
+    end
+  end
 
   @doc """
   Returns the `%Metastatic.Language{}` descriptor for a language, or `nil`.
@@ -262,10 +267,10 @@ defmodule Metastatic.Languages do
       nil
   """
   @spec get(atom()) :: Language.t() | nil
-  def get(language), do: Map.get(@by_language, language)
+  def get(language) when is_atom(language), do: Store.get(language)
 
   @doc """
-  Returns all language descriptors.
+  Returns all language descriptors, sorted by language atom.
 
   ## Examples
 
@@ -273,7 +278,7 @@ defmodule Metastatic.Languages do
       true
   """
   @spec all() :: [Language.t()]
-  def all, do: @languages
+  def all, do: Store.all()
 
   @doc """
   Returns the adapter module for a supported language.
@@ -287,18 +292,21 @@ defmodule Metastatic.Languages do
       {:error, "Unsupported language: unknown. Supported: " <> _}
   """
   @spec get_adapter(atom()) :: {:ok, module()} | {:error, String.t()}
-  def get_adapter(language) do
-    case Map.fetch(@by_language, language) do
-      {:ok, %Language{adapter: adapter}} ->
+  def get_adapter(language) when is_atom(language) do
+    case Store.get(language) do
+      %Language{adapter: adapter} ->
         {:ok, adapter}
 
-      :error ->
-        {:error, "Unsupported language: #{language}. Supported: #{@supported_languages_string}"}
+      nil ->
+        {:error, "Unsupported language: #{language}. Supported: #{supported_languages_string()}"}
     end
   end
 
   @doc """
   Detects language from a file path based on its extension.
+
+  A single ETS lookup — this is called once per file during directory
+  translation, so it must not go through a `GenServer`.
 
   ## Examples
 
@@ -312,10 +320,10 @@ defmodule Metastatic.Languages do
       {:error, "Cannot detect language from extension: .xyz"}
   """
   @spec detect_language(String.t()) :: {:ok, atom()} | {:error, String.t()}
-  def detect_language(path) do
+  def detect_language(path) when is_binary(path) do
     ext = Path.extname(path)
 
-    case Map.fetch(@extension_map, ext) do
+    case Store.detect(ext) do
       {:ok, lang} -> {:ok, lang}
       :error -> {:error, "Cannot detect language from extension: #{ext}"}
     end
@@ -351,16 +359,21 @@ defmodule Metastatic.Languages do
   def parse_language(nil), do: :none
 
   def parse_language(lang_str) when is_binary(lang_str) do
-    lang = lang_str |> String.downcase() |> String.to_existing_atom()
+    # `String.to_existing_atom/1` would reject a runtime-registered language
+    # whose atom was created after this module was loaded, so the lookup is by
+    # name against the registry instead.
+    normalised = String.downcase(lang_str)
 
-    if supported?(lang) do
-      {:ok, lang}
-    else
-      {:error, "Invalid language: #{lang_str}. Supported: #{@supported_languages_string}"}
+    Enum.find_value(supported_languages(), :error, fn language ->
+      if Atom.to_string(language) == normalised, do: {:ok, language}
+    end)
+    |> case do
+      {:ok, language} ->
+        {:ok, language}
+
+      :error ->
+        {:error, "Invalid language: #{lang_str}. Supported: #{supported_languages_string()}"}
     end
-  rescue
-    ArgumentError ->
-      {:error, "Invalid language: #{lang_str}. Supported: #{@supported_languages_string}"}
   end
 
   @doc """
@@ -375,10 +388,10 @@ defmodule Metastatic.Languages do
       {:error, "No extension known for language: unknown"}
   """
   @spec extension_for_language(atom()) :: {:ok, String.t()} | {:error, String.t()}
-  def extension_for_language(language) do
-    case Map.fetch(@primary_extensions, language) do
-      {:ok, ext} -> {:ok, ext}
-      :error -> {:error, "No extension known for language: #{language}"}
+  def extension_for_language(language) when is_atom(language) do
+    case Store.get(language) do
+      %Language{extensions: [first | _]} -> {:ok, first}
+      _ -> {:error, "No extension known for language: #{language}"}
     end
   end
 
@@ -393,6 +406,20 @@ defmodule Metastatic.Languages do
   """
   @spec adapters() :: %{atom() => module()}
   def adapters do
-    Map.new(@languages, fn %Language{language: lang, adapter: adapter} -> {lang, adapter} end)
+    Map.new(Store.all(), fn %Language{language: lang, adapter: adapter} -> {lang, adapter} end)
   end
+
+  @doc """
+  Returns the built-in language descriptors, ignoring runtime registrations.
+
+  Useful for diagnostics and for code that must reason about what the library
+  itself ships.
+
+  ## Examples
+
+      iex> is_list(Metastatic.Languages.builtin())
+      true
+  """
+  @spec builtin() :: [Language.t()]
+  def builtin, do: Builtin.all()
 end

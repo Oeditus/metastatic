@@ -141,6 +141,21 @@ defmodule Metastatic.Semantic.Callbacks do
   end
 
   @doc """
+  Returns `true` when no callbacks are registered.
+
+  Used by `Metastatic.Semantic.ensure_registered_if_empty/0`.
+
+  ## Examples
+
+      iex> Metastatic.Semantic.ensure_registered()
+      :ok
+      iex> Metastatic.Semantic.Callbacks.empty?()
+      false
+  """
+  @spec empty?() :: boolean()
+  def empty?, do: map_size(get_registry()) == 0
+
+  @doc """
   Clears all registered callbacks. Primarily for testing.
   """
   @spec clear() :: :ok
@@ -159,6 +174,12 @@ defmodule Metastatic.Semantic.Callbacks do
   via BEAM introspection (see `Metastatic.Semantic.Callbacks.BeamIntrospector`).
   Third-party framework callbacks that may not be compiled are registered
   manually.
+
+  Registration is **idempotent**: the registry is a map keyed by
+  `{language, behaviour, function, arity}`, so re-registering overwrites each
+  entry in place rather than duplicating it. Host applications extend this
+  table with `config :metastatic, :semantic, callback_providers: [...]` and
+  `Metastatic.Semantic.ensure_registered/0`.
   """
   @spec register_builtins() :: :ok
   def register_builtins do

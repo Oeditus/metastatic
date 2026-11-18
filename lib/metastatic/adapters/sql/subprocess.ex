@@ -13,6 +13,7 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
   Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
   @parser_bin "parsers/sql/bin/sql_parser"
@@ -56,8 +57,12 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
     end
   end
 
+  # Parsing keeps a bespoke decoder because it is the only bridge that reports
+  # `{:ok, ast, metadata}`: statements the underlying parser cannot model are
+  # listed in `:unsupported` rather than silently dropped. Everything else
+  # (the envelope, the error shapes) is `Bridge.decode/1`.
   defp decode_parse_result(result) do
-    case JSON.decode(result) do
+    case Jason.decode(result) do
       {:ok, %{"ok" => true, "ast" => ast} = decoded} ->
         case Map.get(decoded, "unsupported") do
           unsupported when is_list(unsupported) and unsupported != [] ->
@@ -68,7 +73,10 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
         end
 
       {:ok, %{"ok" => false, "error" => error}} ->
-        {:error, format_error(error)}
+        {:error, Bridge.format_error(error)}
+
+      {:ok, other} ->
+        {:error, "Unexpected SQL parser output: #{inspect(other, limit: 5)}"}
 
       {:error, reason} ->
         {:error, "JSON decode failed: #{inspect(reason)}"}
@@ -86,23 +94,13 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
   """
   @spec unparse(term()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
-    with {:ok, json} <- encode_ast(ast),
+    with {:ok, json} <- Bridge.encode(ast),
          {:ok, output} <- run_sql_parser(["unparse"], json) do
-      case JSON.decode(output) do
-        {:ok, %{"ok" => true, "source" => source}} -> {:ok, source}
-        {:ok, %{"ok" => false, "error" => error}} -> {:error, format_error(error)}
-        {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
-      end
+      Bridge.decode(output)
     end
   end
 
   # ----- Private Helpers -----
-
-  defp encode_ast(ast) do
-    {:ok, JSON.encode!(ast)}
-  rescue
-    error -> {:error, "JSON encode failed: #{Exception.message(error)}"}
-  end
 
   defp run_sql_parser(args, input) do
     bin_path = Priv.parser_path(@parser_bin)
@@ -148,8 +146,4 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
       {:error, reason} -> {:error, "SQL parser process failed: #{reason}"}
     end
   end
-
-  defp format_error(%{"type" => type, "msg" => msg}), do: "#{type}: #{msg}"
-  defp format_error(error) when is_binary(error), do: error
-  defp format_error(error), do: inspect(error)
 end

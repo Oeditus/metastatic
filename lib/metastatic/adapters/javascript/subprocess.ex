@@ -10,6 +10,7 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   to `Metastatic.Subprocess`.
   """
 
+  alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
   @parser_path "parsers/javascript/parser.js"
@@ -29,13 +30,8 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
     with :ok <- available?(),
-         {:ok, result} <- run_node_script(@parser_path, source, ".js"),
-         {:ok, decoded} <- decode(result) do
-      case decoded do
-        %{"ok" => true, "ast" => ast} -> {:ok, ast}
-        %{"ok" => false, "error" => error} -> {:error, Subprocess.format_error(error)}
-        _ -> {:error, "Unexpected JavaScript parser output"}
-      end
+         {:ok, result} <- run_node_script(@parser_path, source, ".js") do
+      Bridge.decode(result)
     end
   end
 
@@ -50,15 +46,10 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   """
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
-    with {:ok, json} <- encode(ast),
+    with {:ok, json} <- Bridge.encode(ast),
          :ok <- available?(),
-         {:ok, result} <- run_node_script(@unparser_path, json, ".json"),
-         {:ok, decoded} <- decode(result) do
-      case decoded do
-        %{"ok" => true, "source" => source} -> {:ok, source}
-        %{"ok" => false, "error" => error} -> {:error, Subprocess.format_error(error)}
-        _ -> {:error, "Unexpected JavaScript unparser output"}
-      end
+         {:ok, result} <- run_node_script(@unparser_path, json, ".json") do
+      Bridge.decode(result)
     end
   end
 
@@ -87,19 +78,6 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
         prefix: "metastatic_js",
         cd: parser_dir
       )
-    end
-  end
-
-  defp encode(ast) do
-    {:ok, Jason.encode!(ast)}
-  rescue
-    error -> {:error, "JSON encode failed: #{Exception.message(error)}"}
-  end
-
-  defp decode(result) do
-    case Jason.decode(result) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
     end
   end
 

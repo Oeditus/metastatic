@@ -89,21 +89,45 @@ defmodule Metastatic.Semantic.Patterns do
   @doc """
   Registers patterns for a domain and language.
 
-  This is called by domain modules (e.g., `Domains.Database`) during compilation.
+  This is called by domain modules (e.g., `Domains.Database`) and by
+  third-party pattern providers.
+
+  ## Idempotence
+
+  Registration **replaces** the table for `{domain, language}` when the same
+  provider registers again, rather than appending. Appending made
+  `register_all/0` unsafe to call twice: every pattern was duplicated, so a
+  host that defensively re-registered after `clear_all/0` (or a test suite
+  that registered in `setup` *and* relied on the module-load side effect)
+  silently doubled the pattern list and changed match precedence.
+
+  Patterns are deduplicated by their match key (the string or regex), keeping
+  the **first** spec for a key so that a more specific provider registered
+  earlier still wins. This makes `register/3` with the same list a no-op and
+  `register/3` with an overlapping list a well-defined merge.
 
   ## Examples
 
-      Patterns.register(:db, :elixir, [
-        {"Repo.get", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
-        {"Repo.all", %{operation: :retrieve_all, framework: :ecto}}
-      ])
+      iex> Patterns.register(:db, :elixir, [
+      ...>   {"Repo.get", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}},
+      ...>   {"Repo.all", %{operation: :retrieve_all, framework: :ecto}}
+      ...> ])
+      :ok
+
+      # Registering the same patterns again does not duplicate them.
+      iex> Patterns.register(:db, :elixir, [
+      ...>   {"Repo.get", %{operation: :retrieve, framework: :ecto, extract_target: :first_arg}}
+      ...> ])
+      :ok
+      iex> length(Patterns.get_patterns(:db, :elixir))
+      2
   """
   @spec register(OpKind.domain(), language(), [{String.t() | Regex.t(), pattern_spec()}]) :: :ok
-  def register(domain, language, patterns) do
-    # Store in persistent_term for fast access
+  def register(domain, language, patterns) when is_list(patterns) do
     key = {__MODULE__, domain, language}
     existing = :persistent_term.get(key, [])
-    :persistent_term.put(key, existing ++ patterns)
+
+    :persistent_term.put(key, merge_patterns(existing, patterns))
     # Invalidate the merged per-language lookup cache.
     :persistent_term.erase({__MODULE__, :merged, language})
     :ok
@@ -116,6 +140,26 @@ defmodule Metastatic.Semantic.Patterns do
   def get_patterns(domain, language) do
     key = {__MODULE__, domain, language}
     :persistent_term.get(key, [])
+  end
+
+  @doc """
+  Returns `true` when no patterns are registered for any domain or language.
+
+  Used by `Metastatic.Semantic.ensure_registered_if_empty/0` to decide whether
+  the lazy registration path needs to run.
+
+  ## Examples
+
+      iex> Metastatic.Semantic.ensure_registered()
+      :ok
+      iex> Metastatic.Semantic.Patterns.empty?()
+      false
+  """
+  @spec empty?() :: boolean()
+  def empty? do
+    not Enum.any?(:persistent_term.get(), fn {key, value} ->
+      match?({__MODULE__, _domain, _language}, key) and value != []
+    end)
   end
 
   @doc """
@@ -136,6 +180,25 @@ defmodule Metastatic.Semantic.Patterns do
   end
 
   # ----- Private Implementation -----
+
+  # Merge `new` into `existing`, deduplicating by match key.
+  #
+  # The first spec seen for a key wins, so re-registering the same list is a
+  # no-op and an overlapping registration keeps the earlier (usually more
+  # specific) spec. Order is preserved: existing patterns keep their
+  # precedence, genuinely new patterns are appended.
+  defp merge_patterns(existing, new) do
+    {merged, _seen} =
+      Enum.reduce(existing ++ new, {[], MapSet.new()}, fn {pattern, _spec} = entry, {acc, seen} ->
+        if MapSet.member?(seen, pattern) do
+          {acc, seen}
+        else
+          {[entry | acc], MapSet.put(seen, pattern)}
+        end
+      end)
+
+    Enum.reverse(merged)
+  end
 
   # Get all patterns applicable to a language (from all domains).
   #

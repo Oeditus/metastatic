@@ -9,7 +9,6 @@ defmodule Metastatic.Adapters.March do
   @behaviour Metastatic.Adapter
 
   alias Metastatic.Adapters.March.{FromMeta, Subprocess, ToMeta}
-  alias Metastatic.Semantic.Enricher
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -18,14 +17,9 @@ defmodule Metastatic.Adapters.March do
 
   @impl true
   def to_meta(march_ast) do
-    case ToMeta.transform(march_ast) do
-      {:ok, meta_ast, metadata} ->
-        enriched_ast = Enricher.enrich_tree(meta_ast, :march)
-        {:ok, enriched_ast, metadata}
-
-      error ->
-        error
-    end
+    march_ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:march)
   end
 
   @impl true

@@ -29,6 +29,7 @@ defmodule Metastatic.Adapters.Java.Subprocess do
   Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
   @parser_path "parsers/java/parser.java"
@@ -48,13 +49,8 @@ defmodule Metastatic.Adapters.Java.Subprocess do
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
     with :ok <- bridge_available?(),
-         {:ok, output} <- run_bridge("parse", source, ".java"),
-         {:ok, decoded} <- decode(output) do
-      case decoded do
-        %{"ok" => true, "ast" => ast} -> {:ok, ast}
-        %{"ok" => false, "error" => error} -> {:error, format_error(error)}
-        _ -> {:error, "Unexpected Java parser output"}
-      end
+         {:ok, output} <- run_bridge("parse", source, ".java") do
+      Bridge.decode(output)
     end
   end
 
@@ -71,14 +67,9 @@ defmodule Metastatic.Adapters.Java.Subprocess do
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
     with :ok <- bridge_available?(),
-         {:ok, json} <- encode(ast),
-         {:ok, output} <- run_bridge("unparse", json, ".json"),
-         {:ok, decoded} <- decode(output) do
-      case decoded do
-        %{"ok" => true, "source" => source} -> {:ok, source}
-        %{"ok" => false, "error" => error} -> {:error, format_error(error)}
-        _ -> {:error, "Unexpected Java unparser output"}
-      end
+         {:ok, json} <- Bridge.encode(ast),
+         {:ok, output} <- run_bridge("unparse", json, ".json") do
+      Bridge.decode(output)
     end
   end
 
@@ -137,19 +128,6 @@ defmodule Metastatic.Adapters.Java.Subprocess do
     end
   end
 
-  defp encode(ast) do
-    {:ok, JSON.encode!(ast)}
-  rescue
-    error -> {:error, "JSON encode failed: #{Exception.message(error)}"}
-  end
-
-  defp decode(output) do
-    case JSON.decode(output) do
-      {:ok, decoded} -> {:ok, decoded}
-      {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
-    end
-  end
-
   defp run_bridge(mode, input, ext) do
     # The single-file source launcher resolves sibling files relative to the
     # *current* directory, so run from the temp dir.
@@ -162,12 +140,4 @@ defmodule Metastatic.Adapters.Java.Subprocess do
       cd: System.tmp_dir!()
     )
   end
-
-  defp format_error(%{"type" => type, "msg" => msg, "line" => line}) when is_integer(line) do
-    "#{type} at line #{line}: #{msg}"
-  end
-
-  defp format_error(%{"type" => type, "msg" => msg}), do: "#{type}: #{msg}"
-  defp format_error(error) when is_binary(error), do: error
-  defp format_error(error), do: inspect(error)
 end

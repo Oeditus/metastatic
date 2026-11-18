@@ -24,7 +24,6 @@ defmodule Metastatic.Adapters.Haskell do
   @behaviour Metastatic.Adapter
 
   alias Metastatic.Adapters.Haskell.{FromMeta, Subprocess, ToMeta, Unparser}
-  alias Metastatic.Semantic.Enricher
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -33,14 +32,9 @@ defmodule Metastatic.Adapters.Haskell do
 
   @impl true
   def to_meta(haskell_ast) do
-    case ToMeta.transform(haskell_ast) do
-      {:ok, meta_ast, metadata} ->
-        enriched_ast = Enricher.enrich_tree(meta_ast, :haskell)
-        {:ok, enriched_ast, metadata}
-
-      error ->
-        error
-    end
+    haskell_ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:haskell)
   end
 
   @impl true

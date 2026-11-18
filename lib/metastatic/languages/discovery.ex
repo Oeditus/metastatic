@@ -6,9 +6,9 @@ defmodule Metastatic.Languages.Discovery do
   `@behaviour Metastatic.Adapter` and returns `{language_atom, module}` pairs.
 
   This lives in its own module (rather than private functions on
-  `Metastatic.Languages`) because `Metastatic.Languages` evaluates the registry
-  in a module attribute, which runs *before* the module's own `defp`s are
-  available. A separate module can be compiled and called first.
+  `Metastatic.Languages.Builtin`) because `Builtin` evaluates the registry in a
+  module attribute, which runs *before* the module's own `defp`s are available.
+  A separate module can be compiled and called first.
 
   The discovery is intentionally source-scanning rather than
   `Mix.Project`-based: `Mix` is not guaranteed to be available in every build

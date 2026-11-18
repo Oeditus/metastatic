@@ -47,3 +47,7 @@ metastatic-*.tar
 
 # Stray local sockets / crash dumps
 *.sock
+
+# Third-party plug-in example: its own Mix project, so its own build dirs.
+/examples/third_party_plugin/_build/
+/examples/third_party_plugin/deps/

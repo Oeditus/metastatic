@@ -7,6 +7,7 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
   on first use. Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
   @parser_rel_dir "parsers/agda"
@@ -69,24 +70,7 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
              ext: ".agda",
              prefix: "metastatic_agda"
            ) do
-      handle_parser_output(output)
-    end
-  end
-
-  # Handle parser JSON output
-  defp handle_parser_output(output) do
-    case Jason.decode(output) do
-      {:ok, %{"status" => "ok", "ast" => ast}} when not is_nil(ast) ->
-        {:ok, ast}
-
-      {:ok, %{"status" => "error", "errorMessage" => message}} ->
-        {:error, "Parse error: #{message}"}
-
-      {:ok, %{"status" => "ok", "ast" => nil}} ->
-        {:error, "Parse error: empty AST returned"}
-
-      {:error, _} = error ->
-        {:error, "Failed to decode parser output: #{inspect(error)}"}
+      Bridge.decode(output)
     end
   end
 

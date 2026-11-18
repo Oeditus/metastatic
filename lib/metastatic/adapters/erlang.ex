@@ -95,7 +95,6 @@ defmodule Metastatic.Adapters.Erlang do
   @behaviour Metastatic.Adapter
 
   alias Metastatic.Adapters.Erlang.{FromMeta, ToMeta}
-  alias Metastatic.Semantic.Enricher
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -173,14 +172,9 @@ defmodule Metastatic.Adapters.Erlang do
 
   @impl true
   def to_meta(erlang_ast) do
-    case ToMeta.transform(erlang_ast) do
-      {:ok, meta_ast, metadata} ->
-        enriched_ast = Enricher.enrich_tree(meta_ast, :erlang)
-        {:ok, enriched_ast, metadata}
-
-      error ->
-        error
-    end
+    erlang_ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:erlang)
   end
 
   @impl true

@@ -62,27 +62,73 @@ tree*, which is what makes cross-language analysis and translation possible.
 
 ## 2. The plug-in registry
 
-You do **not** register your adapter by hand. `Metastatic.Languages` discovers
-adapters at compile time:
+There are two ways in, depending on where your adapter lives.
 
-- It scans `lib/metastatic/adapters/*.ex`.
+### Inside Metastatic — compile-time discovery
+
+`Metastatic.Languages.Builtin` scans `lib/metastatic/adapters/*.ex` at compile
+time:
+
 - Every module that declares `@behaviour Metastatic.Adapter` is registered.
 - The language atom is derived from the module's last name segment,
   **downcased**: `Metastatic.Adapters.Rust` → `:rust`,
   `Metastatic.Adapters.TypeScript` → `:typescript`.
 
-Everything else — the extension map, `supported_languages/0`, the
-`supported_languages_string/0` used in error messages, `detect_language/1` —
-is derived from your adapter's `file_extensions/0` automatically.
+### From a host application — runtime registration
 
-### Exclusions and overrides
+A third-party adapter is registered at boot. **Do not** edit Metastatic and do
+**not** use `:include`: neither is needed, and `:include` requires recompiling
+the library.
+
+```elixir
+defmodule MyApp.Application do
+  use Application
+
+  def start(_type, _args) do
+    # Metastatic is started as a dependency, so its registry already exists.
+    :ok = Metastatic.Adapter.Registry.install([MyApp.Adapters.Rust])
+    Supervisor.start_link([], strategy: :one_for_one)
+  end
+end
+```
+
+If you start the registry yourself, the child-spec option is equivalent:
+
+```elixir
+{Metastatic.Adapter.Registry, plugins: [MyApp.Adapters.Rust]}
+```
+
+Either form accepts a module, `{language, module}`, or
+`{language, module, opts}`. A module built with `Metastatic.Adapter.Plugin`
+carries its own descriptor; a bare `Metastatic.Adapter` implementation gets its
+language atom derived from the module name, exactly as built-in discovery does.
+
+See `examples/third_party_plugin/` for a complete, tested example.
+
+### What registration gives you
+
+`Metastatic.Languages` is a façade over `Metastatic.Languages.Store` (ETS), so
+a registered language is visible to **every** query immediately:
+
+| Query | Result for a registered `:rust` |
+| :--- | :--- |
+| `Languages.supported_languages/0` | includes `:rust` |
+| `Languages.detect_language("x.rs")` | `{:ok, :rust}` |
+| `Languages.get_adapter(:rust)` | `{:ok, MyApp.Adapters.Rust}` |
+| `Languages.supported_extensions/0` | includes `".rs"` |
+| `Builder.from_file("x.rs")` | parses with your adapter |
+| `Builder.supported_languages/0` | lists it with your extensions/flags |
+
+`detect_language/1` is a single `:ets.lookup/2`, so the per-file hot path is
+unaffected.
+
+### Exclusions and overrides (built-ins only)
 
 A few adapters are structural but not *source languages* (natural-language
 adapters such as `english`/`spanish`) and are excluded in
-`Metastatic.Languages` via `@excluded`. You should not need this.
+`Metastatic.Languages.Builtin` via `@excluded`. You should not need this.
 
-If you need to adjust discovery (e.g. ship an adapter from a host app, or mark
-a language experimental), use config — no core edits:
+Compile-time config still adjusts the built-in set:
 
 ```elixir
 config :metastatic, :languages,
@@ -99,6 +145,9 @@ config :metastatic, :languages,
 | `:experimental` | languages needing an external toolchain outside CI |
 | `:documentation` | document languages (no callable entities, e.g. Markdown) |
 
+For a host adapter prefer runtime registration: `:include` is evaluated at
+compile time and therefore needs a recompile of Metastatic, while
+`install/1` does not.
 ---
 
 ## 3. The adapter contract
@@ -161,10 +210,63 @@ bin    = Metastatic.Priv.find_executable("cargo")
 env    = Metastatic.Priv.subprocess_env()
 ```
 
-`Priv.parser_path/1` searches the app `priv`, the compile-time source `priv`,
-Ragex's `priv`, and `priv/` under the CWD, so the bridge works in dev, as a
-dependency, and in a release. `Priv.subprocess_env/0` augments `PATH`/`NODE_PATH`
-for `mise` users and is overridable via `config :metastatic, :subprocess_env`.
+`Priv.parser_path/1` searches the `:metastatic` app `priv`, the compile-time
+source `priv`, any `config :metastatic, :priv_dirs`, Ragex's `priv`, **the host
+application's `priv`**, and `priv/` under the CWD — so a bridge shipped in your
+own application is found in dev, as a dependency, and in a release without
+configuration. `Priv.subprocess_env/0` augments `PATH`/`NODE_PATH` for `mise`
+users and is overridable via `config :metastatic, :subprocess_env`.
+
+#### Decoding the response: `Metastatic.Adapter.Bridge`
+
+Do **not** hand-roll a `decode/1` for your bridge. `Metastatic.Adapter.Bridge`
+owns the protocol and accepts every response shape in use:
+
+```elixir
+{"ok": true, "ast": {...}}                      # canonical
+{"ok": true, "source": "..."}                   # canonical, unparse direction
+{"ok": false, "error": "..."}                   # canonical error
+{"ok": false, "error": {"type": "...", "msg": "...", "line": 3}}
+{"status": "ok", "ast": {...}}                 # legacy envelope (Haskell, Agda)
+{"status": "error", "errorMessage": "..."}
+```
+
+A `null` AST is reported as an error rather than a successful parse of `nil`,
+and a malformed response never raises:
+
+```elixir
+defmodule MyApp.Adapters.Rust.Bridge do
+  @behaviour Metastatic.Adapter.Bridge
+
+  @impl true
+  def parse(source), do: run("parse", source, ".rs")
+
+  @impl true
+  def unparse(ast) do
+    with {:ok, json} <- Metastatic.Adapter.Bridge.encode(ast) do
+      run("unparse", json, ".json")
+    end
+  end
+
+  defp run(mode, input, ext) do
+    executable = Metastatic.Priv.find_executable("metastatic-rust-bridge")
+    script = Metastatic.Priv.parser_path("parsers/rust/bridge")
+
+    with {:ok, executable} <-
+           Metastatic.Adapter.Bridge.require_executable(executable, :rust) do
+      Metastatic.Adapter.Bridge.run(executable, [script, mode], input,
+        ext: ext,
+        prefix: "metastatic_rust"
+      )
+    end
+  end
+end
+```
+
+`Bridge.run/4` delegates temp-file handling and exit-code reporting to
+`Metastatic.Subprocess.run/4`, so a crashing child cannot leak a temp file, and
+`Bridge.require_executable/2` produces the same "parser unavailable" wording
+for every language.
 
 ### C. Hybrid
 
@@ -180,53 +282,63 @@ toolchains.
 
 ## 5. Step-by-step: building an adapter
 
-Let's build a hypothetical `:rust` adapter using a subprocess bridge.
+Let's build a hypothetical `:rust` adapter using a subprocess bridge. The
+module below lives in the host application (`my_app/lib/my_app/adapters/rust.ex`)
+— that is the point: nothing here is compiled into Metastatic.
 
 ### Step 1 — create the module
 
-`lib/metastatic/adapters/rust.ex`:
-
 ```elixir
-defmodule Metastatic.Adapters.Rust do
+defmodule MyApp.Adapters.Rust do
   @moduledoc """
   Rust adapter: bridges Rust source (M1, via a subprocess bridge) and
   MetaAST (M2).
   """
 
-  @behaviour Metastatic.Adapter
+  use Metastatic.Adapter.Plugin,
+    language: :rust,
+    extensions: [".rs"]
 
-  alias Metastatic.Adapters.Rust.{FromMeta, Subprocess, ToMeta}
-  alias Metastatic.Semantic.Enricher
+  alias MyApp.Adapters.Rust.{FromMeta, Bridge, ToMeta}
 
   @impl true
-  def parse(source) when is_binary(source), do: Subprocess.parse(source)
+  def parse(source) when is_binary(source), do: Bridge.parse(source)
 
   @impl true
   def to_meta(rust_ast) do
-    case ToMeta.transform(rust_ast) do
-      {:ok, meta_ast, metadata} ->
-        enriched = Enricher.enrich_tree(meta_ast, :rust)
-        {:ok, enriched, metadata}
-
-      error ->
-        error
-    end
+    rust_ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:rust)
   end
 
   @impl true
   def from_meta(meta_ast, metadata), do: FromMeta.transform(meta_ast, metadata)
 
   @impl true
-  def unparse(rust_ast), do: Subprocess.unparse(rust_ast)
-
-  @impl true
-  def file_extensions, do: [".rs"]
+  def unparse(rust_ast), do: Bridge.unparse(rust_ast)
 end
 ```
 
-That's the whole registration. `Metastatic.Languages` now reports `:rust` and
-`.rs`.
+`use Metastatic.Adapter.Plugin` injects `@behaviour Metastatic.Adapter`,
+`file_extensions/0` and the descriptor the registry reads, and validates
+`:language` / `:extensions` at compile time. `Metastatic.Adapter.enrich/3` is
+the shared "transform then enrich" step — do not hand-roll it.
 
+### Step 1b — register it
+
+```elixir
+defmodule MyApp.Application do
+  use Application
+
+  def start(_type, _args) do
+    :ok = Metastatic.Adapter.Registry.install([MyApp.Adapters.Rust])
+    Supervisor.start_link([], strategy: :one_for_one)
+  end
+end
+```
+
+That's the whole integration. `Metastatic.Languages` now reports `:rust` and
+`.rs`, and `Builder.from_file("x.rs")` parses with your adapter.
 ### Step 2 — the subprocess bridge
 
 `lib/metastatic/adapters/rust/subprocess.ex` — parse and unparse via JSON over
@@ -273,7 +385,9 @@ end
 
 Ship the actual parser under `priv/parsers/rust/`. Follow the existing
 convention: the bridge must output `{"ok": true, "ast": ...}` on success and
-`{"ok": false, "error": "..."}` on failure.
+`{"ok": false, "error": "..."}` on failure — or just use
+`Metastatic.Adapter.Bridge` (see §4B), which already handles that shape and the
+legacy `status` variant.
 
 ### Step 3 — abstraction (`ToMeta`)
 
@@ -337,21 +451,65 @@ database, HTTP, cache, queue, file, external API, auth. Ragex's semantic
 analysis and MetaCredo consume these. The domains live in
 `Metastatic.Semantic.Domains.*` and register pattern tables.
 
-Call `Metastatic.Semantic.Enricher.enrich_tree/2` in `to_meta/2` (as the Python
-adapter does) so your language gets semantic analysis for free:
+End `to_meta/1` with `Metastatic.Adapter.enrich/3` so your language gets
+semantic analysis for free:
 
 ```elixir
-enriched = Metastatic.Semantic.Enricher.enrich_tree(meta_ast, :rust)
+@impl true
+def to_meta(native_ast) do
+  native_ast
+  |> ToMeta.transform()
+  |> Metastatic.Adapter.enrich(:rust)
+end
 ```
 
-If your language has library idioms worth recognising (e.g. `reqwest::get`),
-add patterns to the relevant domain module and register them. This is optional
-but is what makes an adapter *fully-fledged* rather than merely parseable.
+`enrich/3` is the single implementation of "transform then enrich" — all eleven
+built-in adapters delegate to it. It passes `{:error, reason}` through
+untouched, honours `enrich: false`, and is a no-op for a language with no
+registered patterns (one traversal, not a wrong answer). Calling
+`Enricher.enrich_tree/2` directly still works but loses those guarantees.
 
-> **Note for Ragex:** Metastatic registers its OpKind tables from a
-> module-level side effect that only runs at compile time. Ragex calls
-> `Ragex.LanguageSupport.ensure_semantic_patterns/0` at startup to re-register
-> them; you don't need to do anything special.
+If your language has library idioms worth recognising (e.g. `reqwest::get`),
+ship a provider module and register it through config — no edit to Metastatic
+required:
+
+```elixir
+defmodule MyApp.Semantic.RustPatterns do
+  @moduledoc false
+
+  alias Metastatic.Semantic.Patterns
+
+  def register_all do
+    Patterns.register(:http, :rust, [
+      {"reqwest::get", %{operation: :request, framework: :reqwest, extract_target: :first_arg}},
+      {"reqwest::Client.*", %{operation: :request, framework: :reqwest}}
+    ])
+  end
+end
+```
+
+```elixir
+config :metastatic, :semantic,
+  pattern_providers: [MyApp.Semantic.RustPatterns],
+  callback_providers: [MyApp.Semantic.RustCallbacks]
+```
+
+`Metastatic.Semantic.ensure_registered/0` calls every built-in provider and then
+yours, so a host can extend or override a built-in table. It runs at
+application boot and lazily before the first abstraction, which means your
+patterns survive a VM restart and a `Patterns.clear_all/0` in a test suite.
+
+> **Idempotence:** `Patterns.register/3` deduplicates by match key and keeps the
+> first spec for a key, so re-registering is safe and a more specific provider
+> registered earlier keeps precedence. Do not append to the table yourself.
+>
+> **Failure isolation:** a provider that is missing or raises is logged and
+> skipped — it cannot break boot or a parse. The failure mode is "no extra
+> patterns", never an exception mid-traversal.
+
+> **Note for Ragex:** Ragex calls
+> `Ragex.LanguageSupport.ensure_semantic_patterns/0` at startup; that path now
+> delegates to `Metastatic.Semantic.ensure_registered/0`, so both agree.
 
 ---
 
@@ -464,13 +622,15 @@ To make it *fully* integrated, add entries to the Ragex-local overlay in
 
 ## 11. Checklist
 
+### For an adapter shipped inside Metastatic
+
 Before opening a PR:
 
 - [ ] Module in `lib/metastatic/adapters/<lang>.ex` with `@behaviour Metastatic.Adapter`
 - [ ] All required callbacks: `parse/1`, `to_meta/1` (or `/2`), `from_meta/2`, `unparse/1`, `file_extensions/0`
 - [ ] Dot-prefixed extensions (`[".rs"]`, not `["rs"]`)
 - [ ] Maps to the highest MetaAST layer possible; `:language_specific` only as a last resort
-- [ ] `Enricher.enrich_tree/2` called in `to_meta` (semantic support)
+- [ ] `to_meta` ends with `Metastatic.Adapter.enrich(result, :lang)` (semantic support)
 - [ ] Missing-toolchain path returns `{:error, reason}` — never raises or hangs
 - [ ] `mix test test/metastatic/adapter_contract_test.exs` passes
 - [ ] Conformance test with real snippets
@@ -479,62 +639,94 @@ Before opening a PR:
 - [ ] `@moduledoc` explains the M1 shape and the mapping strategy
 - [ ] (Optional) Ragex overlay entries for validator / native analyzer / SCIP
 
+### For a third-party adapter (host application)
+
+- [ ] `use Metastatic.Adapter.Plugin, language: ..., extensions: [...]`
+- [ ] All required callbacks (the macro supplies `file_extensions/0`)
+- [ ] `to_meta` ends with `Metastatic.Adapter.enrich(result, :lang)`
+- [ ] Registered at boot with `Metastatic.Adapter.Registry.install/1`
+- [ ] (Optional) A pattern provider listed in `config :metastatic, :semantic, pattern_providers:`
+- [ ] Bridge scripts under **your** app's `priv/` (found by `Priv.parser_path/1`)
+- [ ] A test that parses, round-trips and — ideally — translates to another language
+
+Start from `examples/third_party_plugin/`, which is a complete, tested example
+of every item above.
+
 ---
 
 ## 12. Reference: a complete skeleton
 
+### Third-party (host application)
+
 ```
-lib/metastatic/adapters/rust.ex
-lib/metastatic/adapters/rust/subprocess.ex
-lib/metastatic/adapters/rust/to_meta.ex
-lib/metastatic/adapters/rust/from_meta.ex
-priv/parsers/rust/parser        # the bridge binary/script
-test/metastatic/adapters/rust_conformance_test.exs
-test/fixtures/rust/*.rs
+my_app/lib/my_app/adapters/rust.ex
+my_app/lib/my_app/adapters/rust/bridge.ex
+my_app/lib/my_app/adapters/rust/to_meta.ex
+my_app/lib/my_app/adapters/rust/from_meta.ex
+my_app/lib/my_app/semantic/rust_patterns.ex
+my_app/priv/parsers/rust/bridge        # the bridge binary/script
+my_app/config/config.exs               # pattern_providers
+my_app/test/adapters/rust_test.exs
 ```
 
 ```elixir
-# lib/metastatic/adapters/rust.ex
-defmodule Metastatic.Adapters.Rust do
+# my_app/lib/my_app/adapters/rust.ex
+defmodule MyApp.Adapters.Rust do
   @moduledoc """
   Rust ⇄ MetaAST adapter.
 
-  M1: a JSON AST emitted by `priv/parsers/rust/parser`.
+  M1: a JSON AST emitted by `priv/parsers/rust/bridge`.
   Mapping: statements → `:block`, `let` → `:variable`/`:type_annotation`,
   `fn` → `:function_def`, expressions → core/extended nodes.
   """
 
-  @behaviour Metastatic.Adapter
+  use Metastatic.Adapter.Plugin, language: :rust, extensions: [".rs"]
 
-  alias Metastatic.Adapters.Rust.{FromMeta, Subprocess, ToMeta}
-  alias Metastatic.Semantic.Enricher
+  alias MyApp.Adapters.Rust.{Bridge, FromMeta, ToMeta}
 
   @impl true
-  def parse(source) when is_binary(source), do: Subprocess.parse(source)
+  def parse(source) when is_binary(source), do: Bridge.parse(source)
 
   @impl true
   def to_meta(ast) do
-    case ToMeta.transform(ast) do
-      {:ok, meta_ast, metadata} ->
-        {:ok, Enricher.enrich_tree(meta_ast, :rust), metadata}
-
-      error ->
-        error
-    end
+    ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:rust)
   end
 
   @impl true
   def from_meta(meta_ast, metadata), do: FromMeta.transform(meta_ast, metadata)
 
   @impl true
-  def unparse(ast), do: Subprocess.unparse(ast)
-
-  @impl true
-  def file_extensions, do: [".rs"]
+  def unparse(ast), do: Bridge.unparse(ast)
 end
 ```
 
-That's it — Metastatic discovers it, derives `.rs` → `:rust`, and the whole
+```elixir
+# my_app/lib/my_app/application.ex
+defmodule MyApp.Application do
+  use Application
+
+  def start(_type, _args) do
+    :ok = Metastatic.Adapter.Registry.install([MyApp.Adapters.Rust])
+    Supervisor.start_link([], strategy: :one_for_one)
+  end
+end
+```
+
+```elixir
+# my_app/config/config.exs
+config :metastatic, :semantic,
+  pattern_providers: [MyApp.Semantic.RustPatterns]
+```
+
+That's it — Metastatic registers it, derives `.rs` → `:rust`, and the whole
 pipeline (translate, validate, inspect, semantic analysis) works. See
-`Metastatic.Adapter` for the formal contract and the existing adapters for
-production examples.
+`examples/third_party_plugin/` for a running example and `Metastatic.Adapter`
+for the formal contract.
+
+### Inside Metastatic
+
+The same module, but with `@behaviour Metastatic.Adapter` in place of the
+`use` line and the files under `lib/metastatic/adapters/rust/`. Compile-time
+discovery picks it up on the next build; no registration call is needed.
