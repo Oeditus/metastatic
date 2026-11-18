@@ -291,6 +291,22 @@ defmodule Metastatic.Semantic.Domains.Queue do
         {"job.schedule", %{operation: :schedule, framework: :agenda, extract_target: :first_arg}},
         {"job.save", %{operation: :enqueue, framework: :agenda, extract_target: :none}}
       ]
+
+    # ----- Rust Queue Patterns -----
+
+    def rust_patterns,
+      do: [
+        {~r/^lapin::/, %{operation: :publish, framework: :lapin, extract_target: :none}},
+        {"*.basic_publish", %{operation: :publish, framework: :lapin, extract_target: :none}},
+        {"*.basic_consume", %{operation: :consume, framework: :lapin, extract_target: :none}},
+        {"*.basic_ack", %{operation: :acknowledge, framework: :lapin, extract_target: :none}},
+        {"*.basic_reject", %{operation: :reject, framework: :lapin, extract_target: :none}},
+        {~r/^rdkafka::/, %{operation: :publish, framework: :rdkafka, extract_target: :none}},
+        {"*.send", %{operation: :publish, framework: :rdkafka, extract_target: :none}},
+        {"*.recv", %{operation: :consume, framework: :rdkafka, extract_target: :none}},
+        {~r/^aws_sdk_sqs::/,
+         %{operation: :enqueue, framework: :aws_sdk_sqs, extract_target: :none}}
+      ]
   end
 
   # ----- Registration -----
@@ -333,6 +349,9 @@ defmodule Metastatic.Semantic.Domains.Queue do
       R.javascript_bullmq_patterns() ++
         R.javascript_amqplib_patterns() ++ R.javascript_agenda_patterns()
     )
+
+    # Rust patterns
+    Patterns.register(:queue, :rust, R.rust_patterns())
 
     :ok
   end

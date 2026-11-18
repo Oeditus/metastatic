@@ -1,3 +1,44 @@
+## Unreleased
+
+### Added — Rust language adapter (Phases 0–1)
+
+Rust is now a first-class source language: `.rs` files are discovered, parsed,
+abstracted to MetaAST and printed back. The parser is
+[`syn`](https://docs.rs/syn) (stable, pure Rust, complete grammar) and the
+printer is [`prettyplease`](https://docs.rs/prettyplease), driven by a small
+bridge CLI in `priv/parsers/rust/`.
+
+- **`priv/parsers/rust/`** — a `cargo` crate (`metastatic-rust-parser`) that
+  speaks the same JSON protocol as every other bridge, so
+  `Metastatic.Adapter.Bridge` decodes it with no bespoke handling. Modes:
+  `parse`, `unparse`, `fmt`, `selftest`.
+- **`Metastatic.Adapters.Rust`** — `parse/1`, `to_meta/1`, `from_meta/2`,
+  `unparse/1`, `file_extensions/0` (`[".rs"]`), plus `format/1`, `selftest/0`
+  and `available?/0`. Discovered automatically by `Languages.Builtin`.
+- **`Metastatic.Adapters.Rust.Subprocess`** — toolchain resolution mirroring the
+  SQL adapter: prebuilt binary, local release build, `PATH`, then a `cargo run`
+  source fallback. A missing toolchain is a clear `{:error, reason}` — never a
+  raise, never a hang.
+- **`Metastatic.Adapters.Rust.ToMeta` / `.FromMeta`** — the M1 ⇄ M2 mapping:
+  literals, operators, calls, `fn`/`struct`/`enum`/`trait`/`impl`/`mod`,
+  `use`, `match`, loops, closures, `?`, `.await`, and patterns. Constructs with
+  no cross-language analogue are preserved as `:language_specific` carrying the
+  original M1 node, so they round-trip exactly.
+
+### Notes
+
+- **Semantic round-trip, not byte-identical.** `prettyplease` normalises
+  formatting to rustfmt style, so the target is a re-parsed AST equal to the
+  original — which the bridge's `selftest` mode verifies over a corpus covering
+  every mapped construct.
+- **Bare expressions are accepted.** `syn::parse_file` only accepts items, so the
+  bridge retries a failed file parse as an expression; `1 + 2` works, as it does
+  for every other adapter.
+- **Stdin is never read.** The Elixir side always passes a temp-file path, and a
+  missing path is a usage error, so a misconfigured caller fails fast instead of
+  blocking on a pipe that will never close.
+- Rust-tagged tests (`@tag :rust`) skip cleanly when no toolchain is present.
+
 ## v0.38.0
 
 ### Added — third-party language plugins (complete)

@@ -370,6 +370,29 @@ defmodule Metastatic.Semantic.Domains.Http do
          %{operation: :delete, framework: :superagent, extract_target: :first_arg}},
         {"request.head", %{operation: :head, framework: :superagent, extract_target: :first_arg}}
       ]
+
+    # ----- Rust HTTP Patterns -----
+
+    def rust_patterns,
+      do: [
+        {"reqwest::get", %{operation: :get, framework: :reqwest, extract_target: :first_arg}},
+        {"reqwest::post", %{operation: :post, framework: :reqwest, extract_target: :first_arg}},
+        {"reqwest::put", %{operation: :put, framework: :reqwest, extract_target: :first_arg}},
+        {"reqwest::delete",
+         %{operation: :delete, framework: :reqwest, extract_target: :first_arg}},
+        {"reqwest::Client::new",
+         %{operation: :request, framework: :reqwest, extract_target: :none}},
+        {"*.get", %{operation: :get, framework: :reqwest, extract_target: :first_arg}},
+        {"*.post", %{operation: :post, framework: :reqwest, extract_target: :first_arg}},
+        {"*.put", %{operation: :put, framework: :reqwest, extract_target: :first_arg}},
+        {"*.patch", %{operation: :patch, framework: :reqwest, extract_target: :first_arg}},
+        {"*.send", %{operation: :request, framework: :reqwest, extract_target: :none}},
+        {"hyper::Client", %{operation: :request, framework: :hyper, extract_target: :none}},
+        {"ureq::get", %{operation: :get, framework: :ureq, extract_target: :first_arg}},
+        {"ureq::post", %{operation: :post, framework: :ureq, extract_target: :first_arg}},
+        {"surf::get", %{operation: :get, framework: :surf, extract_target: :first_arg}},
+        {"surf::post", %{operation: :post, framework: :surf, extract_target: :first_arg}}
+      ]
   end
 
   # ----- Registration -----
@@ -414,6 +437,9 @@ defmodule Metastatic.Semantic.Domains.Http do
         R.javascript_axios_patterns() ++
         R.javascript_got_patterns() ++ R.javascript_superagent_patterns()
     )
+
+    # Rust patterns
+    Patterns.register(:http, :rust, R.rust_patterns())
 
     :ok
   end

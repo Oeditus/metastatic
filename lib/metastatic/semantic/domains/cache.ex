@@ -321,6 +321,29 @@ defmodule Metastatic.Semantic.Domains.Cache do
          %{operation: :increment, framework: :ioredis, extract_target: :first_arg}},
         {"client.decr", %{operation: :decrement, framework: :ioredis, extract_target: :first_arg}}
       ]
+
+    # ----- Rust Cache Patterns -----
+
+    def rust_patterns,
+      do: [
+        {"redis::get", %{operation: :get, framework: :redis_rs, extract_target: :first_arg}},
+        {"redis::set", %{operation: :set, framework: :redis_rs, extract_target: :first_arg}},
+        {"redis::set_ex", %{operation: :set, framework: :redis_rs, extract_target: :first_arg}},
+        {"redis::del", %{operation: :delete, framework: :redis_rs, extract_target: :first_arg}},
+        {"redis::exists",
+         %{operation: :exists, framework: :redis_rs, extract_target: :first_arg}},
+        {"redis::expire",
+         %{operation: :expire, framework: :redis_rs, extract_target: :first_arg}},
+        {"redis::incr",
+         %{operation: :increment, framework: :redis_rs, extract_target: :first_arg}},
+        {"redis::decr",
+         %{operation: :decrement, framework: :redis_rs, extract_target: :first_arg}},
+        {"*.get", %{operation: :get, framework: :moka, extract_target: :first_arg}},
+        {"*.insert", %{operation: :set, framework: :moka, extract_target: :first_arg}},
+        {"*.invalidate", %{operation: :invalidate, framework: :moka, extract_target: :first_arg}},
+        {"*.get_or_insert", %{operation: :fetch, framework: :moka, extract_target: :first_arg}},
+        {"cached::proc_macro", %{operation: :fetch, framework: :cached, extract_target: :none}}
+      ]
   end
 
   # ----- Registration -----
@@ -362,6 +385,9 @@ defmodule Metastatic.Semantic.Domains.Cache do
       :javascript,
       R.javascript_nodecache_patterns() ++ R.javascript_ioredis_patterns()
     )
+
+    # Rust patterns
+    Patterns.register(:cache, :rust, R.rust_patterns())
 
     :ok
   end

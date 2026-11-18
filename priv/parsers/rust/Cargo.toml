@@ -1,0 +1,42 @@
+[package]
+name = "metastatic-rust-parser"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Rust AST bridge for Metastatic: parses Rust source into JSON (M1) and prints it back."
+license = "GPL-3.0"
+
+[[bin]]
+name = "metastatic-rust-parser"
+path = "src/main.rs"
+
+[dependencies]
+# `full` gives the complete Rust grammar; `extra-traits` gives `Debug`/`PartialEq`
+# on every node, which the `selftest` mode uses to compare round-tripped trees.
+syn = { version = "2", features = ["full", "extra-traits", "parsing", "printing", "visit"] }
+# `span-locations` is load-bearing: without it `Span::start()`/`end()` return
+# line 0 / col 0 for `syn`-parsed files, and every MetaAST node would lose its
+# source position. Risk R1 in RUST_IMPL.md is exactly this.
+proc-macro2 = { version = "1", features = ["span-locations"] }
+prettyplease = "0.2"
+quote = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Optional lossless concrete-syntax-tree backend (Phase 6). Behind a feature so
+# the default build stays small and fast; `--features ra` enables byte-exact
+# round-tripping at the cost of a much larger dependency tree.
+ra_ap_syntax = { version = "0.0.363", optional = true }
+
+[features]
+default = []
+# Enables the `ra` backend: `metastatic-rust-parser fmt --backend ra`.
+ra = ["dep:ra_ap_syntax"]
+
+[profile.release]
+# The bridge is a short-lived CLI: optimise for a fast cold start and a small
+# binary rather than peak throughput.
+opt-level = 2
+lto = true
+codegen-units = 1
+strip = true

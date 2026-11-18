@@ -333,6 +333,40 @@ defmodule Metastatic.Semantic.Domains.File do
         {"fsPromises.access",
          %{operation: :exists, framework: :nodejs_fs_promises, extract_target: :first_arg}}
       ]
+
+    # ----- Rust File Patterns -----
+
+    def rust_patterns,
+      do: [
+        {"std::fs::read",
+         %{operation: :read, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::read_to_string",
+         %{operation: :read, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::write",
+         %{operation: :write, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::remove_file",
+         %{operation: :delete, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::remove_dir_all",
+         %{operation: :rmdir, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::create_dir",
+         %{operation: :mkdir, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::create_dir_all",
+         %{operation: :mkdir, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::copy",
+         %{operation: :copy, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::rename",
+         %{operation: :move, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::metadata",
+         %{operation: :stat, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"std::fs::read_dir",
+         %{operation: :list, framework: :rust_std_fs, extract_target: :first_arg}},
+        {"tokio::fs::read",
+         %{operation: :read, framework: :tokio_fs, extract_target: :first_arg}},
+        {"tokio::fs::write",
+         %{operation: :write, framework: :tokio_fs, extract_target: :first_arg}},
+        {"tokio::fs::remove_file",
+         %{operation: :delete, framework: :tokio_fs, extract_target: :first_arg}}
+      ]
   end
 
   # ----- Registration -----
@@ -373,6 +407,9 @@ defmodule Metastatic.Semantic.Domains.File do
       :javascript,
       R.javascript_fs_patterns() ++ R.javascript_fspromises_patterns()
     )
+
+    # Rust patterns
+    Patterns.register(:file, :rust, R.rust_patterns())
 
     :ok
   end

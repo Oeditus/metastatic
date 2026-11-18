@@ -130,6 +130,11 @@ defmodule Metastatic.MixProject do
         priv/parsers/sql/Cargo.toml
         priv/parsers/sql/Cargo.lock
         priv/parsers/sql/src
+        priv/parsers/rust/Cargo.toml
+        priv/parsers/rust/Cargo.lock
+        priv/parsers/rust/rust-toolchain.toml
+        priv/parsers/rust/README.md
+        priv/parsers/rust/src
         .formatter.exs
         mix.exs
         README.md
@@ -277,6 +282,10 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapters.Ruby.FromMeta,
         Metastatic.Adapters.Ruby.Subprocess,
         Metastatic.Adapters.Ruby.ToMeta,
+        Metastatic.Adapters.Rust,
+        Metastatic.Adapters.Rust.FromMeta,
+        Metastatic.Adapters.Rust.Subprocess,
+        Metastatic.Adapters.Rust.ToMeta,
         Metastatic.Adapters.TypeScript,
         Metastatic.Adapters.English,
         Metastatic.Adapters.Spanish
