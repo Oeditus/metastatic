@@ -1,4 +1,4 @@
-## Unreleased
+## v0.38.0
 
 ### Added — third-party language plugins (complete)
 
