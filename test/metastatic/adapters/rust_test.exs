@@ -93,6 +93,9 @@ defmodule Metastatic.Adapters.RustTest do
     end
 
     test "parser_executable/0 resolves a real path" do
+      # In CI the crate is built on demand by `cargo run`, so the resolved
+      # executable is `cargo` itself rather than a prebuilt binary. The
+      # contract is "a path to something runnable", not "a prebuilt binary".
       assert path = Subprocess.parser_executable()
       assert File.exists?(path)
     end

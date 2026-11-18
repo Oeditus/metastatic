@@ -69,6 +69,33 @@ defmodule Metastatic.Adapters.Rust.Subprocess do
   end
 
   @doc """
+  Returns `true` when the bridge binary in use was built with the lossless
+  `ra_ap_syntax` backend (`--features ra`).
+
+  The `:ra` backend is a compile-time feature, so whether it is available
+  depends on *how the binary was built*, not on the source tree. Callers that
+  want to assert byte-exact behaviour must check this rather than assuming.
+
+  Detection is empirical: a probe source that `prettyplease` would rewrite is
+  formatted with `backend: :ra`, and the result is compared with the input.
+  Returns `false` when the bridge is unavailable or falls back.
+
+  ## Examples
+
+      iex> is_boolean(Metastatic.Adapters.Rust.Subprocess.ra_available?())
+      true
+  """
+  @spec ra_available?() :: boolean()
+  def ra_available? do
+    probe = "fn  probe( ){}\n"
+
+    case format(probe, backend: :ra) do
+      {:ok, ^probe} -> true
+      _ -> false
+    end
+  end
+
+  @doc """
   Normalise Rust source formatting without changing its semantics.
 
   Uses `prettyplease`, so the output is rustfmt-style but not byte-identical to
@@ -140,9 +167,23 @@ defmodule Metastatic.Adapters.Rust.Subprocess do
   @doc """
   Returns the path of the parser executable that will be used, or `nil`.
 
-  Useful for diagnostics and for tests that need to skip when no toolchain is
-  installed. Unlike `run_parser/3` this does not build anything: the `cargo`
-  fallback is reported as the `cargo` path itself.
+  Resolution order matches `run_parser/3`:
+
+    1. a prebuilt binary in `priv/parsers/rust/bin/`
+    2. a local `cargo build --release` artefact
+    3. `metastatic-rust-parser` on `PATH`
+    4. `cargo` itself (the source fallback — it will build and run the crate)
+
+  Nothing is built here: when only `cargo` is available, the `cargo` path is
+  returned. Use `available?/0` when the question is "can I parse?" rather than
+  "which executable?" — the two differ only in that `available?/0` also
+  verifies the bundled sources are present.
+
+  ## Examples
+
+      iex> path = Metastatic.Adapters.Rust.Subprocess.parser_executable()
+      iex> is_binary(path) or is_nil(path)
+      true
   """
   @spec parser_executable() :: String.t() | nil
   def parser_executable do
@@ -152,7 +193,8 @@ defmodule Metastatic.Adapters.Rust.Subprocess do
     cond do
       File.exists?(bin_path) -> bin_path
       File.exists?(release_path) -> release_path
-      true -> Priv.find_executable("metastatic-rust-parser")
+      bin = Priv.find_executable("metastatic-rust-parser") -> bin
+      true -> Priv.find_executable("cargo")
     end
   end
 

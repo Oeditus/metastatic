@@ -66,6 +66,24 @@ jobs:
       - name: Set up Rust for packaged SQL parser smoke tests
         uses: dtolnay/rust-toolchain@stable
 
+      # The Rust adapter shells out to `priv/parsers/rust`. Without this step the
+      # first test that touches it pays a cold `cargo build` (and the `ra`
+      # backend is unavailable because `cargo run` uses default features).
+      - name: Build the Rust parser bridge
+        run: cargo build --release --locked
+        working-directory: priv/parsers/rust
+
+      - name: Cache cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            priv/parsers/rust/target
+          key: ${{ runner.os }}-cargo-rust-${{ hashFiles('priv/parsers/rust/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-rust-
+
       - name: Restore dependencies cache
         uses: actions/cache@v4
         with:

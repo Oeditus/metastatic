@@ -181,4 +181,23 @@ defmodule Metastatic.Adapters.Rust do
   def available? do
     Subprocess.available?()
   end
+
+  @doc """
+  Returns `true` when the bridge binary in use supports the lossless
+  `ra_ap_syntax` backend (`backend: :ra`).
+
+  This is a property of *how the binary was built*, not of the source tree: a
+  bridge compiled with `--features ra` round-trips byte-for-byte, while a
+  default build falls back to `prettyplease` and reports `lossless: false`.
+  Callers that need byte-exact output should check this first.
+
+  ## Examples
+
+      iex> is_boolean(Metastatic.Adapters.Rust.lossless_backend?())
+      true
+  """
+  @spec lossless_backend?() :: boolean()
+  def lossless_backend? do
+    Subprocess.ra_available?()
+  end
 end
