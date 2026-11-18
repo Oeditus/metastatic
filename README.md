@@ -39,6 +39,10 @@ Metastatic is a **foundation library** that other tools build upon.
 
 ## Quick Start
 
+Metastatic requires Erlang/OTP 27 or newer for its built-in `:json` module.
+`Metastatic.JSON` handles JSON without an external runtime dependency, preserving
+Elixir `nil` as JSON `null`.
+
 ### CLI Tools
 
 Metastatic provides command-line tools for cross-language translation, AST inspection, and equivalence validation:

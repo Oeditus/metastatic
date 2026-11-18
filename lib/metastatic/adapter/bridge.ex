@@ -135,7 +135,7 @@ defmodule Metastatic.Adapter.Bridge do
   """
   @spec decode(String.t()) :: response()
   def decode(output) when is_binary(output) do
-    case Jason.decode(output) do
+    case Metastatic.JSON.decode(output) do
       {:ok, decoded} -> decode_map(decoded)
       {:error, reason} -> {:error, "JSON decode failed: #{inspect(reason)}"}
     end
@@ -301,7 +301,7 @@ defmodule Metastatic.Adapter.Bridge do
   """
   @spec encode(term()) :: {:ok, String.t()} | {:error, String.t()}
   def encode(ast) do
-    {:ok, Jason.encode!(ast)}
+    {:ok, Metastatic.JSON.encode!(ast)}
   rescue
     error -> {:error, "JSON encode failed: #{Exception.message(error)}"}
   end

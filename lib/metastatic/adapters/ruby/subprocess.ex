@@ -37,7 +37,7 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   # `Bridge.decode/1` sees it. Every other shape (including the legacy
   # `status` envelope) is handled by the shared decoder.
   defp decode_parse(result) do
-    case Jason.decode(result) do
+    case Metastatic.JSON.decode(result) do
       {:ok, %{"status" => "ok", "ast" => nil}} -> {:error, "Parse error: syntax error"}
       _ -> Bridge.decode(result)
     end

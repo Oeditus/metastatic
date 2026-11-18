@@ -150,7 +150,7 @@ defmodule Metastatic.Adapter.BridgeTest do
   describe "encode/1" do
     test "encodes an encodable term" do
       assert {:ok, json} = Bridge.encode(%{"type" => "File"})
-      assert Jason.decode!(json) == %{"type" => "File"}
+      assert Metastatic.JSON.decode!(json) == %{"type" => "File"}
     end
 
     test "reports an unencodable term instead of raising" do

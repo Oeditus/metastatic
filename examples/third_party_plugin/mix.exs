@@ -37,8 +37,7 @@ defmodule MyLisp.MixProject do
     [
       # A real third-party consumer depends on the published package. The path
       # dependency keeps the example runnable from a checkout.
-      {:metastatic, path: "../.."},
-      {:jason, "~> 1.4"}
+      {:metastatic, path: "../.."}
     ]
   end
 end

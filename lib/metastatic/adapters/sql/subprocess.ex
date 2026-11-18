@@ -62,7 +62,7 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
   # listed in `:unsupported` rather than silently dropped. Everything else
   # (the envelope, the error shapes) is `Bridge.decode/1`.
   defp decode_parse_result(result) do
-    case Jason.decode(result) do
+    case Metastatic.JSON.decode(result) do
       {:ok, %{"ok" => true, "ast" => ast} = decoded} ->
         case Map.get(decoded, "unsupported") do
           unsupported when is_list(unsupported) and unsupported != [] ->

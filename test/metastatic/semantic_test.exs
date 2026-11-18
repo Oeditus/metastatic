@@ -93,8 +93,10 @@ defmodule Metastatic.SemanticTest do
   describe "configured providers" do
     defmodule GoodProvider do
       @moduledoc false
+      alias Metastatic.Semantic.Patterns
+
       def register_all do
-        Metastatic.Semantic.Patterns.register(:db, :testlang, [
+        Patterns.register(:db, :testlang, [
           {"TestRepo.get", %{operation: :retrieve, framework: :test, extract_target: :first_arg}}
         ])
       end

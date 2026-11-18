@@ -314,7 +314,7 @@ defmodule Metastatic.CLI.Formatter do
   defp render_json(node_map) do
     node_map
     |> json_map()
-    |> Jason.encode!(pretty: true)
+    |> Metastatic.JSON.encode!(pretty: true)
   end
 
   defp json_map(%{type: :literal, meta: meta, children: value}) do

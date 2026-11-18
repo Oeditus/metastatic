@@ -21,10 +21,10 @@ defmodule Metastatic.Adapters.Agda.Unparser do
     case val do
       %{"literalType" => "int", "value" => v} -> to_string(v)
       %{"literalType" => "float", "value" => v} -> to_string(v)
-      %{"literalType" => "string", "value" => v} -> Jason.encode!(v)
+      %{"literalType" => "string", "value" => v} -> Metastatic.JSON.encode!(v)
       %{"literalType" => "char", "value" => v} -> "'#{v}'"
       v when is_integer(v) or is_float(v) -> to_string(v)
-      v when is_binary(v) -> Jason.encode!(v)
+      v when is_binary(v) -> Metastatic.JSON.encode!(v)
       _ -> inspect(val)
     end
   end

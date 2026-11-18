@@ -353,7 +353,7 @@ defmodule Mix.Tasks.Metastatic.InspectTest do
       # "Filtered AST" heading. Assert the whole output parses as JSON.
       refute output =~ "Filtered AST"
       refute output =~ "Language:"
-      assert {:ok, _decoded} = Jason.decode(String.trim(output))
+      assert {:ok, _decoded} = Metastatic.JSON.decode(String.trim(output))
     end
 
     test "plain format with explicit language" do

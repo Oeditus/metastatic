@@ -2,6 +2,7 @@ defmodule Metastatic.Adapter.RegistryTest do
   use ExUnit.Case, async: false
 
   alias Metastatic.Adapter.Registry
+  alias Metastatic.Languages.Builtin
 
   # Mock adapter for testing
   defmodule MockAdapter do
@@ -46,7 +47,7 @@ defmodule Metastatic.Adapter.RegistryTest do
   end
 
   defp builtin?(language) do
-    Enum.any?(Metastatic.Languages.Builtin.all(), &(&1.language == language))
+    Enum.any?(Builtin.all(), &(&1.language == language))
   end
 
   describe "register/2" do

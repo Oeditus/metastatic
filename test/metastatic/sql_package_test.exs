@@ -59,10 +59,8 @@ defmodule Metastatic.SQLPackageTest do
     # Only load packaged source files in a fresh VM. The parent application's
     # priv directory and compile-time checkout must not mask missing assets.
     #
-    # `Metastatic.Subprocess` must be loaded explicitly: `SQL.Subprocess`
-    # delegates temp-file handling to it, and `-r` does not resolve
-    # dependencies automatically. Omitting it surfaces as
-    # `UndefinedFunctionError: Metastatic.Subprocess.run/4 is undefined`.
+    # `-r` does not resolve dependencies automatically, so load the shared
+    # subprocess, OTP JSON wrapper, and bridge explicitly from the package.
     script = """
     source = "CREATE OR REPLACE VIEW active_items AS SELECT id FROM items WHERE deleted_at IS NULL"
     alias Metastatic.Adapters.SQL.Subprocess
@@ -80,6 +78,10 @@ defmodule Metastatic.SQLPackageTest do
           Path.join(package, "lib/metastatic/priv.ex"),
           "-r",
           Path.join(package, "lib/metastatic/subprocess.ex"),
+          "-r",
+          Path.join(package, "lib/metastatic/json.ex"),
+          "-r",
+          Path.join(package, "lib/metastatic/adapter/bridge.ex"),
           "-r",
           Path.join(package, "lib/metastatic/adapters/sql/subprocess.ex"),
           "-e",

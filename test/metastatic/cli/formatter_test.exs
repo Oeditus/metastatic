@@ -122,7 +122,7 @@ defmodule Metastatic.CLI.FormatterTest do
     end
 
     test "produces valid JSON" do
-      assert {:ok, _} = Jason.decode(Formatter.format(@binary_op, :json))
+      assert {:ok, _} = Metastatic.JSON.decode(Formatter.format(@binary_op, :json))
     end
   end
 

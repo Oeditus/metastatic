@@ -60,7 +60,6 @@ defmodule Metastatic.MixProject do
   defp deps do
     [
       # Core dependencies
-      {:jason, "~> 1.4"},
       {:ex_panda, "~> 0.2"},
 
       # NOTE: the optional `Dllb` cache backend (see `Metastatic.Cache.DLLB`)

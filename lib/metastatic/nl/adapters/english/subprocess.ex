@@ -161,7 +161,7 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
                stderr_to_stdout: true
              ) do
           {output, 0} ->
-            case Jason.decode(output) do
+            case Metastatic.JSON.decode(output) do
               {:ok, %{"ok" => true, "ast" => ast}} ->
                 {:ok, ast}
 

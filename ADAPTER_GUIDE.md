@@ -355,7 +355,7 @@ defmodule Metastatic.Adapters.Rust.Subprocess do
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
     with {:ok, json} <- run(@parser_path, source),
-         {:ok, %{"ok" => true, "ast" => ast}} <- Jason.decode(json) do
+         {:ok, %{"ok" => true, "ast" => ast}} <- Metastatic.JSON.decode(json) do
       {:ok, ast}
     else
       {:ok, %{"ok" => false, "error" => err}} -> {:error, err}

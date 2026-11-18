@@ -126,7 +126,7 @@ defmodule Mix.Tasks.Metastatic.SupplementalCheck do
     result
     |> Map.put(:source_language, source_lang)
     |> Map.put(:target_language, target_lang)
-    |> Jason.encode!(pretty: true)
+    |> Metastatic.JSON.encode!(pretty: true)
   end
 
   defp format_result(result, source_lang, target_lang, :detailed, compatible?) do
@@ -184,7 +184,7 @@ defmodule Mix.Tasks.Metastatic.SupplementalCheck do
   end
 
   defp format_constructs(result, :json) do
-    Jason.encode!(result, pretty: true)
+    Metastatic.JSON.encode!(result, pretty: true)
   end
 
   defp format_constructs(result, :detailed) do

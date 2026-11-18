@@ -11,6 +11,7 @@ defmodule Metastatic.Adapter.EnrichTest do
   use ExUnit.Case, async: false
 
   alias Metastatic.Adapter
+  alias Metastatic.Adapters.Python
   alias Metastatic.Semantic
 
   setup do
@@ -75,7 +76,7 @@ defmodule Metastatic.Adapter.EnrichTest do
         "keywords" => []
       }
 
-      assert {:ok, meta_ast, _metadata} = Metastatic.Adapters.Python.to_meta(ast)
+      assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
       assert is_tuple(meta_ast)
     end
   end
