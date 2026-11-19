@@ -36,20 +36,96 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     {:ok, %{"type" => "var", "name" => name}}
   end
 
-  # M2.1 Core Layer - Binary Operations (3-tuple format)
+  # M2.1 Core Layer - Unary Operations (3-tuple format)
 
+  def transform({:unary_op, meta, [operand]}, _metadata) when is_list(meta) do
+    op = Keyword.get(meta, :operator)
+
+    with {:ok, operand_ast} <- transform(operand, %{}) do
+      case op do
+        :- ->
+          {:ok, %{"type" => "negate", "expression" => operand_ast}}
+
+        _ ->
+          {:ok,
+           %{"type" => "prefix", "operator" => Atom.to_string(op), "expression" => operand_ast}}
+      end
+    end
+  end
+
+  # M2.1 Core Layer - Binary Operations (3-tuple format)
   def transform({:binary_op, meta, [left, right]}, _metadata) when is_list(meta) do
     op = Keyword.get(meta, :operator)
 
-    with {:ok, left_ast} <- transform(left, %{}),
-         {:ok, right_ast} <- transform(right, %{}) do
-      {:ok,
-       %{
-         "type" => "infix",
-         "left" => left_ast,
-         "operator" => Atom.to_string(op),
-         "right" => right_ast
-       }}
+    if Keyword.get(meta, :category) == :pattern do
+      # Infix constructor pattern: x : xs
+      with {:ok, left_ast} <- transform_pattern(left),
+           {:ok, right_ast} <- transform_pattern(right) do
+        {:ok,
+         %{
+           "type" => "infix_pat",
+           "left" => left_ast,
+           "operator" => to_string(op),
+           "right" => right_ast
+         }}
+      end
+    else
+      with {:ok, left_ast} <- transform(left, %{}),
+           {:ok, right_ast} <- transform(right, %{}) do
+        {:ok,
+         %{
+           "type" => "infix",
+           "left" => left_ast,
+           "operator" => to_string(op),
+           "right" => right_ast
+         }}
+      end
+    end
+  end
+
+  # M2.1 Core Layer - Ranges (enum sequences)
+
+  def transform({:range, meta, [from, to]}, _metadata) when is_list(meta) do
+    with {:ok, from_ast} <- transform(from, %{}),
+         {:ok, to_ast} <- transform(to, %{}) do
+      {:ok, %{"type" => "enum_from_to", "from" => from_ast, "to" => to_ast}}
+    end
+  end
+
+  # Pattern-shaped nodes reached outside a match arm (e.g. do-notation
+  # generators) are reified with the pattern reifier.
+
+  def transform({:tuple, meta, elements}, _metadata) when is_list(meta) do
+    if Keyword.get(meta, :pattern, false) do
+      transform_pattern({:tuple, meta, elements})
+    else
+      transform_collection(elements, :tuple)
+    end
+  end
+
+  def transform({:list, meta, elements}, _metadata) when is_list(meta) do
+    if Keyword.get(meta, :pattern, false) do
+      transform_pattern({:list, meta, elements})
+    else
+      transform_collection(elements, Keyword.get(meta, :collection_type, :list))
+    end
+  end
+
+  def transform({:function_call, meta, args}, _metadata) when is_list(meta) do
+    if Keyword.get(meta, :pattern, false) do
+      transform_pattern({:function_call, meta, args})
+    else
+      transform_function_call(Keyword.get(meta, :name), args)
+    end
+  end
+
+  # M2.1 Core Layer - Maps (Haskell record construction)
+
+  def transform({:map, meta, pairs}, _metadata) when is_list(meta) do
+    if Keyword.get(meta, :record, false) do
+      transform_record_constr(Keyword.get(meta, :constructor), pairs)
+    else
+      {:error, "Unsupported MetaAST construct for Haskell reification: map without :record"}
     end
   end
 
@@ -89,26 +165,6 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
          "else" => else_ast
        }}
     end
-  end
-
-  # M2.1 Core Layer - Function Calls (3-tuple format)
-
-  def transform({:function_call, meta, args}, _metadata) when is_list(meta) do
-    name = Keyword.get(meta, :name)
-    transform_function_call(name, args)
-  end
-
-  # M2.1 Core Layer - Lists (3-tuple format)
-
-  def transform({:list, meta, elements}, _metadata) when is_list(meta) do
-    collection_type = Keyword.get(meta, :collection_type, :list)
-    transform_collection(elements, collection_type)
-  end
-
-  # M2.1 Core Layer - Tuples (3-tuple format)
-
-  def transform({:tuple, _meta, elements}, _metadata) when is_list(elements) do
-    transform_collection(elements, :tuple)
   end
 
   # M2.1 Core Layer - Blocks (3-tuple format)
@@ -246,6 +302,40 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
+  defp transform_record_constr(name, pairs) when is_binary(name) and is_list(pairs) do
+    pairs
+    |> Enum.reduce_while({:ok, []}, fn
+      {:pair, _meta, [key, value]}, {:ok, acc} ->
+        with {:ok, key_name} <- record_field_name(key),
+             {:ok, value_ast} <- transform(value, %{}) do
+          field = %{"name" => key_name, "value" => value_ast}
+          {:cont, {:ok, [field | acc]}}
+        else
+          {:error, _} = err -> {:halt, err}
+        end
+
+      other, {:ok, _acc} ->
+        {:halt, {:error, "Expected pair in record construction, got: #{inspect(other)}"}}
+    end)
+    |> case do
+      {:ok, fields} ->
+        {:ok, %{"type" => "record_constr", "name" => name, "fields" => Enum.reverse(fields)}}
+
+      error ->
+        error
+    end
+  end
+
+  defp transform_record_constr(nil, _pairs) do
+    {:error, "Record construction requires a :constructor name"}
+  end
+
+  defp record_field_name({:literal, _meta, name}) when is_binary(name), do: {:ok, name}
+  defp record_field_name({:variable, _meta, name}) when is_binary(name), do: {:ok, name}
+
+  defp record_field_name(other),
+    do: {:error, "Unsupported record field name: #{inspect(other)}"}
+
   defp transform_let_block(statements) do
     # Extract assignments and body
     {assignments, body_stmts} =
@@ -354,8 +444,92 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     {:ok, %{"type" => "wildcard"}}
   end
 
+  # Constructor pattern: {:function_call, [name: "Just"], [arg]}
+  defp transform_pattern({:function_call, meta, args}) when is_list(meta) do
+    with {:ok, args_ast} <- transform_pattern_list(args) do
+      {:ok, %{"type" => "con_pat", "name" => Keyword.get(meta, :name), "patterns" => args_ast}}
+    end
+  end
+
+  # Tuple pattern
+  defp transform_pattern({:tuple, _meta, elements}) when is_list(elements) do
+    with {:ok, elements_ast} <- transform_pattern_list(elements) do
+      {:ok, %{"type" => "tuple_pat", "elements" => elements_ast}}
+    end
+  end
+
+  # List pattern
+  defp transform_pattern({:list, _meta, elements}) when is_list(elements) do
+    with {:ok, elements_ast} <- transform_pattern_list(elements) do
+      {:ok, %{"type" => "list_pat", "elements" => elements_ast}}
+    end
+  end
+
+  # Infix constructor pattern: x : xs
+  defp transform_pattern({:binary_op, meta, [left, right]}) when is_list(meta) do
+    with {:ok, left_ast} <- transform_pattern(left),
+         {:ok, right_ast} <- transform_pattern(right) do
+      {:ok,
+       %{
+         "type" => "infix_pat",
+         "left" => left_ast,
+         "operator" => to_string(Keyword.get(meta, :operator)),
+         "right" => right_ast
+       }}
+    end
+  end
+
+  # Record pattern
+  defp transform_pattern({:map, meta, pairs}) when is_list(meta) do
+    with true <- Keyword.get(meta, :record, false),
+         {:ok, fields} <- transform_record_pattern_fields(pairs) do
+      {:ok,
+       %{
+         "type" => "record_pat",
+         "name" => Keyword.get(meta, :constructor),
+         "fields" => fields
+       }}
+    else
+      _ -> {:error, "Unsupported map pattern for reification"}
+    end
+  end
+
   defp transform_pattern(other),
     do: {:error, "Unsupported pattern for reification: #{inspect(other)}"}
+
+  defp transform_pattern_list(pats) when is_list(pats) do
+    pats
+    |> Enum.reduce_while({:ok, []}, fn pat, {:ok, acc} ->
+      case transform_pattern(pat) do
+        {:ok, ast} -> {:cont, {:ok, [ast | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, asts} -> {:ok, Enum.reverse(asts)}
+      error -> error
+    end
+  end
+
+  defp transform_record_pattern_fields(pairs) when is_list(pairs) do
+    pairs
+    |> Enum.reduce_while({:ok, []}, fn
+      {:pair, _meta, [key, value]}, {:ok, acc} ->
+        with {:ok, key_name} <- record_field_name(key),
+             {:ok, pat_ast} <- transform_pattern(value) do
+          {:cont, {:ok, [%{"name" => key_name, "pattern" => pat_ast} | acc]}}
+        else
+          {:error, _} = err -> {:halt, err}
+        end
+
+      other, {:ok, _acc} ->
+        {:halt, {:error, "Expected pair in record pattern, got: #{inspect(other)}"}}
+    end)
+    |> case do
+      {:ok, fields} -> {:ok, Enum.reverse(fields)}
+      error -> error
+    end
+  end
 
   defp transform_collection(elements, :list) do
     with {:ok, elements_ast} <- transform_list(elements) do

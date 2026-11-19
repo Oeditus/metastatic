@@ -52,6 +52,32 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
     "(#{to_source(expr)})"
   end
 
+  def to_source(%{"type" => "expr_type_sig", "expression" => expr, "signature" => sig}) do
+    "(#{to_source(expr)} :: #{to_type(sig)})"
+  end
+
+  def to_source(%{"type" => "record_constr", "name" => name, "fields" => fields}) do
+    fields_str = Enum.map_join(fields, ", ", &to_field/1)
+    "#{name} { #{fields_str} }"
+  end
+
+  def to_source(%{"type" => "record_update", "expression" => expr, "fields" => fields}) do
+    fields_str = Enum.map_join(fields, ", ", &to_field/1)
+    "#{to_sub_source(expr)} { #{fields_str} }"
+  end
+
+  def to_source(%{"type" => "left_section", "expression" => expr, "operator" => op}) do
+    "(#{to_source(expr)} #{op})"
+  end
+
+  def to_source(%{"type" => "right_section", "operator" => op, "expression" => expr}) do
+    "(#{op} #{to_source(expr)})"
+  end
+
+  def to_source(%{"type" => "enum_from_to", "from" => from, "to" => to}) do
+    "[#{to_source(from)} .. #{to_source(to)}]"
+  end
+
   def to_source(%{"type" => "tuple", "elements" => elems}) do
     "(" <> Enum.map_join(elems, ", ", &to_source/1) <> ")"
   end
@@ -142,6 +168,23 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
     "[" <> Enum.map_join(elems, ", ", &to_pattern/1) <> "]"
   end
 
+  defp to_pattern(%{"type" => "infix_pat", "left" => left, "operator" => op, "right" => right}) do
+    "#{to_pattern(left)} #{op} #{to_pattern(right)}"
+  end
+
+  defp to_pattern(%{"type" => "as_pat", "name" => name, "pattern" => pat}) do
+    "#{name}@#{to_pattern(pat)}"
+  end
+
+  defp to_pattern(%{"type" => "record_pat", "name" => name, "fields" => fields}) do
+    fields_str =
+      Enum.map_join(fields, ", ", fn %{"name" => fname, "pattern" => fpat} ->
+        "#{fname} = #{to_pattern(fpat)}"
+      end)
+
+    "#{name} { #{fields_str} }"
+  end
+
   defp to_pattern(name) when is_binary(name), do: name
   defp to_pattern(other), do: inspect(other)
 
@@ -164,12 +207,34 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
   defp to_name(%{"name" => name}), do: name
   defp to_name(other), do: inspect(other)
 
+  defp to_field(%{"name" => name, "value" => value}) do
+    "#{name} = #{to_source(value)}"
+  end
+
+  defp to_field(other), do: inspect(other)
+
   defp to_type(sig) when is_binary(sig), do: sig
   defp to_type(%{"type" => "type_con", "name" => name}), do: name
   defp to_type(%{"type" => "type_var", "name" => name}), do: name
 
+  defp to_type(%{"type" => "type_fun", "argument" => arg, "result" => res}) do
+    "#{to_type(arg)} -> #{to_type(res)}"
+  end
+
   defp to_type(%{"type" => "type_fun", "from" => from, "to" => to}) do
     "#{to_type(from)} -> #{to_type(to)}"
+  end
+
+  defp to_type(%{"type" => "type_list", "element" => element}) do
+    "[#{to_type(element)}]"
+  end
+
+  defp to_type(%{"type" => "type_tuple", "elements" => elems}) do
+    "(" <> Enum.map_join(elems, ", ", &to_type/1) <> ")"
+  end
+
+  defp to_type(%{"type" => "type_app", "constructor" => ctor, "argument" => arg}) do
+    "#{to_type(ctor)} #{to_type(arg)}"
   end
 
   defp to_type(other), do: inspect(other)

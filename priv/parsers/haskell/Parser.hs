@@ -189,11 +189,89 @@ exprToJson expr = case expr of
     , "location" Aeson..= srcSpanToJson l
     ]
   
+  -- Expression type signature: (e :: T)
+  ExpTypeSig l expr' ty -> Aeson.object
+    [ "type" Aeson..= ("expr_type_sig" :: String)
+    , "expression" Aeson..= exprToJson expr'
+    , "signature" Aeson..= typeToJson ty
+    , "location" Aeson..= srcSpanToJson l
+    ]
+
+  -- Record construction: C { field = value, ... }
+  RecConstr l qname fields -> Aeson.object
+    [ "type" Aeson..= ("record_constr" :: String)
+    , "name" Aeson..= qnameToString qname
+    , "fields" Aeson..= map fieldUpdateToJson fields
+    , "location" Aeson..= srcSpanToJson l
+    ]
+
+  -- Record update: e { field = value, ... }
+  RecUpdate l expr' fields -> Aeson.object
+    [ "type" Aeson..= ("record_update" :: String)
+    , "expression" Aeson..= exprToJson expr'
+    , "fields" Aeson..= map fieldUpdateToJson fields
+    , "location" Aeson..= srcSpanToJson l
+    ]
+
+  -- Left operator section: (x +)
+  LeftSection l expr' op -> Aeson.object
+    [ "type" Aeson..= ("left_section" :: String)
+    , "expression" Aeson..= exprToJson expr'
+    , "operator" Aeson..= qopToString op
+    , "location" Aeson..= srcSpanToJson l
+    ]
+
+  -- Right operator section: (+ x)
+  RightSection l op expr' -> Aeson.object
+    [ "type" Aeson..= ("right_section" :: String)
+    , "operator" Aeson..= qopToString op
+    , "expression" Aeson..= exprToJson expr'
+    , "location" Aeson..= srcSpanToJson l
+    ]
+
+  -- Negation: -x
+  NegApp l expr' -> Aeson.object
+    [ "type" Aeson..= ("negate" :: String)
+    , "expression" Aeson..= exprToJson expr'
+    , "location" Aeson..= srcSpanToJson l
+    ]
+
+  -- Enum sequence: [a .. b], [a, b .. c]
+  EnumFromTo l from to -> enumToJson l "enum_from_to" from (Just to)
+  EnumFrom l from -> enumToJson l "enum_from" from Nothing
+  EnumFromThenTo l from thenE to -> enumThenToJson l from thenE (Just to)
+  EnumFromThen l from thenE -> enumThenToJson l from thenE Nothing
+
   -- Fallback for unsupported constructs
   _ -> Aeson.object
     [ "type" Aeson..= ("unsupported" :: String)
     , "original" Aeson..= show expr
     ]
+
+-- | Convert an enum-from(-to) expression to JSON
+enumToJson :: SrcSpanInfo -> String -> Exp SrcSpanInfo -> Maybe (Exp SrcSpanInfo) -> Aeson.Value
+enumToJson l tag from mTo = Aeson.object $
+  [ "type" Aeson..= tag
+  , "from" Aeson..= exprToJson from
+  ] ++ maybe [] (\t -> ["to" Aeson..= exprToJson t]) mTo ++
+  [ "location" Aeson..= srcSpanToJson l ]
+
+-- | Convert an enum-from-then(-to) expression to JSON
+enumThenToJson :: SrcSpanInfo -> Exp SrcSpanInfo -> Exp SrcSpanInfo -> Maybe (Exp SrcSpanInfo) -> Aeson.Value
+enumThenToJson l from thenE mTo = Aeson.object $
+  [ "type" Aeson..= ("enum_from_then" :: String)
+  , "from" Aeson..= exprToJson from
+  , "then" Aeson..= exprToJson thenE
+  ] ++ maybe [] (\t -> ["to" Aeson..= exprToJson t]) mTo ++
+  [ "location" Aeson..= srcSpanToJson l ]
+
+-- | Convert a record field update to JSON
+fieldUpdateToJson :: FieldUpdate SrcSpanInfo -> Aeson.Value
+fieldUpdateToJson (FieldUpdate l qname expr') = Aeson.object
+  [ "name" Aeson..= qnameToString qname
+  , "value" Aeson..= exprToJson expr'
+  , "location" Aeson..= srcSpanToJson l
+  ]
 
 -- | Convert literal to JSON
 literalToJson :: Literal SrcSpanInfo -> Aeson.Value
@@ -228,6 +306,8 @@ qnameToString (UnQual _ (Symbol _ s)) = s
 qnameToString (Special _ (UnitCon _)) = "()"
 qnameToString (Special _ (ListCon _)) = "[]"
 qnameToString (Special _ (TupleCon _ Boxed n)) = replicate (n - 1) ',' 
+qnameToString (Special _ (Cons _)) = ":"
+qnameToString (Special _ (ExprHole _)) = "_"
 qnameToString _ = "unknown"
 
 -- | Convert qualified operator to string
@@ -249,10 +329,66 @@ patToJson pat = case pat of
   PWildCard _ -> Aeson.object
     [ "type" Aeson..= ("wildcard" :: String)
     ]
+  -- Constructor pattern: Just x, Nothing
+  PApp _ qname pats -> Aeson.object
+    [ "type" Aeson..= ("con_pat" :: String)
+    , "name" Aeson..= qnameToString qname
+    , "patterns" Aeson..= map patToJson pats
+    ]
+  -- Parenthesized pattern: (x:xs) -- transparent, unwrap
+  PParen _ pat' -> patToJson pat'
+  -- Tuple pattern: (a, b)
+  PTuple _ Boxed pats -> Aeson.object
+    [ "type" Aeson..= ("tuple_pat" :: String)
+    , "elements" Aeson..= map patToJson pats
+    ]
+  -- List pattern: [a, b]
+  PList _ pats -> Aeson.object
+    [ "type" Aeson..= ("list_pat" :: String)
+    , "elements" Aeson..= map patToJson pats
+    ]
+  -- Infix constructor pattern: x : xs
+  PInfixApp _ lhs qname rhs -> Aeson.object
+    [ "type" Aeson..= ("infix_pat" :: String)
+    , "left" Aeson..= patToJson lhs
+    , "operator" Aeson..= qnameToString qname
+    , "right" Aeson..= patToJson rhs
+    ]
+  -- As-pattern: name@pat
+  PAsPat _ (Ident _ n) pat' -> Aeson.object
+    [ "type" Aeson..= ("as_pat" :: String)
+    , "name" Aeson..= n
+    , "pattern" Aeson..= patToJson pat'
+    ]
+  -- Lazy pattern: ~pat
+  PIrrPat _ pat' -> patToJson pat'
+  -- Bang pattern: !pat
+  PBangPat _ pat' -> patToJson pat'
+  -- Record pattern: C { field = pat }
+  PRec _ qname fields -> Aeson.object
+    [ "type" Aeson..= ("record_pat" :: String)
+    , "name" Aeson..= qnameToString qname
+    , "fields" Aeson..= map patFieldToJson fields
+    ]
   _ -> Aeson.object
     [ "type" Aeson..= ("unsupported_pat" :: String)
     , "original" Aeson..= show pat
     ]
+
+-- | Convert a record pattern field to JSON
+patFieldToJson :: PatField SrcSpanInfo -> Aeson.Value
+patFieldToJson (PFieldPat _ qname pat') = Aeson.object
+  [ "name" Aeson..= qnameToString qname
+  , "pattern" Aeson..= patToJson pat'
+  ]
+patFieldToJson (PFieldPun _ qname) = Aeson.object
+  [ "name" Aeson..= qnameToString qname
+  , "pattern" Aeson..= Aeson.object [ "type" Aeson..= ("var_pat" :: String), "name" Aeson..= qnameToString qname ]
+  ]
+patFieldToJson (PFieldWildcard _) = Aeson.object
+  [ "name" Aeson..= ("_" :: String)
+  , "pattern" Aeson..= Aeson.object [ "type" Aeson..= ("wildcard" :: String) ]
+  ]
 
 -- | Convert bindings to JSON
 bindsToJson :: Binds SrcSpanInfo -> Aeson.Value

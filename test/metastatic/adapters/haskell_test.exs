@@ -769,4 +769,360 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert String.trim(code) == "1 + 2"
     end
   end
+
+  describe "ToMeta - patterns (M1 pattern coverage)" do
+    test "transforms constructor patterns to function_call" do
+      ast = %{
+        "type" => "con_pat",
+        "name" => "Just",
+        "patterns" => [%{"type" => "var_pat", "name" => "x"}]
+      }
+
+      assert {:ok, {:function_call, [name: "Just", pattern: true], [arg]}, %{}} =
+               ToMeta.transform(ast)
+
+      assert {:variable, [], "x"} = arg
+    end
+
+    test "transforms nullary constructor patterns" do
+      ast = %{"type" => "con_pat", "name" => "Nothing", "patterns" => []}
+
+      assert {:ok, {:function_call, [name: "Nothing", pattern: true], []}, %{}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms tuple patterns" do
+      ast = %{
+        "type" => "tuple_pat",
+        "elements" => [
+          %{"type" => "var_pat", "name" => "a"},
+          %{"type" => "var_pat", "name" => "b"}
+        ]
+      }
+
+      assert {:ok, {:tuple, [pattern: true], [_, _]}, %{}} = ToMeta.transform(ast)
+    end
+
+    test "transforms empty list patterns" do
+      ast = %{"type" => "list_pat", "elements" => []}
+
+      assert {:ok, {:list, [collection_type: :list, pattern: true], []}, %{}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms list patterns with elements" do
+      ast = %{
+        "type" => "list_pat",
+        "elements" => [%{"type" => "var_pat", "name" => "x"}]
+      }
+
+      assert {:ok, {:list, [collection_type: :list, pattern: true], [_]}, %{}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms infix constructor patterns" do
+      ast = %{
+        "type" => "infix_pat",
+        "left" => %{"type" => "var_pat", "name" => "x"},
+        "operator" => ":",
+        "right" => %{"type" => "var_pat", "name" => "xs"}
+      }
+
+      assert {:ok, {:binary_op, [category: :pattern, operator: ":"], [_, _]}, %{}} =
+               ToMeta.transform(ast)
+    end
+
+    test "transforms as-patterns" do
+      ast = %{
+        "type" => "as_pat",
+        "name" => "all",
+        "pattern" => %{"type" => "var_pat", "name" => "x"}
+      }
+
+      assert {:ok, {:language_specific, meta, data}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :hint) == :as_pattern
+      assert data["name"] == "all"
+    end
+
+    test "transforms record patterns" do
+      ast = %{
+        "type" => "record_pat",
+        "name" => "Response",
+        "fields" => [
+          %{"name" => "status", "pattern" => %{"type" => "var_pat", "name" => "s"}}
+        ]
+      }
+
+      assert {:ok, {:map, meta, [pair]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :record) == true
+      assert Keyword.get(meta, :constructor) == "Response"
+      assert {:pair, [], [{:literal, _, "status"}, {:variable, [], "s"}]} = pair
+    end
+  end
+
+  describe "ToMeta - expression type signatures" do
+    test "transforms (e :: T) to a type_annotation hint" do
+      ast = %{
+        "type" => "expr_type_sig",
+        "expression" => %{
+          "type" => "literal",
+          "value" => %{"literalType" => "string", "value" => "literal"}
+        },
+        "signature" => %{"type" => "type_con", "name" => "String"}
+      }
+
+      assert {:ok, {:type_annotation, meta, [expr, type_expr]}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :annotation_type) == :hint
+      assert {:literal, [subtype: :string], "literal"} = expr
+      assert {:language_specific, [language: :haskell, hint: :type_expr], _} = type_expr
+    end
+  end
+
+  describe "ToMeta - record construction" do
+    test "transforms record construction to a record map" do
+      ast = %{
+        "type" => "record_constr",
+        "name" => "Response",
+        "fields" => [
+          %{
+            "name" => "status",
+            "value" => %{
+              "type" => "literal",
+              "value" => %{"literalType" => "string", "value" => "ok"}
+            }
+          },
+          %{"name" => "ast", "value" => %{"type" => "con", "name" => "Nothing"}}
+        ]
+      }
+
+      assert {:ok, {:map, meta, pairs}, %{record: true}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :record) == true
+      assert Keyword.get(meta, :constructor) == "Response"
+      assert length(pairs) == 2
+    end
+
+    test "transforms record update to language_specific" do
+      ast = %{
+        "type" => "record_update",
+        "expression" => %{"type" => "var", "name" => "r"},
+        "fields" => [
+          %{
+            "name" => "status",
+            "value" => %{
+              "type" => "literal",
+              "value" => %{"literalType" => "string", "value" => "error"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, {:language_specific, meta, data}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :hint) == :record_update
+      assert data["target"] == {:variable, [scope: :local], "r"}
+    end
+  end
+
+  describe "ToMeta - operator sections and negation" do
+    test "transforms left sections" do
+      ast = %{
+        "type" => "left_section",
+        "expression" => %{
+          "type" => "literal",
+          "value" => %{"literalType" => "string", "value" => "--"}
+        },
+        "operator" => "isPrefixOf"
+      }
+
+      assert {:ok, {:language_specific, meta, data}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :hint) == :left_section
+      assert data["operator"] == "isPrefixOf"
+    end
+
+    test "transforms right sections" do
+      ast = %{
+        "type" => "right_section",
+        "operator" => "+",
+        "expression" => %{"type" => "var", "name" => "x"}
+      }
+
+      assert {:ok, {:language_specific, meta, _data}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :hint) == :right_section
+    end
+
+    test "transforms negation to unary_op" do
+      ast = %{"type" => "negate", "expression" => %{"type" => "var", "name" => "x"}}
+
+      assert {:ok, {:unary_op, [category: :arithmetic, operator: :-], [_]}, %{}} =
+               ToMeta.transform(ast)
+    end
+  end
+
+  describe "ToMeta - enum sequences" do
+    test "transforms [a .. b] to a range" do
+      ast = %{
+        "type" => "enum_from_to",
+        "from" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 1}},
+        "to" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 10}}
+      }
+
+      assert {:ok, {:range, [range_type: :enum], [from, to]}, %{}} = ToMeta.transform(ast)
+      assert {:literal, [subtype: :integer], 1} = from
+      assert {:literal, [subtype: :integer], 10} = to
+    end
+
+    test "transforms [a ..] to language_specific" do
+      ast = %{
+        "type" => "enum_from",
+        "from" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 1}}
+      }
+
+      assert {:ok, {:language_specific, meta, _}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :hint) == :enum_from
+    end
+
+    test "transforms [a, b ..] to language_specific" do
+      ast = %{
+        "type" => "enum_from_then",
+        "from" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 1}},
+        "then" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 3}}
+      }
+
+      assert {:ok, {:language_specific, meta, _}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :hint) == :enum_from_then
+    end
+  end
+
+  describe "FromMeta - new construct reification" do
+    alias Metastatic.Adapters.Haskell.FromMeta
+
+    test "reifies record construction" do
+      meta_ast =
+        {:map, [record: true, constructor: "Response"],
+         [
+           {:pair, [],
+            [{:literal, [subtype: :string], "status"}, {:literal, [subtype: :string], "ok"}]}
+         ]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "record_constr"
+      assert ast["name"] == "Response"
+      assert [%{"name" => "status"}] = ast["fields"]
+    end
+
+    test "reifies enum ranges" do
+      meta_ast =
+        {:range, [range_type: :enum],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 10}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "enum_from_to"
+    end
+
+    test "reifies negation" do
+      meta_ast = {:unary_op, [category: :arithmetic, operator: :-], [{:variable, [], "x"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "negate"
+    end
+
+    test "reifies constructor patterns" do
+      meta_ast = {:function_call, [name: "Just", pattern: true], [{:variable, [], "x"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "con_pat"
+      assert ast["name"] == "Just"
+    end
+
+    test "reifies tuple patterns" do
+      meta_ast = {:tuple, [pattern: true], [{:variable, [], "a"}, {:variable, [], "b"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "tuple_pat"
+    end
+
+    test "reifies list patterns" do
+      meta_ast = {:list, [pattern: true], [{:variable, [], "x"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "list_pat"
+    end
+
+    test "reifies infix constructor patterns" do
+      meta_ast =
+        {:binary_op, [category: :pattern, operator: ":"],
+         [{:variable, [], "x"}, {:variable, [], "xs"}]}
+
+      assert {:ok, ast} = FromMeta.transform(meta_ast, %{})
+      assert ast["type"] == "infix_pat"
+      assert ast["operator"] == ":"
+    end
+
+    test "rejects maps without :record metadata" do
+      meta_ast = {:map, [], []}
+
+      assert {:error, reason} = FromMeta.transform(meta_ast, %{})
+      assert reason =~ "map without :record"
+    end
+  end
+
+  describe "unparse/1 - new constructs" do
+    test "unparses record construction" do
+      ast = %{
+        "type" => "record_constr",
+        "name" => "Response",
+        "fields" => [
+          %{
+            "name" => "status",
+            "value" => %{
+              "type" => "literal",
+              "value" => %{"literalType" => "string", "value" => "ok"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, source} = Haskell.unparse(ast)
+      assert source =~ "Response { status ="
+    end
+
+    test "unparses enum ranges" do
+      ast = %{
+        "type" => "enum_from_to",
+        "from" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 1}},
+        "to" => %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 10}}
+      }
+
+      assert {:ok, "[1 .. 10]"} = Haskell.unparse(ast)
+    end
+
+    test "unparses function type signatures" do
+      ast = %{
+        "type" => "type_sig",
+        "names" => ["f"],
+        "signature" => %{
+          "type" => "type_fun",
+          "argument" => %{"type" => "type_con", "name" => "Int"},
+          "result" => %{"type" => "type_con", "name" => "Int"}
+        }
+      }
+
+      assert {:ok, "f :: Int -> Int"} = Haskell.unparse(ast)
+    end
+  end
+
+  describe "dogfooding - own parser sources" do
+    @parser_sources ["priv/parsers/haskell/Parser.hs", "priv/parsers/agda/Parser.hs"]
+
+    for path <- @parser_sources do
+      test "parses and abstracts #{path} without unsupported constructs" do
+        source = File.read!(unquote(path))
+
+        assert {:ok, ast} = Haskell.parse(source)
+        assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
+        assert {:container, meta, decls} = meta_ast
+        assert Keyword.get(meta, :container_type) == :module
+        assert is_list(decls) and decls != []
+      end
+    end
+  end
 end

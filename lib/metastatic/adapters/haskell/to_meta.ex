@@ -61,6 +61,96 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     {:ok, add_location({:literal, [subtype: :constructor], name}, node), %{}}
   end
 
+  # M2.1 Core Layer - Negation (unary minus)
+
+  def transform(%{"type" => "negate", "expression" => expr} = node) do
+    with {:ok, expr_meta, _} <- transform(expr) do
+      ast = {:unary_op, [category: :arithmetic, operator: :-], [expr_meta]}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # M2.1 Core Layer - Expression type signature: (e :: T)
+
+  def transform(%{"type" => "expr_type_sig", "expression" => expr, "signature" => sig} = node) do
+    with {:ok, expr_meta, _} <- transform(expr) do
+      type_expr = {:language_specific, [language: :haskell, hint: :type_expr], sig}
+      ast = {:type_annotation, [annotation_type: :hint], [expr_meta, type_expr]}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # M2.1 Core Layer - Operator sections
+
+  def transform(%{"type" => "left_section", "expression" => expr, "operator" => op} = node) do
+    with {:ok, expr_meta, _} <- transform(expr) do
+      ast =
+        {:language_specific, [language: :haskell, hint: :left_section],
+         %{"operator" => op, "expression" => expr_meta}}
+
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  def transform(%{"type" => "right_section", "operator" => op, "expression" => expr} = node) do
+    with {:ok, expr_meta, _} <- transform(expr) do
+      ast =
+        {:language_specific, [language: :haskell, hint: :right_section],
+         %{"operator" => op, "expression" => expr_meta}}
+
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # M2.1 Core Layer - Record construction: C { field = value }
+
+  def transform(%{"type" => "record_constr", "name" => name, "fields" => fields} = node) do
+    with {:ok, pairs} <- transform_record_fields(fields) do
+      ast = {:map, [record: true, constructor: name], pairs}
+      {:ok, add_location(ast, node), %{record: true}}
+    end
+  end
+
+  # M2.1 Core Layer - Record update: e { field = value }
+
+  def transform(%{"type" => "record_update", "expression" => expr, "fields" => fields} = node) do
+    with {:ok, expr_meta, _} <- transform(expr),
+         {:ok, pairs} <- transform_record_fields(fields) do
+      ast =
+        {:language_specific, [language: :haskell, hint: :record_update],
+         %{"target" => expr_meta, "fields" => pairs}}
+
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # M2.1 Core Layer - Enum sequences ([a .. b], [a, b .. c])
+
+  def transform(%{"type" => "enum_from_to", "from" => from, "to" => to} = node) do
+    with {:ok, from_meta, _} <- transform(from),
+         {:ok, to_meta, _} <- transform(to) do
+      {:ok, add_location({:range, [range_type: :enum], [from_meta, to_meta]}, node), %{}}
+    end
+  end
+
+  def transform(%{"type" => "enum_from", "from" => from} = node) do
+    with {:ok, from_meta, _} <- transform(from) do
+      ast = {:language_specific, [language: :haskell, hint: :enum_from], %{"from" => from_meta}}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  def transform(%{"type" => "enum_from_then", "from" => from, "then" => then_e} = node) do
+    with {:ok, from_meta, _} <- transform(from),
+         {:ok, then_meta, _} <- transform(then_e) do
+      ast =
+        {:language_specific, [language: :haskell, hint: :enum_from_then],
+         %{"from" => from_meta, "then" => then_meta}}
+
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
   # M2.1 Core Layer - Function Application
 
   def transform(%{"type" => "app", "function" => func, "argument" => arg} = node) do
@@ -308,6 +398,40 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
+  # Pattern nodes reached as expressions (e.g. inside do-notation generators)
+
+  def transform(%{"type" => pat_type} = node)
+      when pat_type in [
+             "con_pat",
+             "tuple_pat",
+             "list_pat",
+             "infix_pat",
+             "as_pat",
+             "record_pat",
+             "var_pat",
+             "lit_pat",
+             "wildcard"
+           ] do
+    with {:ok, pat_meta} <- transform_pattern(node) do
+      {:ok, add_location(pat_meta, node), %{}}
+    end
+  end
+
+  # Statement nodes reached as expressions (do-notation / comprehension items)
+
+  def transform(%{"type" => stmt_type} = node)
+      when stmt_type in ["generator", "qualifier", "let_stmt"] do
+    transform_statement(node)
+  end
+
+  # Top-level pattern bindings (e.g. `main = do ...`)
+
+  def transform(%{"type" => "pat_bind"} = node) do
+    with {:ok, assignment} <- transform_binding(node) do
+      {:ok, add_location(assignment, node), %{}}
+    end
+  end
+
   # Unsupported constructs
 
   def transform(unsupported) do
@@ -424,7 +548,101 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     {:ok, :_}
   end
 
+  defp transform_pattern(%{"type" => "con_pat", "name" => name, "patterns" => pats}) do
+    with {:ok, args} <- transform_patterns(pats) do
+      {:ok, {:function_call, [name: name, pattern: true], args}}
+    end
+  end
+
+  defp transform_pattern(%{"type" => "tuple_pat", "elements" => elems}) do
+    with {:ok, args} <- transform_patterns(elems) do
+      {:ok, {:tuple, [pattern: true], args}}
+    end
+  end
+
+  defp transform_pattern(%{"type" => "list_pat", "elements" => elems}) do
+    with {:ok, args} <- transform_patterns(elems) do
+      {:ok, {:list, [collection_type: :list, pattern: true], args}}
+    end
+  end
+
+  defp transform_pattern(%{
+         "type" => "infix_pat",
+         "left" => left,
+         "operator" => op,
+         "right" => right
+       }) do
+    with {:ok, left_meta} <- transform_pattern(left),
+         {:ok, right_meta} <- transform_pattern(right) do
+      {:ok, {:binary_op, [category: :pattern, operator: op], [left_meta, right_meta]}}
+    end
+  end
+
+  defp transform_pattern(%{"type" => "as_pat", "name" => name, "pattern" => pat}) do
+    with {:ok, pat_meta} <- transform_pattern(pat) do
+      {:ok,
+       {:language_specific, [language: :haskell, hint: :as_pattern],
+        %{"name" => name, "pattern" => pat_meta}}}
+    end
+  end
+
+  defp transform_pattern(%{"type" => "record_pat", "name" => name, "fields" => fields}) do
+    with {:ok, pairs} <- transform_record_pattern_fields(fields) do
+      {:ok, {:map, [record: true, constructor: name], pairs}}
+    end
+  end
+
   defp transform_pattern(_), do: {:error, "Unsupported pattern"}
+
+  defp transform_patterns(pats) when is_list(pats) do
+    pats
+    |> Enum.reduce_while({:ok, []}, fn pat, {:ok, acc} ->
+      case transform_pattern(pat) do
+        {:ok, meta} -> {:cont, {:ok, [meta | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, metas} -> {:ok, Enum.reverse(metas)}
+      error -> error
+    end
+  end
+
+  defp transform_record_pattern_fields(fields) when is_list(fields) do
+    fields
+    |> Enum.reduce_while({:ok, []}, fn field, {:ok, acc} ->
+      with %{"name" => name, "pattern" => pat} <- field,
+           {:ok, pat_meta} <- transform_pattern(pat) do
+        key = {:literal, [subtype: :string], name}
+        {:cont, {:ok, [{:pair, [], [key, pat_meta]} | acc]}}
+      else
+        {:error, _} = err -> {:halt, err}
+        _ -> {:halt, {:error, "Unsupported record pattern field: #{inspect(field)}"}}
+      end
+    end)
+    |> case do
+      {:ok, pairs} -> {:ok, Enum.reverse(pairs)}
+      error -> error
+    end
+  end
+
+  defp transform_record_fields(fields) when is_list(fields) do
+    fields
+    |> Enum.reduce_while({:ok, []}, fn field, {:ok, acc} ->
+      with %{"name" => name, "value" => value} <- field,
+           {:ok, value_meta, _} <- transform(value) do
+        key = {:literal, [subtype: :string], name}
+        {:cont, {:ok, [{:pair, [], [key, value_meta]} | acc]}}
+      else
+        {:error, _} = err -> {:halt, err}
+        _ -> {:halt, {:error, "Unsupported record field: #{inspect(field)}"}}
+      end
+    end)
+    |> case do
+      {:ok, pairs} -> {:ok, Enum.reverse(pairs)}
+      error -> error
+    end
+  end
 
   defp transform_qualifiers(quals) when is_list(quals) do
     quals
@@ -487,7 +705,13 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   end
 
   defp transform_statement(%{"type" => "let_stmt", "bindings" => bindings}) do
-    transform_bindings(bindings)
+    with {:ok, bindings_meta} <- transform_bindings(bindings) do
+      {:ok, {:block, [construct: :let], bindings_meta}}
+    end
+  end
+
+  defp transform_statement(%{"type" => "pat_bind"} = binding) do
+    transform_binding(binding)
   end
 
   defp transform_statement(other), do: {:error, "Unsupported statement: #{inspect(other)}"}
