@@ -45,6 +45,11 @@ metastatic-*.tar
 *.hi
 *.o
 
+# Stack build directory (build outputs, package DBs, caches).
+# The compiled parser used at runtime is committed separately as
+# priv/parsers/haskell/bin/parser, so nothing here needs tracking.
+/priv/parsers/haskell/.stack-work/
+
 # Stray local sockets / crash dumps
 *.sock
 

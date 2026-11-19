@@ -1118,11 +1118,77 @@ defmodule Metastatic.Adapters.HaskellTest do
         source = File.read!(unquote(path))
 
         assert {:ok, ast} = Haskell.parse(source)
+
+        # Stricter guard: the raw parser AST must contain zero `unsupported`
+        # / `unsupported_pat` nodes anywhere. `ToMeta` errors on these, so
+        # without this scan a construct could silently degrade to a partial
+        # AST while the top-level transform still succeeds.
+        assert %{"unsupported" => 0, "unsupported_pat" => 0} ==
+                 count_unsupported_nodes(ast),
+               "parser emitted unsupported AST nodes for #{unquote(path)}"
+
         assert {:ok, meta_ast, _metadata} = ToMeta.transform(ast)
         assert {:container, meta, decls} = meta_ast
         assert Keyword.get(meta, :container_type) == :module
         assert is_list(decls) and decls != []
       end
+    end
+
+    test "count_unsupported_nodes/1 detects nested regressions" do
+      # A construct nested deep inside a type signature must still be caught.
+      ast = %{
+        "type" => "module",
+        "declarations" => [
+          %{
+            "type" => "type_sig",
+            "names" => ["f"],
+            "signature" => %{"type" => "unsupported", "original" => "TyX"}
+          },
+          %{
+            "type" => "fun_bind",
+            "matches" => [%{"patterns" => [%{"type" => "unsupported_pat"}]}]
+          }
+        ]
+      }
+
+      assert %{"unsupported" => 1, "unsupported_pat" => 1} == count_unsupported_nodes(ast)
+    end
+
+    test "count_unsupported_nodes/1 returns zero for clean trees" do
+      ast = %{
+        "type" => "module",
+        "declarations" => [
+          %{"type" => "literal", "value" => %{"literalType" => "int", "value" => 1}}
+        ]
+      }
+
+      assert %{"unsupported" => 0, "unsupported_pat" => 0} == count_unsupported_nodes(ast)
+    end
+  end
+
+  # Recursively counts `unsupported` / `unsupported_pat` nodes in a raw
+  # Haskell parser AST. Used by the dogfooding tests to fail loudly when a
+  # construct degrades instead of being properly modelled.
+  @doc false
+  @spec count_unsupported_nodes(term()) :: %{String.t() => non_neg_integer()}
+  defp count_unsupported_nodes(ast) do
+    count_unsupported_nodes(ast, %{"unsupported" => 0, "unsupported_pat" => 0})
+  end
+
+  defp count_unsupported_nodes(node, acc) do
+    case node do
+      %{"type" => type} = map when type in ["unsupported", "unsupported_pat"] ->
+        acc = Map.update!(acc, type, &(&1 + 1))
+        Enum.reduce(map, acc, fn {_k, v}, a -> count_unsupported_nodes(v, a) end)
+
+      map when is_map(map) ->
+        Enum.reduce(map, acc, fn {_k, v}, a -> count_unsupported_nodes(v, a) end)
+
+      list when is_list(list) ->
+        Enum.reduce(list, acc, fn v, a -> count_unsupported_nodes(v, a) end)
+
+      _ ->
+        acc
     end
   end
 end
