@@ -23,7 +23,7 @@ defmodule Metastatic.MixProject do
       dialyzer: [
         plt_file: {:no_warn, ".dialyzer/dialyzer.plt"},
         plt_add_deps: :app_tree,
-        plt_add_apps: [:mix, :ex_unit],
+        plt_add_apps: [:mix, :ex_unit, :lfe],
         plt_core_path: ".dialyzer",
         list_unused_filters: true,
         ignore_warnings: ".dialyzer/ignore.exs"
@@ -68,6 +68,7 @@ defmodule Metastatic.MixProject do
       # `config :dllb, :enabled, true` and `config :metastatic, :cache, :dllb`.
 
       # Development and documentation
+      {:lfe, "~> 2.2", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:excoveralls, "~> 0.18", only: :test, runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -116,6 +117,7 @@ defmodule Metastatic.MixProject do
         priv/parsers/javascript/package-lock.json
         priv/parsers/javascript/parser.js
         priv/parsers/javascript/unparser.js
+        priv/parsers/lfe/README.md
         priv/parsers/march/dune-project
         priv/parsers/march/march_parser.opam
         priv/parsers/march/bin
@@ -270,6 +272,12 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapters.JavaScript.FromMeta,
         Metastatic.Adapters.JavaScript.Subprocess,
         Metastatic.Adapters.JavaScript.ToMeta,
+        Metastatic.Adapters.Lfe,
+        Metastatic.Adapters.Lfe.FromMeta,
+        Metastatic.Adapters.Lfe.MacroExpander,
+        Metastatic.Adapters.Lfe.Printer,
+        Metastatic.Adapters.Lfe.Reader,
+        Metastatic.Adapters.Lfe.ToMeta,
         Metastatic.Adapters.Python,
         Metastatic.Adapters.Python.FromMeta,
         Metastatic.Adapters.Python.Subprocess,

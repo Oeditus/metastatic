@@ -26,7 +26,7 @@ Parse once, use everywhere. A universal meta-model for program syntax that enabl
 **What Metastatic Provides:**
 - MetaAST meta-model (M2 level) with three layers
 - Natural Language MetaAST (NL-MetaAST) for prose and documentation analysis (see [METAST_NL_SPEC.md](METAST_NL_SPEC.md))
-- Language adapters (Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Markdown, Python, Ruby, SQL, TypeScript; English and Spanish for prose)
+- Language adapters (Agda, Cure, Elixir, Erlang, Haskell, JavaScript, LFE, March, Markdown, Python, Ruby, SQL, TypeScript; English and Spanish for prose)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
 - Semantic enrichment (OpKind metadata for code; voice, hedging, and readability for prose)
@@ -88,7 +88,7 @@ Every `mix metastatic.*` task distinguishes a **usage error** from a
 
 ### Using Language Adapters
 
-Metastatic currently supports 12 language adapters: Agda, Cure, Elixir, Erlang, Haskell, JavaScript, March, Markdown, Python, Ruby, SQL, and TypeScript.
+Metastatic currently supports 13 language adapters: Agda, Cure, Elixir, Erlang, Haskell, JavaScript, LFE, March, Markdown, Python, Ruby, SQL, and TypeScript.
 
 #### Agda & Haskell
 

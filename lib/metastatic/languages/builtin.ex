@@ -63,10 +63,13 @@ defmodule Metastatic.Languages.Builtin do
   # modules) so that discovery stays purely name-driven.
   @excluded [:english, :spanish]
 
-  # Languages whose adapters are not exercised by the default CI matrix
-  # (they require an external toolchain: GHC/Agda). They remain usable but
-  # are advertised as experimental so the support matrix stays honest.
-  @default_experimental [:agda, :haskell]
+  # Languages whose adapters require non-OTP toolchains (GHC/Agda/LFE).
+  # They remain usable but are advertised as experimental.
+  #
+  # `:lfe` is here because LFE's reader/compiler (`lfe_scan`, `lfe_io`,
+  # `lfe_comp`) are not part of OTP. The development/test dependency makes
+  # them available in CI, but host applications still provide LFE themselves.
+  @default_experimental [:agda, :haskell, :lfe]
 
   # Languages that describe documents rather than executable code. They are
   # fully parseable and analyzable, but carry no callable entities.

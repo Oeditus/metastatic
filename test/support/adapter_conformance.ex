@@ -46,7 +46,7 @@ defmodule Metastatic.Test.AdapterConformance do
       @conformance_adapter unquote(adapter)
       @conformance_language unquote(language)
       @conformance_sample unquote(sample)
-
+      @conformance_invalid unquote(Keyword.get(opts, :invalid_sample, "this is not valid @@#$%"))
       # The sample MetaAST arrives as quoted AST (keyword args to `use` are
       # macro-expanded), so splicing it directly evaluates to the tuple at
       # runtime. Escaping it again would double-quote it into `{:{}, ...}`.
@@ -76,7 +76,7 @@ defmodule Metastatic.Test.AdapterConformance do
 
       test "parse/1 accepts valid input and rejects junk" do
         assert {:ok, _native} = @conformance_adapter.parse(@conformance_sample)
-        assert {:error, _reason} = @conformance_adapter.parse("this is not valid @@#$%")
+        assert {:error, _reason} = @conformance_adapter.parse(@conformance_invalid)
       end
 
       test "to_meta/1 produces a conforming MetaAST" do

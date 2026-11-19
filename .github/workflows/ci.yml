@@ -106,6 +106,29 @@ jobs:
       - name: Run tests
         run: mix test
 
+      - name: Report experimental languages
+        # LFE is flagged `experimental` in `Metastatic.Languages.Builtin`
+        # because its reader/compiler are not part of OTP. LFE is installed
+        # as a development/test dependency and exercised in this job.
+        run: |
+          mix run --no-start -e '
+            experimental = Metastatic.Languages.Builtin.experimental_languages()
+            IO.puts("Experimental languages (external toolchains): #{inspect(experimental)}")
+
+            unless :lfe in experimental do
+              IO.puts(:stderr, "::error::LFE must be flagged experimental")
+              System.halt(1)
+            end
+
+            IO.puts("LFE toolchain available in this runner: #{Metastatic.Adapters.Lfe.available?()}")
+          '
+
+      - name: Run LFE adapter tests
+        # The unit tests run everywhere; the toolchain-dependent and
+        # conformance suites self-skip when LFE is absent (see
+        # `test/metastatic/adapters/lfe_conformance_test.exs`).
+        run: mix test test/metastatic/adapters/lfe_test.exs test/metastatic/adapters/lfe_conformance_test.exs
+
       - name: Run tests with coverage (enforces minimum via coveralls.json)
         run: mix coveralls
 

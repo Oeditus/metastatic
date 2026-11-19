@@ -34,6 +34,7 @@ defmodule Metastatic.LanguagesTest do
         :haskell,
         :java,
         :javascript,
+        :lfe,
         :march,
         :markdown,
         :python,
