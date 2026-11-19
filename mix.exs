@@ -262,6 +262,10 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapters.Erlang,
         Metastatic.Adapters.Erlang.FromMeta,
         Metastatic.Adapters.Erlang.ToMeta,
+        Metastatic.Adapters.Java,
+        Metastatic.Adapters.Java.FromMeta,
+        Metastatic.Adapters.Java.Subprocess,
+        Metastatic.Adapters.Java.ToMeta,
         Metastatic.Adapters.JavaScript,
         Metastatic.Adapters.JavaScript.FromMeta,
         Metastatic.Adapters.JavaScript.Subprocess,
@@ -292,6 +296,7 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapters.Rust.FromMeta,
         Metastatic.Adapters.Rust.Subprocess,
         Metastatic.Adapters.Rust.ToMeta,
+        Metastatic.Adapters.Rust.Validate,
         Metastatic.Adapters.TypeScript,
         Metastatic.Adapters.English,
         Metastatic.Adapters.Spanish
