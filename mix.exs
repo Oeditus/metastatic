@@ -210,9 +210,13 @@ defmodule Metastatic.MixProject do
         Metastatic.Document,
         Metastatic.Language,
         Metastatic.Languages,
+        Metastatic.Languages.Builtin,
         Metastatic.Languages.Discovery,
+        Metastatic.Languages.Store,
         Metastatic.MetaAST,
         Metastatic.Priv,
+        Metastatic.Semantic,
+        Metastatic.Subprocess,
         Metastatic.Validator
       ],
       CLI: [
@@ -239,6 +243,8 @@ defmodule Metastatic.MixProject do
       ],
       "Language Adapters": [
         Metastatic.Adapter,
+        Metastatic.Adapter.Bridge,
+        Metastatic.Adapter.Plugin,
         Metastatic.Adapter.Registry,
         Metastatic.Adapters.Agda,
         Metastatic.Adapters.Agda.FromMeta,
@@ -328,6 +334,7 @@ defmodule Metastatic.MixProject do
         Metastatic.NL.Validator
       ],
       Internals: [
+        Metastatic.JSON,
         Metastatic.Test.AdapterHelper,
         Metastatic.Test.FixtureHelper
       ]
