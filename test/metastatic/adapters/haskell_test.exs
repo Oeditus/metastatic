@@ -71,7 +71,10 @@ defmodule Metastatic.Adapters.HaskellTest do
 
     test "transforms constructors" do
       ast = %{"type" => "con", "name" => "Just"}
-      assert {:ok, {:literal, [subtype: :constructor], "Just"}, %{}} = ToMeta.transform(ast)
+
+      # Constructors are `:symbol` literals (the only conforming subtype for a
+      # bare name); `:symbol` requires an atom payload.
+      assert {:ok, {:literal, [subtype: :symbol], :Just}, %{}} = ToMeta.transform(ast)
     end
   end
 
@@ -828,7 +831,10 @@ defmodule Metastatic.Adapters.HaskellTest do
         "right" => %{"type" => "var_pat", "name" => "xs"}
       }
 
-      assert {:ok, {:binary_op, [category: :pattern, operator: ":"], [_, _]}, %{}} =
+      # An infix constructor is a *constructor* pattern, not an operator:
+      # `:pattern` is not a valid `:binary_op` category, so encoding it as a
+      # binary op produced a non-conforming node.
+      assert {:ok, {:function_call, [name: ":", pattern: true], [_, _]}, %{}} =
                ToMeta.transform(ast)
     end
 
@@ -857,6 +863,27 @@ defmodule Metastatic.Adapters.HaskellTest do
       assert Keyword.get(meta, :record) == true
       assert Keyword.get(meta, :constructor) == "Response"
       assert {:pair, [], [{:literal, _, "status"}, {:variable, [], "s"}]} = pair
+    end
+
+    test "wildcard patterns conform to MetaAST" do
+      # Regression: `:_` was emitted for a wildcard, but `AST.conforms?/1`
+      # rejects the bare atom, so any `case` arm with `_` made the whole
+      # module non-conforming.
+      assert {:ok, {:wildcard, [], nil}, %{}} = ToMeta.transform(%{"type" => "wildcard"})
+    end
+
+    test "infix constructor patterns conform to MetaAST" do
+      # Regression: `x : xs` was encoded as a `:binary_op` with
+      # `category: :pattern`, which is not a valid operator category.
+      ast = %{
+        "type" => "infix_pat",
+        "left" => %{"type" => "var_pat", "name" => "x"},
+        "operator" => ":",
+        "right" => %{"type" => "wildcard"}
+      }
+
+      assert {:ok, pattern, %{}} = ToMeta.transform(ast)
+      assert Metastatic.AST.conforms?(pattern)
     end
   end
 

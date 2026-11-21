@@ -49,6 +49,22 @@ defmodule Metastatic.Adapters.LfeTest do
       result = Lfe.parse("(defun f () 1)")
       assert match?({:ok, _}, result) or match?({:error, _}, result)
     end
+
+    test "the error message explains every place the toolchain is looked for" do
+      # Regression: LFE is a `runtime: false` dependency, so a host app never
+      # gets it on its own code path and every `.lfe` file silently fell back
+      # to the native analyzer. `Reader.ensure_loaded/0` now also looks in
+      # `deps/lfe`, and the failure message must say so.
+      case Reader.ensure_loaded() do
+        :ok ->
+          assert Lfe.available?()
+
+        {:error, message} ->
+          assert message =~ "LFE toolchain unavailable"
+          assert message =~ "deps/lfe"
+          assert message =~ "priv/parsers/lfe/ebin"
+      end
+    end
   end
 
   describe "the call-versus-data rule (no toolchain needed)" do

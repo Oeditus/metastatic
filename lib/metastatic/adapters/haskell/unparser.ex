@@ -134,6 +134,33 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
     Enum.map_join(decls, "\n\n", &to_source/1)
   end
 
+  # Data / newtype declarations. `ToMeta` preserves these as
+  # `:language_specific` payloads with "kind", "name" and "constructors", and
+  # `FromMeta` restores that map verbatim — so the unparser has to render it.
+  def to_source(%{"type" => "data_decl"} = node) do
+    kind = Map.get(node, "data_or_new") || Map.get(node, "kind") || "data"
+    name = Map.get(node, "name", "")
+    constructors = Map.get(node, "constructors", [])
+
+    ctor_str = Enum.map_join(constructors, " | ", &to_constructor/1)
+    "#{kind} #{name}#{if ctor_str == "", do: "", else: " = " <> ctor_str}"
+  end
+
+  def to_source(%{"type" => "type_alias"} = node) do
+    "type #{Map.get(node, "name", "")} = #{to_type(Map.get(node, "definition"))}"
+  end
+
+  # Instance declarations: `instance <rule> where` plus its methods.
+  def to_source(%{"type" => "instance_decl"} = node) do
+    rule = to_instance_rule(Map.get(node, "rule"))
+    methods = Map.get(node, "methods", [])
+
+    case methods do
+      [] -> "instance #{rule}"
+      _ -> "instance #{rule} where\n" <> Enum.map_join(methods, "\n", &("  " <> to_source(&1)))
+    end
+  end
+
   def to_source(other) when is_map(other) do
     inspect(other)
   end
@@ -206,6 +233,36 @@ defmodule Metastatic.Adapters.Haskell.Unparser do
   defp to_name(name) when is_binary(name), do: name
   defp to_name(%{"name" => name}), do: name
   defp to_name(other), do: inspect(other)
+
+  # A constructor is either `Name` or `Name field1 field2`. The parser emits
+  # `"fields"` for record syntax and `"types"` for positional arguments.
+  defp to_constructor(%{"name" => name} = ctor) do
+    case Map.get(ctor, "fields") do
+      [_ | _] = fields ->
+        field_str = Enum.map_join(fields, ", ", &to_record_field/1)
+        "#{name} { #{field_str} }"
+
+      _ ->
+        case Map.get(ctor, "types") do
+          [_ | _] = types -> name <> " " <> Enum.map_join(types, " ", &to_type/1)
+          _ -> name
+        end
+    end
+  end
+
+  defp to_constructor(other), do: inspect(other)
+
+  defp to_record_field(%{"names" => names, "type" => type}) do
+    Enum.map_join(names, ", ", &to_name/1) <> " :: " <> to_type(type)
+  end
+
+  defp to_record_field(other), do: inspect(other)
+
+  # The instance head is preserved as raw AST by the parser (a `type` node).
+  defp to_instance_rule(rule) when is_binary(rule), do: rule
+  defp to_instance_rule(%{"type" => _} = rule), do: to_type(rule)
+  defp to_instance_rule(nil), do: ""
+  defp to_instance_rule(other), do: inspect(other)
 
   defp to_field(%{"name" => name, "value" => value}) do
     "#{name} = #{to_source(value)}"

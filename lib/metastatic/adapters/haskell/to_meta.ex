@@ -56,9 +56,13 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   end
 
   # M2.1 Core Layer - Constructors (data constructors)
-
+  #
+  # A constructor is a bare name, which the `:symbol` literal subtype models.
+  # `:constructor` is not a member of `@literal_subtypes` and `:symbol`
+  # requires an atom, so the name is converted here — emitting the string
+  # made every node containing a constructor (e.g. `Nothing`) non-conforming.
   def transform(%{"type" => "con", "name" => name} = node) do
-    {:ok, add_location({:literal, [subtype: :constructor], name}, node), %{}}
+    {:ok, add_location({:literal, [subtype: :symbol], String.to_atom(name)}, node), %{}}
   end
 
   # M2.1 Core Layer - Negation (unary minus)
@@ -425,10 +429,13 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
   end
 
   # Top-level pattern bindings (e.g. `main = do ...`)
-
+  #
+  # `transform_binding/1` already attaches the location, so this clause must
+  # not call `add_location/2` again — doing so duplicated every location key
+  # (`[line: 29, line: 29, ...]`), which made the node fail `AST.conforms?/1`.
   def transform(%{"type" => "pat_bind"} = node) do
     with {:ok, assignment} <- transform_binding(node) do
-      {:ok, add_location(assignment, node), %{}}
+      {:ok, assignment, %{}}
     end
   end
 
@@ -544,8 +551,11 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
     end
   end
 
+  # A wildcard is the `:wildcard` node, not the bare atom `:_`. `AST.conforms?/1`
+  # rejects the atom, so emitting it made every `case` arm with a `_` pattern
+  # (and therefore the whole module) non-conforming.
   defp transform_pattern(%{"type" => "wildcard"}) do
-    {:ok, :_}
+    {:ok, {:wildcard, [], nil}}
   end
 
   defp transform_pattern(%{"type" => "con_pat", "name" => name, "patterns" => pats}) do
@@ -574,7 +584,12 @@ defmodule Metastatic.Adapters.Haskell.ToMeta do
        }) do
     with {:ok, left_meta} <- transform_pattern(left),
          {:ok, right_meta} <- transform_pattern(right) do
-      {:ok, {:binary_op, [category: :pattern, operator: op], [left_meta, right_meta]}}
+      # `x : xs` is a cons *constructor* pattern, not an operator: `:pattern`
+      # is not a valid `:binary_op` category, so the previous encoding made
+      # every node containing a cons pattern non-conforming. A constructor
+      # application (`{:function_call, [pattern: true]}`) is the shape the
+      # other constructor patterns already use.
+      {:ok, {:function_call, [name: to_string(op), pattern: true], [left_meta, right_meta]}}
     end
   end
 

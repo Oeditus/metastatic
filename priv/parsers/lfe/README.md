@@ -23,7 +23,13 @@ None of these are part of OTP.
    LFE, or a shell started with `-pa /path/to/lfe/ebin`;
 2. `priv/parsers/lfe/ebin` (this directory) — a vendored copy of LFE's `ebin`,
    added with `Code.prepend_path/1`;
-3. the `:lfe` application's own `ebin` via `:code.lib_dir/1`.
+3. a dependency checkout in the host project: `deps/lfe/ebin` (a plain
+   `make` build) or `deps/lfe/_build/*/lib/lfe/ebin` (rebar3/Mix layout).
+
+Step 3 matters because LFE is declared `runtime: false`: Mix compiles it into
+*Metastatic's* `_build`, so a host application never gets LFE on its own code
+path. Without it, every `.lfe` file in a host project fell back to the native
+analyzer with "LFE toolchain unavailable" even though the beams were present.
 
 When none work, every callback returns `{:error, reason}` naming the missing
 modules and how to install LFE. Nothing raises.

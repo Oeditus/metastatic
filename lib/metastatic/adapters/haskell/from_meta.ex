@@ -187,7 +187,70 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     end
   end
 
-  # M2.2 Extended Layer - Pattern Matching (3-tuple format)
+  # M2.2s Structural Layer - Function Binding -> function_def
+  #
+  # The inverse of `ToMeta`'s `fun_bind` -> `:function_def` mapping. The body
+  # arrives as a one-element list holding the single expression the parser
+  # produced, so it is unwrapped back into the `rhs` of a `fun_bind` match.
+  def transform({:function_def, meta, body}, _metadata) when is_list(meta) do
+    name = Keyword.get(meta, :name, "")
+    params = Keyword.get(meta, :params, [])
+
+    with {:ok, patterns} <- transform_param_patterns(params),
+         {:ok, rhs} <- transform_function_body(body) do
+      {:ok,
+       %{
+         "type" => "fun_bind",
+         "matches" => [%{"name" => name, "patterns" => patterns, "rhs" => rhs}]
+       }}
+    end
+  end
+
+  # M2.2 Extended Layer - Do-notation / comprehension generators.
+  def transform({:generator, _meta, [pattern, collection]}, metadata) do
+    with {:ok, pat_ast} <- transform_pattern(pattern),
+         {:ok, expr_ast} <- transform(collection, metadata) do
+      {:ok, %{"type" => "generator", "pattern" => pat_ast, "expression" => expr_ast}}
+    end
+  end
+
+  # M2.2s Structural Layer - Module (`:container`) — the inverse of
+  # `ToMeta`'s `module` -> `:container` mapping. Without this clause every
+  # Haskell module failed to reify, which is why `Parser.hs` and
+  # `Agda/Parser.hs` could be abstracted but never round-tripped.
+  def transform({:container, meta, declarations}, _metadata) when is_list(meta) do
+    name = Keyword.get(meta, :name, "Main")
+
+    with {:ok, decls_ast} <- transform_list(declarations) do
+      {:ok, %{"type" => "module", "name" => name, "declarations" => decls_ast}}
+    end
+  end
+
+  # M2.2s Structural Layer - Type Signature (`:type_annotation`).
+  #
+  # Two shapes reach here:
+  #
+  #   * `annotation_type: :spec` — a top-level signature, whose single child is
+  #     the `:language_specific` wrapper around the original signature AST;
+  #   * `annotation_type: :hint` — an expression annotated inline
+  #     (`(x :: T)`), whose children are `[expression, type_expr]`.
+  def transform({:type_annotation, meta, [type_expr]}, _metadata) when is_list(meta) do
+    names = Keyword.get(meta, :names) || List.wrap(Keyword.get(meta, :name))
+
+    with {:ok, signature} <- unwrap_type_expr(type_expr) do
+      {:ok, %{"type" => "type_sig", "names" => names, "signature" => signature}}
+    end
+  end
+
+  def transform({:type_annotation, meta, [expression, type_expr]}, metadata)
+      when is_list(meta) do
+    with {:ok, expr_ast} <- transform(expression, metadata),
+         {:ok, signature} <- unwrap_type_expr(type_expr) do
+      {:ok, %{"type" => "expr_type_sig", "expression" => expr_ast, "signature" => signature}}
+    end
+  end
+
+  # M2.2s Structural Layer - Pattern Matching (3-tuple format)
 
   def transform({:pattern_match, _meta, [scrutinee | arms]}, _metadata)
       when is_list(arms) do
@@ -230,6 +293,71 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
 
   # Helper Functions
 
+  # An infix pattern operator such as `:` or `++`. Constructor names start
+  # with an upper-case letter, so a leading symbol character identifies an
+  # operator unambiguously.
+  defp operator_name?(name) when is_binary(name) do
+    case String.next_grapheme(name) do
+      {<<c>>, _} -> not (c in ?A..?Z or c in ?a..?z or c == ?_)
+      _ -> false
+    end
+  end
+
+  defp operator_name?(_), do: false
+
+  # Parameters are `:param` nodes (or bare names) that become `var_pat`
+  # patterns in the reified `fun_bind` match.
+  defp transform_param_patterns(params) when is_list(params) do
+    params
+    |> Enum.reduce_while({:ok, []}, fn param, {:ok, acc} ->
+      case transform_param_pattern(param) do
+        {:ok, pat} -> {:cont, {:ok, [pat | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, pats} -> {:ok, Enum.reverse(pats)}
+      error -> error
+    end
+  end
+
+  defp transform_param_patterns(other), do: {:error, "Invalid params: #{inspect(other)}"}
+
+  defp transform_param_pattern({:param, meta, name}) when is_binary(name) do
+    case Keyword.get(meta, :pattern) do
+      nil -> {:ok, %{"type" => "var_pat", "name" => name}}
+      pattern -> transform_pattern(pattern)
+    end
+  end
+
+  defp transform_param_pattern(name) when is_binary(name),
+    do: {:ok, %{"type" => "var_pat", "name" => name}}
+
+  defp transform_param_pattern(other), do: transform_pattern(other)
+
+  # `ToMeta` stores a function body as a one-element list containing the single
+  # expression the parser produced; a `let` block keeps its own shape.
+  defp transform_function_body([single]), do: transform(single, %{})
+  defp transform_function_body([]), do: {:ok, %{"type" => "con", "name" => "()"}}
+
+  defp transform_function_body(statements) when is_list(statements) do
+    with {:ok, stmts_ast} <- transform_list(statements) do
+      {:ok, %{"type" => "begin", "statements" => stmts_ast}}
+    end
+  end
+
+  # `ToMeta` wraps a type signature in `:language_specific` so it round-trips
+  # verbatim. Unwrap it; a plain MetaAST type expression is reified normally.
+  defp unwrap_type_expr({:language_specific, meta, ast}) when is_list(meta) do
+    if Keyword.get(meta, :language) == :haskell do
+      {:ok, ast}
+    else
+      {:error, "Cannot reify #{Keyword.get(meta, :language)} type expression to Haskell"}
+    end
+  end
+
+  defp unwrap_type_expr(other), do: transform(other, %{})
+
   defp transform_literal(:integer, value) do
     {:ok,
      %{
@@ -260,6 +388,17 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
        "type" => "literal",
        "value" => %{"literalType" => "char", "value" => value}
      }}
+  end
+
+  # A constructor is a bare name, which `ToMeta` models as a `:symbol`
+  # literal (whose payload is an atom). `:constructor` is still accepted so
+  # MetaAST from older versions reifies.
+  defp transform_literal(:symbol, name) when is_atom(name) do
+    {:ok, %{"type" => "con", "name" => Atom.to_string(name)}}
+  end
+
+  defp transform_literal(:symbol, name) when is_binary(name) do
+    {:ok, %{"type" => "con", "name" => name}}
   end
 
   defp transform_literal(:constructor, name) do
@@ -444,10 +583,31 @@ defmodule Metastatic.Adapters.Haskell.FromMeta do
     {:ok, %{"type" => "wildcard"}}
   end
 
+  # `ToMeta` emits `{:wildcard, [], nil}` for a `_` pattern.
+  defp transform_pattern({:wildcard, _meta, _}) do
+    {:ok, %{"type" => "wildcard"}}
+  end
+
   # Constructor pattern: {:function_call, [name: "Just"], [arg]}
+  #
+  # An infix constructor (`x : xs`) is encoded the same way, with the
+  # operator as the name; it is recognised by the caller passing
+  # `pattern: true` plus an operator-shaped name.
   defp transform_pattern({:function_call, meta, args}) when is_list(meta) do
-    with {:ok, args_ast} <- transform_pattern_list(args) do
-      {:ok, %{"type" => "con_pat", "name" => Keyword.get(meta, :name), "patterns" => args_ast}}
+    name = Keyword.get(meta, :name)
+
+    if Keyword.get(meta, :pattern, false) and operator_name?(name) and length(args) == 2 do
+      [left, right] = args
+
+      with {:ok, left_ast} <- transform_pattern(left),
+           {:ok, right_ast} <- transform_pattern(right) do
+        {:ok,
+         %{"type" => "infix_pat", "left" => left_ast, "operator" => name, "right" => right_ast}}
+      end
+    else
+      with {:ok, args_ast} <- transform_pattern_list(args) do
+        {:ok, %{"type" => "con_pat", "name" => name, "patterns" => args_ast}}
+      end
     end
   end
 

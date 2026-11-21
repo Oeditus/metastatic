@@ -891,8 +891,11 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:function_call, try_meta, []} = try_block
       assert Keyword.get(try_meta, :name) == "risky"
 
-      # Rescue clauses contain variables
-      assert [{:error, {:variable, _, "e"}, _}] = rescue_clauses
+      # Rescue clauses are `:match_arm` nodes (the shape `AST.conforms?/1`
+      # requires) carrying the exception type in metadata.
+      assert [{:match_arm, arm_meta, [_]} = _clause] = rescue_clauses
+      assert Keyword.get(arm_meta, :exception_type) == :error
+      assert {:variable, _, "e"} = Keyword.get(arm_meta, :pattern)
 
       assert nil == finally_block
     end
@@ -908,6 +911,70 @@ defmodule Metastatic.Adapters.PythonTest do
 
       assert {:function_call, cleanup_meta, []} = finally_block
       assert Keyword.get(cleanup_meta, :name) == "cleanup"
+    end
+  end
+
+  describe "ToMeta - subscriptions and membership" do
+    test "transforms a subscript into an accessor call" do
+      # Regression: `Subscript` had no clause, so one `obj[key]` aborted the
+      # whole file with "Unsupported Python AST construct".
+      source = "x = data[0]"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+      assert Metastatic.AST.conforms?(result)
+
+      assert {:assignment, _, [{:variable, _, "x"}, subscript]} = result
+      assert {:function_call, meta, [receiver, index]} = subscript
+      assert Keyword.get(meta, :name) == "[]"
+      assert {:variable, _, "data"} = receiver
+      assert {:literal, index_meta, 0} = index
+      assert Keyword.get(index_meta, :subtype) == :integer
+    end
+
+    test "transforms a slice into a range" do
+      source = "x = data[1:5]"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+      assert Metastatic.AST.conforms?(result)
+
+      assert {:assignment, _, [_, {:function_call, _, [_, slice]}]} = result
+      assert {:range, meta, [lower, upper]} = slice
+      assert Keyword.get(meta, :kind) == :slice
+      assert {:literal, lower_meta, 1} = lower
+      assert {:literal, upper_meta, 5} = upper
+      assert Keyword.get(lower_meta, :subtype) == :integer
+      assert Keyword.get(upper_meta, :subtype) == :integer
+    end
+
+    test "transforms membership tests" do
+      # Regression: `In` / `NotIn` had no mapping, so `x in y` failed.
+      for {op, expected} <- [{"in", :in}, {"not in", :not_in}] do
+        source = "result = x #{op} y"
+
+        assert {:ok, ast} = Python.parse(source)
+        assert {:ok, result, _metadata} = Python.to_meta(ast)
+        assert Metastatic.AST.conforms?(result)
+
+        assert {:assignment, _, [_, {:binary_op, meta, [_, _]}]} = result
+        assert Keyword.get(meta, :category) == :comparison
+        assert Keyword.get(meta, :operator) == expected
+      end
+    end
+
+    test "preserves unknown constructs as language_specific instead of failing" do
+      # Regression: an unmodelled node aborted the whole file. It is now
+      # preserved verbatim so the rest of the tree stays usable.
+      source = "x = f'{a}'"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+      assert Metastatic.AST.conforms?(result)
+
+      assert {:assignment, _, [_, {:language_specific, meta, native}]} = result
+      assert Keyword.get(meta, :language) == :python
+      assert native["_type"] == "JoinedStr"
     end
   end
 

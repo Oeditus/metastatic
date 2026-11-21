@@ -99,9 +99,15 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   def transform({:function_call, meta, args}, metadata) when is_list(meta) do
     name = Keyword.get(meta, :name)
 
-    with {:ok, func_py} <- build_function_ref(name),
-         {:ok, args_py} <- transform_list(args, metadata) do
-      {:ok, %{"_type" => "Call", "func" => func_py, "args" => args_py, "keywords" => []}}
+    # `[]` is the accessor `ToMeta` uses for a `Subscript`; rebuild the
+    # original node rather than emitting a call to a function named `[]`.
+    if name == "[]" do
+      transform_subscript(args, metadata)
+    else
+      with {:ok, func_py} <- build_function_ref(name),
+           {:ok, args_py} <- transform_list(args, metadata) do
+        {:ok, %{"_type" => "Call", "func" => func_py, "args" => args_py, "keywords" => []}}
+      end
     end
   end
 
@@ -303,6 +309,36 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
+  # Inline match — `x := expr` (walrus) or a `with ... as x` item.
+  #
+  # The two forms are distinguished by `:original_form`: a `with_item` is
+  # rebuilt as a `withitem` (the `With` node owns the statement), while a
+  # walrus becomes a `NamedExpr` expression.
+  def transform({:inline_match, meta, [target, value]}, metadata) when is_list(meta) do
+    with {:ok, target_py} <- transform_assignment_target(target, metadata),
+         {:ok, value_py} <- transform(value, metadata) do
+      case Keyword.get(meta, :original_form) do
+        :with_item ->
+          {:ok,
+           %{"_type" => "withitem", "context_expr" => value_py, "optional_vars" => target_py}}
+
+        _ ->
+          {:ok, %{"_type" => "NamedExpr", "target" => target_py, "value" => value_py}}
+      end
+    end
+  end
+
+  # Throw — `raise X` / bare `raise`.
+  def transform({:throw, meta, []}, _metadata) when is_list(meta) do
+    {:ok, %{"_type" => "Raise", "exc" => nil, "cause" => nil}}
+  end
+
+  def transform({:throw, meta, [exception]}, metadata) when is_list(meta) do
+    with {:ok, exc_py} <- transform(exception, metadata) do
+      {:ok, %{"_type" => "Raise", "exc" => exc_py, "cause" => nil}}
+    end
+  end
+
   # Exception Handling - M2.2 Extended Layer (New 3-tuple format)
   def transform({:exception_handling, meta, [try_block, rescue_clauses, finally_block]}, metadata)
       when is_list(meta) do
@@ -470,6 +506,33 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
+  # `obj[i] = v` — a subscript target. `ToMeta` renders a subscript as a call
+  # to `[]`, so the Store context has to be applied to the rebuilt node.
+  defp transform_assignment_target({:function_call, meta, args}, metadata)
+       when is_list(meta) do
+    if Keyword.get(meta, :name) == "[]" do
+      with {:ok, subscript} <- transform_subscript(args, metadata) do
+        {:ok, put_in(subscript["ctx"], %{"_type" => "Store"})}
+      end
+    else
+      {:error, "Unsupported assignment target: a function call is not assignable"}
+    end
+  end
+
+  # `obj.attr = v` — an attribute target.
+  defp transform_assignment_target({:attribute_access, meta, [receiver]}, metadata)
+       when is_list(meta) do
+    with {:ok, receiver_py} <- transform(receiver, metadata) do
+      {:ok,
+       %{
+         "_type" => "Attribute",
+         "value" => receiver_py,
+         "attr" => Keyword.get(meta, :attribute),
+         "ctx" => %{"_type" => "Store"}
+       }}
+    end
+  end
+
   defp transform_assignment_target(target, _metadata) do
     {:error, "Unsupported assignment target: #{inspect(target)}"}
   end
@@ -530,6 +593,39 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
+  # `{:function_call, [name: "[]"], [receiver, index]}` is how `ToMeta`
+  # represents a Python `Subscript`. Rebuild `obj[index]`, turning a
+  # `:range`-with-`:kind == :slice` index back into a `Slice` node.
+  defp transform_subscript([receiver, index], metadata) do
+    with {:ok, receiver_py} <- transform(receiver, metadata),
+         {:ok, index_py} <- transform_slice_index(index, metadata) do
+      {:ok,
+       %{
+         "_type" => "Subscript",
+         "value" => receiver_py,
+         "slice" => index_py,
+         "ctx" => %{"_type" => "Load"}
+       }}
+    end
+  end
+
+  defp transform_subscript(args, _metadata) do
+    {:error, "Subscript expects [receiver, index], got #{length(args)} children"}
+  end
+
+  defp transform_slice_index({:range, meta, [lower, upper]}, metadata) do
+    with {:ok, lower_py} <- transform_or_none(lower, metadata),
+         {:ok, upper_py} <- transform_or_none(upper, metadata),
+         {:ok, step_py} <- transform_or_none(Keyword.get(meta, :step), metadata) do
+      {:ok, %{"_type" => "Slice", "lower" => lower_py, "upper" => upper_py, "step" => step_py}}
+    end
+  end
+
+  defp transform_slice_index(index, metadata), do: transform(index, metadata)
+
+  defp transform_or_none(nil, _metadata), do: {:ok, nil}
+  defp transform_or_none(node, metadata), do: transform(node, metadata)
+
   defp transform_bool_op(op, left, right, metadata) do
     with {:ok, left_py} <- transform(left, metadata),
          {:ok, right_py} <- transform(right, metadata),
@@ -555,6 +651,8 @@ defmodule Metastatic.Adapters.Python.FromMeta do
   defp python_compare_op(:>=), do: {:ok, %{"_type" => "GtE"}}
   defp python_compare_op(:===), do: {:ok, %{"_type" => "Is"}}
   defp python_compare_op(:!==), do: {:ok, %{"_type" => "IsNot"}}
+  defp python_compare_op(:in), do: {:ok, %{"_type" => "In"}}
+  defp python_compare_op(:not_in), do: {:ok, %{"_type" => "NotIn"}}
   defp python_compare_op(op), do: {:error, "Unsupported comparison operator: #{op}"}
 
   defp python_bool_op(:and), do: {:ok, %{"_type" => "And"}}
@@ -679,11 +777,25 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
+  # A handler is a `:match_arm` whose metadata carries `:exception_type` and
+  # whose `:pattern` is the bound variable (or `nil` for a bare `except:`).
+  # The legacy bare `{type, var, body}` tuple is still accepted so that
+  # MetaAST produced by older versions reifies.
+  defp transform_exception_handler({:match_arm, meta, [body]}, metadata) when is_list(meta) do
+    with {:ok, type_py} <- build_exception_type(Keyword.get(meta, :exception_type, :error)),
+         {:ok, name_py} <- extract_var_name(Keyword.get(meta, :pattern)),
+         {:ok, body_py} <- transform_to_body(body, metadata) do
+      {:ok,
+       %{"_type" => "ExceptHandler", "type" => type_py, "name" => name_py, "body" => body_py}}
+    end
+  end
+
   defp transform_exception_handler({exception_type, var, body}, metadata) do
     with {:ok, type_py} <- build_exception_type(exception_type),
          {:ok, name_py} <- extract_var_name(var),
          {:ok, body_py} <- transform_to_body(body, metadata) do
-      {:ok, %{"type" => type_py, "name" => name_py, "body" => body_py}}
+      {:ok,
+       %{"_type" => "ExceptHandler", "type" => type_py, "name" => name_py, "body" => body_py}}
     end
   end
 

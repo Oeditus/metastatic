@@ -24,9 +24,17 @@ defmodule Metastatic.Adapters.Lfe.Reader do
        for a project that depends on LFE, or for a shell started with
        `-pa /path/to/lfe/ebin`);
     2. `Metastatic.Priv.parser_path("parsers/lfe/ebin")`, added with
-       `Code.add_patha/1` — this is how a vendored copy of LFE is found
+       `Code.prepend_path/1` — this is how a vendored copy of LFE is found
        without configuration;
-    3. the `:lfe` application's own `priv`/`ebin` via `:code.lib_dir/1`.
+    3. the `:lfe` application's own `ebin` via `:code.lib_dir/1`;
+    4. **a dependency checkout of LFE inside the host project**, i.e.
+       `deps/lfe/ebin` or `deps/lfe/_build/*/lib/lfe/ebin`.
+
+  Step 4 exists because LFE is a `runtime: false` dependency: Mix compiles it
+  into *Metastatic's* `_build`, so a host application that depends on
+  Metastatic never gets LFE on its own code path. Without step 4 every `.lfe`
+  file in a host project fell back to the native analyzer with "LFE toolchain
+  unavailable", even though the beams were sitting in `deps/lfe`.
 
   When none of those work the caller gets `{:error, reason}` naming the
   missing module and how to install LFE. Nothing raises.
@@ -58,6 +66,15 @@ defmodule Metastatic.Adapters.Lfe.Reader do
   @compile {:no_warn_undefined, {:lfe_io, :parse_file, 2}}
 
   @lfe_ebin_rel "parsers/lfe/ebin"
+
+  # Relative to a project root: a plain `deps/lfe` checkout (built in place by
+  # `make`) and the rebar3 layout Mix uses for `runtime: false` deps.
+  @dep_ebin_rels [
+    "ebin",
+    "_build/prod/lib/lfe/ebin",
+    "_build/default/lib/lfe/ebin",
+    "_build/dev/lib/lfe/ebin"
+  ]
   @required_modules [:lfe_io, :lfe_scan, :lfe_parse, :lfe_comp]
 
   @typedoc "One parsed form: the sexpr and the line it started on."
@@ -111,7 +128,8 @@ defmodule Metastatic.Adapters.Lfe.Reader do
     if loaded?() do
       :ok
     else
-      with :ok <- add_vendored_ebin() do
+      with :ok <- add_vendored_ebin(),
+           :ok <- add_dependency_ebin() do
         if loaded?(), do: :ok, else: {:error, missing_message()}
       end
     end
@@ -137,6 +155,46 @@ defmodule Metastatic.Adapters.Lfe.Reader do
     end
   rescue
     _ -> :ok
+  end
+
+  # LFE is declared `runtime: false` in `mix.exs`, so Mix builds it into
+  # *Metastatic's* `_build` and a host application never gets it on its own
+  # code path. Look for the dependency checkout in the host project instead.
+  #
+  # Only directories that actually contain `lfe_io.beam` are added: a bare
+  # `deps/lfe/ebin` that was never compiled would otherwise be prepended and
+  # shadow nothing, while making the failure message harder to explain.
+  defp add_dependency_ebin do
+    case Enum.find_value(project_roots(), &dep_ebin/1) do
+      nil -> :ok
+      path -> Code.prepend_path(path)
+    end
+  end
+
+  defp dep_ebin(root) when is_binary(root) do
+    lfe_root = Path.join(root, "deps/lfe")
+
+    @dep_ebin_rels
+    |> Enum.map(&Path.join(lfe_root, &1))
+    |> Enum.find(&File.regular?(Path.join(&1, "lfe_io.beam")))
+  end
+
+  # The working directory (a Mix task runs from the project root) and the
+  # `:lfe` application's own directory, which is where a release or an
+  # umbrella child keeps it. `:code.lib_dir/1` returns `_build/<env>/lib/lfe`
+  # in a Mix project, so its parent is the project's `_build/<env>/lib` — the
+  # sibling `deps/` is what we actually want, hence `File.cwd!()` first.
+  defp project_roots do
+    [File.cwd!()]
+    |> maybe_prepend_lib_dir(:lfe)
+    |> maybe_prepend_lib_dir(:metastatic)
+  end
+
+  defp maybe_prepend_lib_dir(roots, app) do
+    case :code.lib_dir(app) do
+      dir when is_list(dir) -> [List.to_string(dir) | roots]
+      _ -> roots
+    end
   end
 
   defp do_parse(path) do
@@ -192,13 +250,19 @@ defmodule Metastatic.Adapters.Lfe.Reader do
     """
     LFE toolchain unavailable: #{missing} not loadable.
 
+    Metastatic looks for LFE in this order:
+
+      1. the code path (`elixir -pa /path/to/lfe/ebin …`);
+      2. `priv/parsers/lfe/ebin` in the host application;
+      3. `deps/lfe/ebin` or `deps/lfe/_build/*/lib/lfe/ebin`.
+
     LFE is not part of OTP. Install it with one of:
 
         git clone https://github.com/lfe/lfe.git && cd lfe && make
         rebar3 as prod compile            # in an LFE project
 
-    then put its `ebin` on the code path (`elixir -pa /path/to/lfe/ebin`), or
-    vendor it at `priv/parsers/lfe/ebin` inside the host application.
+    then put its `ebin` on the code path, or vendor it at
+    `priv/parsers/lfe/ebin` inside the host application.
     """
     |> String.trim()
   end

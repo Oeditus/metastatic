@@ -743,7 +743,68 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  # Catch-all for unsupported constructs
+  # Subscription (obj[key], obj[start:stop:step]) - M2.2s Structural Layer
+  #
+  # MetaAST has no dedicated index node, so a subscript is expressed as a
+  # function call to the `[]` accessor with the receiver as the first
+  # argument. That keeps the receiver and the index in the tree (so analyzers
+  # can still see both) while staying inside the M2 core layer.
+  def transform(%{"_type" => "Subscript", "value" => value, "slice" => slice} = node) do
+    with {:ok, receiver_meta, _} <- transform(value),
+         {:ok, index_meta, _} <- transform(slice) do
+      ast = {:function_call, [name: "[]"] ++ location_meta(node), [receiver_meta, index_meta]}
+      {:ok, ast, %{}}
+    end
+  end
+
+  # Slices - the `slice` field of a Subscript.
+  #
+  # Python 3.9+ emits the bound expressions directly; 3.8 wrapped them in an
+  # `Index` node. Both shapes are accepted, and `ExtSlice` (multi-dimensional
+  # `a[i, j]`) becomes a tuple of slices.
+  def transform(%{"_type" => "Slice", "lower" => lower, "upper" => upper} = node) do
+    step = Map.get(node, "step")
+
+    with {:ok, lower_meta, _} <- transform_or_nil(lower),
+         {:ok, upper_meta, _} <- transform_or_nil(upper),
+         {:ok, step_meta, _} <- transform_or_nil(step) do
+      meta =
+        [kind: :slice] ++ if(step_meta, do: [step: step_meta], else: []) ++ location_meta(node)
+
+      {:ok, {:range, meta, [lower_meta, upper_meta]}, %{}}
+    end
+  end
+
+  # Python 3.8 compatibility: `Index` is a transparent wrapper.
+  def transform(%{"_type" => "Index", "value" => value}), do: transform(value)
+
+  def transform(%{"_type" => "ExtSlice", "dims" => dims} = node) do
+    with {:ok, dims_meta} <- transform_list(dims) do
+      {:ok, add_location({:tuple, [], dims_meta}, node), %{}}
+    end
+  end
+
+  # Context nodes (`Load`/`Store`/`Del`) carry no information of their own;
+  # they only annotate the *parent* node, so they transform to a null literal
+  # rather than failing the whole file.
+  def transform(%{"_type" => ctx} = node) when ctx in ["Load", "Store", "Del"] do
+    {:ok, add_location({:literal, [subtype: :null], nil}, node), %{}}
+  end
+
+  # Catch-all for constructs the core layer does not model.
+  #
+  # Returning an error here made an entire file unparseable because of one
+  # unsupported node (a `Subscript` in `parser.py` aborted the whole module).
+  # Preserving the native node as `:language_specific` keeps the rest of the
+  # tree usable and lets `FromMeta` restore the node verbatim.
+  def transform(unsupported) when is_map(unsupported) do
+    hint = unsupported |> Map.get("_type", "unknown") |> Macro.underscore() |> String.to_atom()
+
+    {:ok,
+     {:language_specific, [language: :python, hint: hint] ++ location_meta(unsupported),
+      unsupported}, %{}}
+  end
+
   def transform(unsupported) do
     {:error, "Unsupported Python AST construct: #{inspect(unsupported)}"}
   end
@@ -807,6 +868,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp transform_compare_op(%{"_type" => "GtE"}), do: {:ok, :>=}
   defp transform_compare_op(%{"_type" => "Is"}), do: {:ok, :===}
   defp transform_compare_op(%{"_type" => "IsNot"}), do: {:ok, :!==}
+  # Membership tests. MetaAST has no dedicated `in` operator atom, so these
+  # are carried as comparison operators with their Python spelling; `FromMeta`
+  # maps them straight back to `In`/`NotIn`.
+  defp transform_compare_op(%{"_type" => "In"}), do: {:ok, :in}
+  defp transform_compare_op(%{"_type" => "NotIn"}), do: {:ok, :not_in}
   defp transform_compare_op(op), do: {:error, "Unsupported comparison operator: #{inspect(op)}"}
 
   defp transform_bool_op(%{"_type" => "And"}), do: {:ok, :and}
@@ -955,6 +1021,22 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
+  # `a[i](x)` — the callee is a subscript. Name it after the receiver so the
+  # call is still attributed to something meaningful.
+  defp extract_function_name(%{"_type" => "Subscript", "value" => obj}) do
+    case extract_function_name(obj) do
+      {:ok, obj_name} -> {:ok, "#{obj_name}[]"}
+      error -> error
+    end
+  end
+
+  # A call whose callee is itself a call (`f(x)(y)`, `tree.get(k)(v)`). The
+  # callee is an expression, not a name, so there is no dotted name to report;
+  # an empty name keeps the tree usable instead of rejecting the whole file.
+  defp extract_function_name(%{"_type" => type}) when type in ["Call", "Lambda"] do
+    {:ok, ""}
+  end
+
   defp extract_function_name(func) do
     {:error, "Unsupported function reference: #{inspect(func)}"}
   end
@@ -990,19 +1072,51 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  defp transform_exception_handler(%{"type" => type, "name" => name, "body" => body}) do
-    with {:ok, exception_type} <- extract_exception_type(type),
-         {:ok, var_meta, _} <- transform_or_name(name),
+  # A `Try` handler is an `ExceptHandler` node. Its `"type"` field is the
+  # exception class expression (`nil` for a bare `except:`), and `"name"` is
+  # the optional `as` binding.
+  #
+  # The M2 shape for a handler is a `:match_arm` whose pattern is the bound
+  # variable (or a wildcard when nothing is bound) and whose metadata carries
+  # the exception type. `AST.conforms?/1` requires exactly that shape, so
+  # emitting a bare `{type, var, body}` tuple made the whole tree invalid.
+  defp transform_exception_handler(%{"_type" => "ExceptHandler"} = handler) do
+    exception_type = Map.get(handler, "type")
+    name = Map.get(handler, "name")
+    body = Map.get(handler, "body", [])
+
+    with {:ok, type_meta} <- extract_exception_type(exception_type),
+         {:ok, pattern, _} <- transform_or_name(name),
          {:ok, body_meta, _} <- transform_body(body) do
-      {:ok, {exception_type, var_meta, body_meta}}
+      {:ok, exception_match_arm(type_meta, pattern, body_meta, handler)}
     end
   end
 
-  defp transform_exception_handler(%{"type" => type, "body" => body}) do
+  # Legacy/alternate shape: the handler type is already a plain string.
+  defp transform_exception_handler(%{"type" => type, "name" => name, "body" => body} = handler) do
+    with {:ok, exception_type} <- extract_exception_type(type),
+         {:ok, pattern, _} <- transform_or_name(name),
+         {:ok, body_meta, _} <- transform_body(body) do
+      {:ok, exception_match_arm(exception_type, pattern, body_meta, handler)}
+    end
+  end
+
+  defp transform_exception_handler(%{"type" => type, "body" => body} = handler) do
     with {:ok, exception_type} <- extract_exception_type(type),
          {:ok, body_meta, _} <- transform_body(body) do
-      {:ok, {exception_type, nil, body_meta}}
+      {:ok, exception_match_arm(exception_type, nil, body_meta, handler)}
     end
+  end
+
+  defp transform_exception_handler(other) do
+    {:error, "Unsupported except handler: #{inspect(other, limit: 5)}"}
+  end
+
+  defp exception_match_arm(exception_type, pattern, body_meta, handler) do
+    meta =
+      [exception_type: exception_type, pattern: pattern] ++ location_meta(handler)
+
+    {:match_arm, meta, [body_meta]}
   end
 
   @python_exceptions %{
