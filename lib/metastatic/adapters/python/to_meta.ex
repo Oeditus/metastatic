@@ -66,12 +66,19 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   @spec transform(map()) :: {:ok, term(), map()} | {:error, String.t()}
 
   # Module - top-level container
+  #
+  # A leading bare string statement is the module docstring. It is kept in the
+  # body and recorded in `:docstring`, because a lone string statement is
+  # indistinguishable from an expression statement once reified — a module
+  # docstring used to reify as a stray string expression before `import ast`.
   def transform(%{"_type" => "Module", "body" => body} = node) do
     with {:ok, statements} <- transform_list(body) do
+      meta = docstring_meta(body)
+
       case statements do
-        [] -> {:ok, add_location({:block, [], []}, node), %{}}
+        [] -> {:ok, add_location({:block, meta, []}, node), %{}}
         [single] -> {:ok, single, %{}}
-        multiple -> {:ok, add_location({:block, [], multiple}, node), %{}}
+        multiple -> {:ok, add_location({:block, meta, multiple}, node), %{}}
       end
     end
   end
@@ -83,9 +90,33 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Literals - M2.1 Core Layer
 
+  # Values that JSON cannot carry are tagged by `parser.py` and decoded here.
+  #
+  # `bytes` becomes a `:bytes` literal (the M2 payload is the raw binary);
+  # `Ellipsis` and complex numbers have no M2 literal subtype, so they are
+  # preserved verbatim as `:language_specific` rather than failing the file.
+  #
+  # These clauses must precede the generic `Constant` clause below, which
+  # would otherwise match the tagged maps first.
+  def transform(%{"_type" => "Constant", "value" => %{"__bytes__" => encoded}} = node) do
+    with {:ok, raw} <- Base.decode64(encoded) do
+      {:ok, add_location({:literal, [subtype: :bytes], raw}, node), %{}}
+    end
+  end
+
+  def transform(%{"_type" => "Constant", "value" => %{"__python_repr__" => repr}} = node) do
+    hint = if repr == "Ellipsis", do: :ellipsis, else: :complex_literal
+    {:ok, {:language_specific, [language: :python, hint: hint], node}, %{}}
+  end
+
   # Constant node (Python 3.8+)
+  #
+  # `kind` records a string prefix (`u" "`, `r"\d"`). It is only present when
+  # the source used one, and dropping it changes the AST, so it is carried as
+  # `:string_kind`.
   def transform(%{"_type" => "Constant", "value" => value} = node) do
     literal = infer_literal_type(value)
+    literal = put_string_kind(literal, Map.get(node, "kind"))
     {:ok, add_location(literal, node), %{}}
   end
 
@@ -170,17 +201,26 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Multiple boolean operations - chain them
+  #
+  # `a and b and c` is n-ary in Python's AST but binary in M2, so it is
+  # chained left-associatively: `(a and b) and c`. `FromMeta` flattens the
+  # chain back into one n-ary `BoolOp`, which reproduces Python's own shape.
+  #
+  # The chain is marked `:chained` so `FromMeta` only flattens what this
+  # clause built. Without the mark, a genuinely nested `a and (b and c)`
+  # would be flattened too, changing the tree.
   def transform(%{"_type" => "BoolOp", "op" => op, "values" => values} = node)
       when length(values) > 2 do
     with {:ok, op_meta} <- transform_bool_op(op),
          {:ok, transformed_values} <- transform_list(values) do
-      # Chain: a and b and c → (a and b) and c
       [first, second | rest] = transformed_values
-      initial = {:binary_op, [category: :boolean, operator: op_meta], [first, second]}
+
+      initial =
+        {:binary_op, [category: :boolean, operator: op_meta, chained: true], [first, second]}
 
       result =
         Enum.reduce(rest, initial, fn value, acc ->
-          {:binary_op, [category: :boolean, operator: op_meta], [acc, value]}
+          {:binary_op, [category: :boolean, operator: op_meta, chained: true], [acc, value]}
         end)
 
       {:ok, add_location(result, node), %{}}
@@ -198,11 +238,28 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Function Calls - M2.1 Core Layer
-
+  #
+  # Keyword arguments and unpacking are part of the call, not decoration:
+  # dropping them silently rewrote `foo(1, x=2, **kw)` as `foo(1)`. They ride
+  # along in metadata (as `:param` nodes, matching how `:function_def`
+  # describes its parameters) so `FromMeta` can rebuild the exact call.
+  #
+  # A callee that is an *expression* (`f(x).decode()`, `a[0](y)`) has no
+  # dotted name. It is carried in `:receiver` so the receiver is not lost —
+  # reporting an empty name used to reify `base64.b64encode(v).decode()` as a
+  # bare `.decode()`.
   def transform(%{"_type" => "Call", "func" => func, "args" => args} = node) do
-    with {:ok, func_name} <- extract_function_name(func),
-         {:ok, args_meta} <- transform_list(args) do
-      ast = {:function_call, [name: func_name], args_meta}
+    keywords = Map.get(node, "keywords") || []
+
+    with {:ok, func_name, receiver} <- call_target(func),
+         {:ok, args_meta} <- transform_list(args),
+         {:ok, kwargs_meta} <- transform_call_keywords(keywords) do
+      meta =
+        [name: func_name] ++
+          if(receiver, do: [receiver: receiver], else: []) ++
+          if(kwargs_meta != [], do: [kwargs: kwargs_meta], else: [])
+
+      ast = {:function_call, meta, args_meta}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -210,11 +267,16 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Conditionals - M2.1 Core Layer
 
   # If statement
+  #
+  # `If` and `IfExp` share the `:conditional` node, so `FromMeta` cannot tell
+  # them apart from the shape alone (an `if` whose branches are expressions
+  # looks exactly like a ternary). `:statement` records which one this was so
+  # a statement `if` reifies as `If` instead of an unparseable `IfExp`.
   def transform(%{"_type" => "If", "test" => test, "body" => body, "orelse" => orelse} = node) do
     with {:ok, test_meta, _} <- transform(test),
          {:ok, body_meta, _} <- transform_body(body),
          {:ok, else_meta, _} <- transform_body_or_nil(orelse) do
-      ast = {:conditional, [], [test_meta, body_meta, else_meta]}
+      ast = {:conditional, [statement: true], [test_meta, body_meta, else_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -307,6 +369,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Annotated assignment: x: int = 5 (Python 3.6+)
   # Ignore the annotation for now
+  # `x: int = 1`. The annotation is kept in `:annotation` so the assignment
+  # reifies as an `AnnAssign` again; without it the annotation was dropped and
+  # `x: int = 1` came back as a plain `x = 1`.
   def transform(%{"_type" => "AnnAssign", "target" => target, "value" => value} = node)
       when not is_nil(value) do
     with {:ok, target_meta, target_metadata} <- transform(target),
@@ -316,7 +381,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         value_metadata: value_metadata
       }
 
-      {:ok, add_location({:assignment, [], [target_meta, value_meta]}, node), metadata}
+      meta = annotation_meta(node)
+
+      {:ok, add_location({:assignment, meta, [target_meta, value_meta]}, node), metadata}
     end
   end
 
@@ -334,14 +401,28 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  # Dicts (Maps) - M2.1 Core Layer
-  def transform(%{"_type" => "Dict", "keys" => keys, "values" => values} = node) do
-    with {:ok, keys_meta} <- transform_list(keys),
-         {:ok, values_meta} <- transform_list(values) do
-      # Transform pairs to {:pair, [], [key, value]} format
-      pairs = Enum.zip_with(keys_meta, values_meta, fn k, v -> {:pair, [], [k, v]} end)
-      ast = {:map, [], pairs}
+  # Sets - M2.1 Core Layer
+  #
+  # A set literal has no dedicated M2 node; it is a collection whose
+  # elements are unordered and unique. It is carried as a `:list` with
+  # `:collection_type` metadata so `FromMeta` can restore the braces.
+  def transform(%{"_type" => "Set", "elts" => elements} = node) do
+    with {:ok, elements_meta} <- transform_list(elements) do
+      ast = {:list, [collection_type: :set], elements_meta}
       {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # Dicts (Maps) - M2.1 Core Layer
+  # `{**a, "b": 1}` has a `nil` key for the unpacked mapping; M2 `:map` has no
+  # unpacking form, so the whole literal is preserved verbatim rather than
+  # silently dropping the unpacked entries. Checked before transforming the
+  # keys, since `transform_list/1` cannot transform a `nil` key.
+  def transform(%{"_type" => "Dict", "keys" => keys} = node) when is_list(keys) do
+    if Enum.any?(keys, &is_nil/1) do
+      {:ok, {:language_specific, [language: :python, hint: :dict_unpacking], node}, %{}}
+    else
+      transform_dict(node)
     end
   end
 
@@ -355,10 +436,17 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Loops - M2.2 Extended Layer
 
   # While loop
+  #
+  # Python's `while ... else:` runs the `else` block when the loop finishes
+  # without `break`; `:orelse` carries it so it is not silently dropped.
   def transform(%{"_type" => "While", "test" => test, "body" => body} = node) do
     with {:ok, test_meta, _} <- transform(test),
-         {:ok, body_meta, _} <- transform_body(body) do
-      ast = {:loop, [loop_type: :while], [test_meta, body_meta]}
+         {:ok, body_meta, _} <- transform_body(body),
+         {:ok, else_meta, _} <- transform_body_or_nil(Map.get(node, "orelse", [])) do
+      meta =
+        [loop_type: :while] ++ if(else_meta, do: [orelse: else_meta], else: [])
+
+      ast = {:loop, meta, [test_meta, body_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -367,8 +455,12 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "For", "target" => target, "iter" => iter, "body" => body} = node) do
     with {:ok, target_meta, _} <- transform(target),
          {:ok, iter_meta, _} <- transform(iter),
-         {:ok, body_meta, _} <- transform_body(body) do
-      ast = {:loop, [loop_type: :for_each], [target_meta, iter_meta, body_meta]}
+         {:ok, body_meta, _} <- transform_body(body),
+         {:ok, else_meta, _} <- transform_body_or_nil(Map.get(node, "orelse", [])) do
+      meta =
+        [loop_type: :for_each] ++ if(else_meta, do: [orelse: else_meta], else: [])
+
+      ast = {:loop, meta, [target_meta, iter_meta, body_meta]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -386,34 +478,27 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Collection Operations - M2.2 Extended Layer
 
   # Simple list comprehension without filters → map
+  #
+  # Only a plain synchronous single generator qualifies. An `async for`
+  # generator falls through to the general `:comprehension` clause below,
+  # which keeps `is_async` — the `:map` shape has nowhere to put it.
   def transform(
         %{
           "_type" => "ListComp",
           "elt" => elt,
-          "generators" => [%{"target" => target, "iter" => iter, "ifs" => []}]
+          "generators" => [%{"target" => target, "iter" => iter, "ifs" => []} = gen]
         } = node
       ) do
-    with {:ok, target_meta, _} <- transform(target),
-         {:ok, iter_meta, _} <- transform(iter),
-         {:ok, elt_meta, _} <- transform(elt) do
-      # Convert to: {:collection_op, [op_type: :map], [lambda, collection]}
-      param_name = extract_variable_name(target_meta)
-      lambda = {:lambda, [params: [{:param, [], param_name}], captures: []], [elt_meta]}
-      {:ok, add_location({:collection_op, [op_type: :map], [lambda, iter_meta]}, node), %{}}
+    if Map.get(gen, "is_async", 0) == 1 do
+      transform_list_comp(node)
+    else
+      transform_simple_list_comp(node, target, iter, elt)
     end
   end
 
-  # List comprehension with filters → comprehension
-  def transform(%{"_type" => "ListComp", "elt" => elt, "generators" => generators} = node) do
-    with {:ok, elt_meta, _} <- transform(elt),
-         {:ok, gens_and_filters} <- transform_comprehension_generators(generators) do
-      {:ok,
-       add_location(
-         {:comprehension, [comp_type: :list], [elt_meta | gens_and_filters]},
-         node
-       ), %{}}
-    end
-  end
+  # List comprehension with filters, several generators, or an async
+  # generator → `:comprehension` (the `:map` shape above cannot hold them).
+  def transform(%{"_type" => "ListComp"} = node), do: transform_list_comp(node)
 
   # Exception Handling - M2.2 Extended Layer
 
@@ -422,15 +507,18 @@ defmodule Metastatic.Adapters.Python.ToMeta do
           "_type" => "Try",
           "body" => body,
           "handlers" => handlers,
-          "orelse" => _orelse,
+          "orelse" => orelse,
           "finalbody" => finalbody
         } = node
       ) do
     with {:ok, body_meta, _} <- transform_body(body),
          {:ok, rescue_clauses} <- transform_exception_handlers(handlers),
+         {:ok, else_meta, _} <- transform_body_or_nil(orelse),
          {:ok, finally_meta, _} <- transform_body_or_nil(finalbody) do
+      meta = if(else_meta, do: [orelse: else_meta], else: [])
+
       {:ok,
-       add_location({:exception_handling, [], [body_meta, rescue_clauses, finally_meta]}, node),
+       add_location({:exception_handling, meta, [body_meta, rescue_clauses, finally_meta]}, node),
        %{}}
     end
   end
@@ -444,10 +532,14 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     else
       with {:ok, decorator_names} <- extract_decorator_names(decorators) do
         node_without_decorators = Map.put(node, "decorator_list", [])
+        decorator_args = extract_decorator_args(decorators)
 
         case transform_function_def(node_without_decorators) do
           {:ok, {:function_def, meta, body}, metadata} ->
-            {:ok, {:function_def, [decorators: decorator_names] ++ meta, body}, metadata}
+            decorator_meta =
+              decorator_meta(decorator_names, decorator_args) ++ decorator_expr_meta(decorators)
+
+            {:ok, {:function_def, decorator_meta ++ meta, body}, metadata}
 
           other ->
             other
@@ -478,11 +570,15 @@ defmodule Metastatic.Adapters.Python.ToMeta do
       {[_ | _] = decs, false} ->
         with {:ok, decorator_names} <- extract_decorator_names(decs) do
           clean = Map.put(func_node, "decorator_list", [])
+          decorator_args = extract_decorator_args(decs)
 
           case transform_function_def(clean) do
             {:ok, {:function_def, meta, body}, metadata} ->
-              {:ok, {:function_def, [async: true, decorators: decorator_names] ++ meta, body},
-               metadata}
+              decorator_meta =
+                decorator_meta(decorator_names, decorator_args) ++ decorator_expr_meta(decs)
+
+              meta = [async: true] ++ decorator_meta ++ meta
+              {:ok, {:function_def, meta, body}, metadata}
 
             other ->
               other
@@ -504,10 +600,14 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   def transform(%{"_type" => "ClassDef", "decorator_list" => [_ | _] = decorators} = node) do
     with {:ok, decorator_names} <- extract_decorator_names(decorators) do
       node_without_decorators = Map.put(node, "decorator_list", [])
+      decorator_args = extract_decorator_args(decorators)
 
       case transform(node_without_decorators) do
         {:ok, {:container, meta, body}, metadata} ->
-          {:ok, {:container, [decorators: decorator_names] ++ meta, body}, metadata}
+          decorator_meta =
+            decorator_meta(decorator_names, decorator_args) ++ decorator_expr_meta(decorators)
+
+          {:ok, {:container, decorator_meta ++ meta, body}, metadata}
 
         other ->
           other
@@ -520,16 +620,25 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     with {:ok, body_stmts} <- transform_list(body) do
       bases = Map.get(node, "bases", [])
 
-      base_names =
-        Enum.map(bases, fn
-          %{"_type" => "Name", "id" => id} -> id
-          %{"_type" => "Attribute"} = attr -> format_attribute_name(attr)
-          _ -> "unknown"
-        end)
+      # `:bases` holds the base *names* (for analyzers); `:base_exprs` holds
+      # the full base expressions, so `class A(B[int])` reifies as `B[int]`
+      # rather than collapsing to `unknown`.
+      base_names = Enum.map(bases, &format_base_name/1)
+      base_exprs = Enum.map(bases, fn base -> elem(transform(base), 1) end)
+
+      # `class A(metaclass=ABCMeta)` — class keyword arguments. Dropping them
+      # silently changed the class's metaclass.
+      class_keywords =
+        case transform_call_keywords(Map.get(node, "keywords", []) || []) do
+          {:ok, keywords} -> keywords
+          _ -> []
+        end
 
       meta =
         [container_type: :class, name: name, module: name, language: :python] ++
           if(base_names != [], do: [bases: base_names], else: []) ++
+          if(base_exprs != [], do: [base_exprs: base_exprs], else: []) ++
+          if(class_keywords != [], do: [class_keywords: class_keywords], else: []) ++
           location_meta(node)
 
       {:ok, {:container, meta, body_stmts}, %{}}
@@ -537,6 +646,10 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   # Context managers (with statement) - transform to block with bindings
+  #
+  # `:with_items` records the `withitem` nodes so `FromMeta` can rebuild the
+  # `With` statement. Without it the items were reified as a bare statement
+  # list, which unparsed to nonsense (`open(a) as fopen(b) as g`).
   def transform(%{"_type" => "With", "items" => items, "body" => body} = node) do
     with {:ok, bindings} <- transform_with_items(items),
          {:ok, body_stmts} <- transform_list(body) do
@@ -547,7 +660,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         end
 
       statements = bindings ++ [body_ast]
-      {:ok, add_location({:block, [original_form: :with], statements}, node), %{}}
+
+      meta =
+        [original_form: :with, with_items: length(items)] ++ location_meta(node)
+
+      {:ok, {:block, meta, statements}, %{}}
     end
   end
 
@@ -611,7 +728,10 @@ defmodule Metastatic.Adapters.Python.ToMeta do
             {:import, meta, []}
           end)
 
-        {:ok, {:block, [], import_nodes}, %{}}
+        # `import a, b` is one `Import` node with several aliases. The block
+        # is marked so `FromMeta` merges it back instead of emitting one
+        # `import` statement per module.
+        {:ok, {:block, [original_form: :multi_import], import_nodes}, %{}}
     end
   end
 
@@ -623,11 +743,22 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         name when is_binary(name) -> name
       end)
 
+    # `from x import y as z` — the `as` names are positional, aligned with
+    # `:names`. Dropping them rewrote `from gettext import gettext as _` as
+    # `from gettext import gettext`, silently changing which symbol was bound.
+    aliases =
+      names
+      |> Enum.map(fn
+        %{"asname" => asname} -> asname
+        _ -> nil
+      end)
+
     source = module || ""
     level = Map.get(node, "level", 0)
 
     meta =
       [source: source, names: imported_names, import_type: :from, language: :python] ++
+        if(Enum.any?(aliases, &is_binary/1), do: [name_aliases: aliases], else: []) ++
         if(level > 0, do: [relative_level: level], else: []) ++
         location_meta(node)
 
@@ -692,6 +823,24 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
+  # F-strings (Python 3.6+) - M2.1 Core Layer
+  #
+  # A `JoinedStr` is a sequence of `Constant` (literal text) and
+  # `FormattedValue` (an interpolated expression) parts, which maps directly
+  # onto M2's `:string_interpolation`. Previously this fell through to the
+  # catch-all and the whole f-string became opaque `:language_specific`.
+  def transform(%{"_type" => "JoinedStr", "values" => values} = node) do
+    with {:ok, parts} <- transform_fstring_parts(values) do
+      {:ok, add_location({:string_interpolation, [], parts}, node), %{}}
+    end
+  end
+
+  # A `FormattedValue` on its own (only reachable through a JoinedStr in
+  # practice) is just its expression.
+  def transform(%{"_type" => "FormattedValue", "value" => value}) do
+    transform(value)
+  end
+
   # Global/nonlocal declarations
   def transform(%{"_type" => "Global"} = node) do
     {:ok, {:language_specific, [language: :python, hint: :global], node}, %{}}
@@ -708,12 +857,13 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   # Raise statements - M2.1 Core Layer (:throw)
   def transform(%{"_type" => "Raise", "exc" => exc} = node) when not is_nil(exc) do
-    with {:ok, exc_meta, _} <- transform(exc) do
-      cause = Map.get(node, "cause")
-
+    with {:ok, exc_meta, _} <- transform(exc),
+         {:ok, cause_meta, _} <- transform_or_nil(Map.get(node, "cause")) do
+      # `raise X from Y` — the cause expression is kept, not just a flag, so
+      # the `from Y` clause survives the round-trip.
       meta =
         [kind: :raise] ++
-          if(cause, do: [has_cause: true], else: []) ++
+          if(cause_meta, do: [has_cause: true, cause: cause_meta], else: []) ++
           location_meta(node)
 
       {:ok, {:throw, meta, [exc_meta]}, %{}}
@@ -809,7 +959,105 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:error, "Unsupported Python AST construct: #{inspect(unsupported)}"}
   end
 
+  # `:decorators` (names) plus `:decorator_args` (call arguments, aligned with
+  # the names; `nil` for a decorator that is not a call).
+  defp decorator_meta(names, args) do
+    [decorators: names] ++ if(args == [], do: [], else: [decorator_args: args])
+  end
+
+  # Decorators whose callee is not a plain dotted name (`@a.b(1)(2)`) cannot
+  # be rebuilt from a name string. Their full expression is kept verbatim.
+  defp decorator_expr_meta(decorators) when is_list(decorators) do
+    exprs =
+      decorators
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {decorator, index} ->
+        if decorator_name_expressible?(decorator) do
+          []
+        else
+          case transform(decorator) do
+            {:ok, expr, _} -> [{index, expr}]
+            _ -> []
+          end
+        end
+      end)
+
+    if exprs == [], do: [], else: [decorator_exprs: exprs]
+  end
+
+  # A decorator is name-expressible when it is a plain dotted name, optionally
+  # called with arguments (`@app.route("/")`). A call whose callee is itself a
+  # call (`@a.b(1)(2)`) is not: the name alone cannot rebuild it.
+  defp decorator_name_expressible?(%{"_type" => "Name"}), do: true
+  defp decorator_name_expressible?(%{"_type" => "Attribute"}), do: true
+
+  defp decorator_name_expressible?(%{"_type" => "Call", "func" => func}),
+    do: dotted_name?(func)
+
+  defp decorator_name_expressible?(_), do: false
+
+  defp dotted_name?(%{"_type" => "Name"}), do: true
+  defp dotted_name?(%{"_type" => "Attribute", "value" => value}), do: dotted_name?(value)
+  defp dotted_name?(_), do: false
+
+  defp transform_dict(%{"_type" => "Dict", "keys" => keys, "values" => values} = node) do
+    with {:ok, keys_meta} <- transform_list(keys),
+         {:ok, values_meta} <- transform_list(values) do
+      # Transform pairs to {:pair, [], [key, value]} format
+      pairs = Enum.zip_with(keys_meta, values_meta, fn k, v -> {:pair, [], [k, v]} end)
+      ast = {:map, [], pairs}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  defp put_fstring_meta({type, meta, children}, node) when is_list(meta) do
+    conversion = Map.get(node, "conversion", -1)
+
+    meta =
+      meta ++
+        if(is_integer(conversion) and conversion >= 0,
+          do: [conversion: conversion],
+          else: []
+        ) ++
+        format_spec_meta(Map.get(node, "format_spec"))
+
+    {type, meta, children}
+  end
+
+  defp put_fstring_meta(other, _node), do: other
+
+  # A format spec is itself a `JoinedStr` of literal text and nested
+  # interpolations (e.g. `f"{x:{width}}"`). The literal text is the common
+  # case and is stored as a plain string.
+  defp format_spec_meta(nil), do: []
+
+  # A format spec may itself interpolate (`f"{x:{width}}"`), so it is kept as
+  # a nested `:string_interpolation` rather than only handling literal text.
+  defp format_spec_meta(%{"_type" => "JoinedStr", "values" => values} = node) do
+    case values do
+      [%{"_type" => "Constant", "value" => text}] when is_binary(text) ->
+        [format_spec: text]
+
+      _ ->
+        case transform_fstring_parts(values) do
+          {:ok, parts} -> [format_spec: {:string_interpolation, [], parts}]
+          _ -> [format_spec: {:language_specific, [language: :python], node}]
+        end
+    end
+  end
+
+  defp format_spec_meta(other), do: [format_spec: other]
+
   # Helper Functions
+
+  # List comprehension with filters (or an async generator) → comprehension
+
+  defp put_string_kind({:literal, meta, value}, kind)
+       when is_binary(value) and is_binary(kind) do
+    {:literal, meta ++ [string_kind: kind], value}
+  end
+
+  defp put_string_kind(literal, _kind), do: literal
 
   defp transform_list(items) when is_list(items) do
     items
@@ -858,6 +1106,20 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp transform_binop(%{"_type" => "FloorDiv"}), do: {:ok, {:arithmetic, :div}}
   defp transform_binop(%{"_type" => "Mod"}), do: {:ok, {:arithmetic, :rem}}
   defp transform_binop(%{"_type" => "Pow"}), do: {:ok, {:arithmetic, :**}}
+
+  # Bitwise operators. The operator atoms are the ones the other adapters
+  # already use for this category (`:band`, `:bsl`, ...), so a Python `a & b`
+  # and an Erlang `A band B` produce the same MetaAST.
+  defp transform_binop(%{"_type" => "BitAnd"}), do: {:ok, {:bitwise, :band}}
+  defp transform_binop(%{"_type" => "BitOr"}), do: {:ok, {:bitwise, :bor}}
+  defp transform_binop(%{"_type" => "BitXor"}), do: {:ok, {:bitwise, :bxor}}
+  defp transform_binop(%{"_type" => "LShift"}), do: {:ok, {:bitwise, :bsl}}
+  defp transform_binop(%{"_type" => "RShift"}), do: {:ok, {:bitwise, :bsr}}
+
+  # Matrix multiplication has no meta-level operator; it is carried as
+  # arithmetic with its own atom so the source spelling survives.
+  defp transform_binop(%{"_type" => "MatMult"}), do: {:ok, {:arithmetic, :@}}
+
   defp transform_binop(op), do: {:error, "Unsupported binary operator: #{inspect(op)}"}
 
   defp transform_compare_op(%{"_type" => "Eq"}), do: {:ok, :==}
@@ -882,13 +1144,105 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp transform_unary_op(%{"_type" => "Not"}), do: {:ok, {:boolean, :not}}
   defp transform_unary_op(%{"_type" => "USub"}), do: {:ok, {:arithmetic, :-}}
   defp transform_unary_op(%{"_type" => "UAdd"}), do: {:ok, {:arithmetic, :+}}
+  defp transform_unary_op(%{"_type" => "Invert"}), do: {:ok, {:bitwise, :bnot}}
   defp transform_unary_op(op), do: {:error, "Unsupported unary operator: #{inspect(op)}"}
+
+  # Call keyword arguments → `:param` nodes.
+  #
+  # Three shapes appear in `Call.keywords`:
+  #   * `keyword(arg="x", value=...)`   → `{:param, [kind: :keyword], "x"}`
+  #   * `keyword(arg=nil, value=...)`    → `**expr` unpacking
+  #   * `None` (from an older parser)    → `**expr` unpacking
+  # The unpacked expression is kept in the param's `:default` slot, which is
+  # where `:param` already stores the value bound to a name.
+  defp transform_call_keywords(keywords) when is_list(keywords) do
+    keywords
+    |> Enum.reduce_while({:ok, []}, fn keyword, {:ok, acc} ->
+      case transform_call_keyword(keyword) do
+        {:ok, param} -> {:cont, {:ok, [param | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, params} -> {:ok, Enum.reverse(params)}
+      error -> error
+    end
+  end
+
+  defp transform_call_keywords(_), do: {:ok, []}
+
+  defp transform_call_keyword(%{"arg" => nil, "value" => value}) do
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:param, [kind: :keyword_variadic, default: value_meta], "**"}}
+    end
+  end
+
+  defp transform_call_keyword(%{"arg" => arg, "value" => value}) when is_binary(arg) do
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, {:param, [kind: :keyword, default: value_meta], arg}}
+    end
+  end
+
+  defp transform_call_keyword(nil) do
+    {:ok, {:param, [kind: :keyword_variadic, default: {:variable, [scope: :local], "_"}], "**"}}
+  end
+
+  defp transform_call_keyword(other) do
+    {:error, "Unsupported call keyword: #{inspect(other, limit: 5)}"}
+  end
+
+  # F-string parts. Literal text becomes a `:string` literal; every
+  # `FormattedValue` becomes the MetaAST of the interpolated expression.
+  # Adjacent literals are merged so `f"a{b}c"` yields three parts, not five.
+  defp transform_fstring_parts(values) when is_list(values) do
+    values
+    |> Enum.reduce_while({:ok, []}, fn value, {:ok, acc} ->
+      case transform_fstring_part(value) do
+        {:ok, part} -> {:cont, {:ok, append_fstring_part(acc, part)}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, parts} -> {:ok, Enum.reverse(parts)}
+      error -> error
+    end
+  end
+
+  defp transform_fstring_parts(_), do: {:ok, []}
+
+  defp transform_fstring_part(%{"_type" => "Constant", "value" => text} = node)
+       when is_binary(text) do
+    {:ok, add_location({:literal, [subtype: :string], text}, node)}
+  end
+
+  # `f"{v:06d}"` — the conversion (`!r`) and format spec (`:06d`) are part of
+  # the interpolation. They are attached as metadata on the interpolated
+  # expression; dropping them silently rewrote `f"{v:06d}"` as `f"{v}"`.
+  defp transform_fstring_part(%{"_type" => "FormattedValue", "value" => value} = node) do
+    with {:ok, value_meta, _} <- transform(value) do
+      {:ok, put_fstring_meta(value_meta, node)}
+    end
+  end
+
+  defp transform_fstring_part(other) do
+    case transform(other) do
+      {:ok, meta, _} -> {:ok, meta}
+      error -> error
+    end
+  end
+
+  defp append_fstring_part([{:literal, meta, previous} | rest], {:literal, _meta, next})
+       when is_binary(previous) and is_binary(next) do
+    [{:literal, meta, previous <> next} | rest]
+  end
+
+  defp append_fstring_part(acc, part), do: [part | acc]
 
   # Transform regular FunctionDef to {:function_def, meta, body}
   defp transform_function_def(
          %{"_type" => "FunctionDef", "name" => name, "body" => body, "args" => args} = node
        ) do
-    with {:ok, params} <- extract_function_params(args),
+    with {:ok, params, posonly_count} <- extract_function_params(args),
          {:ok, body_stmts} <- transform_list(body) do
       meta =
         [
@@ -898,18 +1252,30 @@ defmodule Metastatic.Adapters.Python.ToMeta do
           arity: length(params),
           function: name,
           language: :python
-        ] ++ location_meta(node)
+        ] ++
+          if(posonly_count > 0, do: [positional_only: posonly_count], else: []) ++
+          docstring_meta(body) ++ location_meta(node)
 
-      # Add return annotation hint if present
-      meta =
-        case Map.get(node, "returns") do
-          nil -> meta
-          _ -> Keyword.put(meta, :has_return_type, true)
-        end
+      # The return annotation expression itself, not just a flag: a flag told
+      # `FromMeta` that a type existed but not which one, so `-> bool` was lost.
+      meta = meta ++ return_annotation_meta(Map.get(node, "returns"))
 
       {:ok, {:function_def, meta, body_stmts}, %{}}
     end
   end
+
+  # A leading bare string statement is a docstring. It is kept in the body
+  # (so the tree stays faithful) *and* recorded in `:docstring`, because a
+  # lone string statement is indistinguishable from an expression statement
+  # once reified — `def f(): "Doc."` unparsed to `def f():'Doc.'`.
+  defp docstring_meta([
+         %{"_type" => "Expr", "value" => %{"_type" => "Constant", "value" => text}} | _
+       ])
+       when is_binary(text) do
+    [docstring: text]
+  end
+
+  defp docstring_meta(_), do: []
 
   # Extract function parameters from Python args structure.
   # Produces :param nodes with kind: metadata:
@@ -917,51 +1283,122 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   #   :keyword           — keyword-only args (after bare * in signature)
   #   :variadic          — *args (variadic positional)
   #   :keyword_variadic  — **kwargs (variadic keyword)
+  #
+  # Default values live in `defaults` (aligned to the end of the positional
+  # list) and `kw_defaults` (aligned to `kwonlyargs`, with `nil` for a
+  # keyword-only parameter that has no default). They are attached to the
+  # matching `:param` as `:default` so `FromMeta` can restore them.
   defp extract_function_params(%{"args" => args} = args_node) do
+    # `posonlyargs` are the parameters before `/`; `args` follows it. Together
+    # they form the positional list that `defaults` aligns to.
+    posonly = Map.get(args_node, "posonlyargs", []) || []
+    all_positional = posonly ++ args
+
+    positional_defaults = Map.get(args_node, "defaults", [])
+
+    # `defaults` aligns to the *end* of the positional list, so pad the front.
+    positional_defaults =
+      List.duplicate(nil, max(length(all_positional) - length(positional_defaults), 0)) ++
+        positional_defaults
+
     positional =
-      Enum.map(args, fn
-        %{"arg" => arg_name, "annotation" => annotation} ->
-          meta = [kind: :positional] ++ if(annotation, do: [has_type: true], else: [])
-          {:param, meta, arg_name}
-
-        %{"arg" => arg_name} ->
-          {:param, [kind: :positional], arg_name}
-
-        _ ->
-          {:param, [kind: :positional], "_"}
+      all_positional
+      |> Enum.with_index()
+      |> Enum.map(fn {arg_node, index} ->
+        default = Enum.at(positional_defaults, index)
+        positional_param(arg_node, default)
       end)
 
-    # Keyword-only params (defined after a bare * in the signature)
+    positional_only_count = length(posonly)
+
     kwonlyargs =
       case Map.get(args_node, "kwonlyargs") do
         nil ->
           []
 
         kw_args ->
-          Enum.map(kw_args, fn
-            %{"arg" => arg_name} -> {:param, [kind: :keyword], arg_name}
-            _ -> {:param, [kind: :keyword], "_"}
+          kw_defaults = Map.get(args_node, "kw_defaults", [])
+
+          kw_args
+          |> Enum.with_index()
+          |> Enum.map(fn {arg_node, index} ->
+            keyword_param(arg_node, Enum.at(kw_defaults, index))
           end)
       end
 
     # *args (variadic positional)
     vararg =
       case Map.get(args_node, "vararg") do
-        %{"arg" => arg_name} -> [{:param, [kind: :variadic], "*#{arg_name}"}]
-        _ -> []
+        %{"arg" => arg_name} = arg_node ->
+          [{:param, [kind: :variadic] ++ annotation_meta(arg_node), "*#{arg_name}"}]
+
+        _ ->
+          []
       end
 
     # **kwargs (variadic keyword)
     kwarg =
       case Map.get(args_node, "kwarg") do
-        %{"arg" => arg_name} -> [{:param, [kind: :keyword_variadic], "**#{arg_name}"}]
-        _ -> []
+        %{"arg" => arg_name} = arg_node ->
+          [{:param, [kind: :keyword_variadic] ++ annotation_meta(arg_node), "**#{arg_name}"}]
+
+        _ ->
+          []
       end
 
-    {:ok, positional ++ kwonlyargs ++ vararg ++ kwarg}
+    {:ok, positional ++ kwonlyargs ++ vararg ++ kwarg, positional_only_count}
   end
 
-  defp extract_function_params(_), do: {:ok, []}
+  defp extract_function_params(_), do: {:ok, [], 0}
+
+  # Build a positional `:param`, attaching `:default` and `:has_type` when the
+  # Python node carries them.
+  defp positional_param(%{"arg" => arg_name} = arg_node, default) do
+    {:param, [kind: :positional] ++ annotation_meta(arg_node) ++ default_meta(default), arg_name}
+  end
+
+  defp positional_param(_, default),
+    do: {:param, [kind: :positional] ++ default_meta(default), "_"}
+
+  defp keyword_param(%{"arg" => arg_name} = arg_node, default) do
+    {:param, [kind: :keyword] ++ annotation_meta(arg_node) ++ default_meta(default), arg_name}
+  end
+
+  defp keyword_param(_, default), do: {:param, [kind: :keyword] ++ default_meta(default), "_"}
+
+  defp default_meta(nil), do: []
+
+  defp default_meta(default_node) do
+    case transform(default_node) do
+      {:ok, default_meta, _} -> [default: default_meta]
+      _ -> []
+    end
+  end
+
+  # A function's return annotation (`-> int`).
+  defp return_annotation_meta(nil), do: []
+
+  defp return_annotation_meta(annotation) do
+    case transform(annotation) do
+      {:ok, annotation_meta, _} -> [has_return_type: true, return_type: annotation_meta]
+      _ -> []
+    end
+  end
+
+  # A parameter annotation (`a: int`). The annotation *expression* is kept,
+  # not just a `has_type: true` flag: the flag told `FromMeta` that a type
+  # existed but not which one, so every annotation was dropped on the way
+  # back (`def f(a: int)` reified as `def f(a)`).
+  defp annotation_meta(%{"annotation" => nil}), do: []
+
+  defp annotation_meta(%{"annotation" => annotation}) do
+    case transform(annotation) do
+      {:ok, annotation_meta, _} -> [has_type: true, annotation: annotation_meta]
+      _ -> []
+    end
+  end
+
+  defp annotation_meta(_), do: []
 
   # Build location metadata from Python AST node
   defp location_meta(%{"lineno" => line} = node) do
@@ -982,6 +1419,14 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   defp location_meta(_), do: []
+
+  # A class base's display name. Subscripts keep their receiver's name
+  # (`B[int]` → `B`) since the full expression lives in `:base_exprs`.
+  defp format_base_name(%{"_type" => "Name", "id" => id}), do: id
+  defp format_base_name(%{"_type" => "Attribute"} = attr), do: format_attribute_name(attr)
+  defp format_base_name(%{"_type" => "Subscript", "value" => value}), do: format_base_name(value)
+  defp format_base_name(%{"_type" => "Call", "func" => func}), do: format_base_name(func)
+  defp format_base_name(_), do: "unknown"
 
   # Format nested Attribute name (e.g. module.submodule)
   defp format_attribute_name(%{"_type" => "Attribute", "value" => value, "attr" => attr}) do
@@ -1012,46 +1457,81 @@ defmodule Metastatic.Adapters.Python.ToMeta do
 
   defp contains_yield_node?(_), do: false
 
-  defp extract_function_name(%{"_type" => "Name", "id" => name}), do: {:ok, name}
+  # Resolve a callee into `{name, receiver}`.
+  #
+  # `receiver` is `nil` when the callee is a plain (possibly dotted) name, and
+  # the callee expression itself when it is not — `f(x).decode()` has no
+  # dotted name, so the receiver is carried verbatim and rebuilt by
+  # `FromMeta` instead of being dropped.
+  defp call_target(%{"_type" => "Name", "id" => name}), do: {:ok, name, nil}
 
-  defp extract_function_name(%{"_type" => "Attribute", "value" => obj, "attr" => attr}) do
-    case extract_function_name(obj) do
-      {:ok, obj_name} -> {:ok, "#{obj_name}.#{attr}"}
+  defp call_target(%{"_type" => "Attribute", "value" => obj, "attr" => attr} = node) do
+    case call_target(obj) do
+      {:ok, obj_name, nil} -> {:ok, "#{obj_name}.#{attr}", nil}
+      {:ok, _obj_name, _receiver} -> expression_target(node)
       error -> error
     end
   end
 
-  # `a[i](x)` — the callee is a subscript. Name it after the receiver so the
-  # call is still attributed to something meaningful.
-  defp extract_function_name(%{"_type" => "Subscript", "value" => obj}) do
-    case extract_function_name(obj) do
-      {:ok, obj_name} -> {:ok, "#{obj_name}[]"}
+  # A subscript callee (`a[k](x)`, `a[k].m(x)`) has no dotted name: the index
+  # is part of the callee and cannot be expressed in one. Naming it `a[]`
+  # used to *drop* the index, which reified `a['k'].split(',')` as
+  # `a[].split(',')` — invalid Python. The expression is carried instead.
+  defp call_target(%{"_type" => "Subscript"} = node), do: expression_target(node)
+
+  # Any other callee (`f(x)(y)`, `f(x).decode()`, a lambda): there is no name
+  # to report, so the expression is carried as the receiver.
+  defp call_target(func) when is_map(func), do: expression_target(func)
+
+  defp call_target(func), do: {:error, "Unsupported function reference: #{inspect(func)}"}
+
+  defp expression_target(node) do
+    case transform(node) do
+      {:ok, receiver, _} -> {:ok, "", receiver}
       error -> error
     end
-  end
-
-  # A call whose callee is itself a call (`f(x)(y)`, `tree.get(k)(v)`). The
-  # callee is an expression, not a name, so there is no dotted name to report;
-  # an empty name keeps the tree usable instead of rejecting the whole file.
-  defp extract_function_name(%{"_type" => type}) when type in ["Call", "Lambda"] do
-    {:ok, ""}
-  end
-
-  defp extract_function_name(func) do
-    {:error, "Unsupported function reference: #{inspect(func)}"}
   end
 
   # Lambda parameter extraction
-
-  defp extract_lambda_params(%{"args" => args}) when is_list(args) do
-    params =
-      Enum.map(args, fn
-        %{"arg" => name} -> {:param, [kind: :positional], name}
-        %{"id" => name} -> {:param, [kind: :positional], name}
-        _ -> {:param, [kind: :positional], "_"}
+  #
+  # `args` is the parameter list; `defaults` (aligned to the end of that list)
+  # carries the default-value expressions, which are attached as `:default`.
+  defp extract_lambda_params(%{"args" => args} = args_node) when is_list(args) do
+    defaults =
+      args_node
+      |> Map.get("defaults", [])
+      |> then(fn defaults ->
+        List.duplicate(nil, max(length(args) - length(defaults), 0)) ++ defaults
       end)
 
-    {:ok, params}
+    positional =
+      args
+      |> Enum.with_index()
+      |> Enum.map(fn {arg_node, index} ->
+        default = Enum.at(defaults, index)
+
+        case arg_node do
+          %{"arg" => name} -> {:param, [kind: :positional] ++ default_meta(default), name}
+          %{"id" => name} -> {:param, [kind: :positional] ++ default_meta(default), name}
+          _ -> {:param, [kind: :positional] ++ default_meta(default), "_"}
+        end
+      end)
+
+    # A lambda can be variadic too: `lambda *args, **kw: ...`. Dropping these
+    # reified `lambda *values: values` as `lambda: values`.
+    vararg =
+      case Map.get(args_node, "vararg") do
+        %{"arg" => name} -> [{:param, [kind: :variadic], "*#{name}"}]
+        _ -> []
+      end
+
+    kwarg =
+      case Map.get(args_node, "kwarg") do
+        %{"arg" => name} -> [{:param, [kind: :keyword_variadic], "**#{name}"}]
+        _ -> []
+      end
+
+    {:ok, positional ++ vararg ++ kwarg}
   end
 
   defp extract_lambda_params(_), do: {:ok, []}
@@ -1119,23 +1599,44 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     {:match_arm, meta, [body_meta]}
   end
 
-  @python_exceptions %{
-    "Exception" => :error,
-    "ValueError" => :error,
-    "TypeError" => :error,
-    "KeyError" => :error,
-    "IndexError" => :error
-  }
-
-  defp extract_exception_type(nil), do: {:ok, :error}
+  # Python's built-in exception hierarchy names. They are carried verbatim so
+  # `raise`/`except ValueError` round-trips as `ValueError` instead of being
+  # flattened to the generic `Exception`.
+  #
+  # A tuple of exception types (`except (A, B):`) is preserved as a
+  # `:language_specific` node, since M2 has no union type.
+  # A bare `except:` catches everything. It is distinguished from
+  # `except Exception:` so the reified source keeps the original spelling.
+  defp extract_exception_type(nil), do: {:ok, nil}
 
   defp extract_exception_type(%{"_type" => "Name", "id" => name}) do
-    # Map common Python exceptions to generic types
-    exception_atom = Map.get(@python_exceptions, name, String.to_atom(name))
-    {:ok, exception_atom}
+    {:ok, safe_exception_atom(name)}
   end
 
-  defp extract_exception_type(_), do: {:ok, :error}
+  defp extract_exception_type(%{"_type" => "Attribute"} = node) do
+    {:ok, safe_exception_atom(format_attribute_name(node))}
+  end
+
+  defp extract_exception_type(%{"_type" => "Tuple"} = node) do
+    {:ok, {:language_specific, [language: :python, hint: :exception_tuple], node}}
+  end
+
+  defp extract_exception_type(other), do: {:ok, other}
+
+  # `String.to_atom/1` on parser output would leak one atom per distinct
+  # exception class in the input. `safe_exception_atom/1` keeps the set
+  # bounded to names that already exist as atoms, falling back to a
+  # `:language_specific` node (which `FromMeta` restores verbatim) for
+  # anything else.
+  defp safe_exception_atom(name) when is_binary(name) do
+    String.to_existing_atom(name)
+  rescue
+    ArgumentError ->
+      {:language_specific, [language: :python, hint: :exception_name],
+       %{"_type" => "Name", "id" => name, "ctx" => %{"_type" => "Load"}}}
+  end
+
+  defp safe_exception_atom(name), do: name
 
   defp transform_or_name(nil), do: {:ok, nil, %{}}
 
@@ -1143,10 +1644,6 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     do: {:ok, {:variable, [scope: :local], name}, %{}}
 
   defp transform_or_name(node), do: transform(node)
-
-  # Extract variable name from MetaAST node
-  defp extract_variable_name({:variable, _, name}), do: name
-  defp extract_variable_name(_), do: "_x"
 
   # Transform comprehension generators (shared by ListComp, DictComp, SetComp, GeneratorExp)
   defp transform_comprehension_generators(generators) when is_list(generators) do
@@ -1164,7 +1661,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
        ) do
     with {:ok, target_meta, _} <- transform(target),
          {:ok, iter_meta, _} <- transform(iter) do
-      generator = add_location({:generator, [], [target_meta, iter_meta]}, gen_node)
+      # `async for` inside a comprehension (`[x async for x in a])` sets
+      # `is_async` on the generator; it is part of the AST, so it is kept.
+      gen_meta = if Map.get(gen_node, "is_async", 0) == 1, do: [async: true], else: []
+
+      generator = add_location({:generator, gen_meta, [target_meta, iter_meta]}, gen_node)
 
       filters =
         Enum.map(ifs, fn if_expr ->
@@ -1218,7 +1719,12 @@ defmodule Metastatic.Adapters.Python.ToMeta do
     end
   end
 
-  # Extract decorator names from decorator list
+  # Extract decorator names from decorator list.
+  #
+  # A decorator may be a bare name (`@property`), a dotted name
+  # (`@app.route`) or a call (`@app.route("/")`). The *name* goes into
+  # `:decorators`; a call's arguments additionally go into `:decorator_args`
+  # so `@app.route("/")` does not round-trip to `@app.route`.
   defp extract_decorator_names(decorators) when is_list(decorators) do
     names =
       Enum.map(decorators, fn
@@ -1236,7 +1742,33 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   defp extract_decorator_call_name(%{"_type" => "Attribute"} = attr),
     do: format_attribute_name(attr)
 
-  defp extract_decorator_call_name(_), do: "unknown"
+  # `@a.b(1)(2)` — the callee is itself a call, so there is no dotted name.
+  # The name is left empty and the full expression is carried in
+  # `:decorator_exprs` instead of collapsing to the literal `"unknown"`.
+  defp extract_decorator_call_name(_), do: ""
+
+  # Decorator call arguments, aligned with `:decorators`. `nil` marks a
+  # decorator that is not a call.
+  defp extract_decorator_args(decorators) when is_list(decorators) do
+    args =
+      Enum.map(decorators, fn
+        %{"_type" => "Call", "args" => call_args, "keywords" => call_keywords} ->
+          with {:ok, args_meta} <- transform_list(call_args),
+               {:ok, kwargs_meta} <- transform_call_keywords(call_keywords || []) do
+            # `@dataclass(frozen=True)` — the keyword arguments are part of
+            # the decorator. They are kept alongside the positional ones as
+            # `:param` nodes, distinguished by `kind: :keyword`.
+            args_meta ++ kwargs_meta
+          else
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end)
+
+    if Enum.all?(args, &is_nil/1), do: [], else: args
+  end
 
   # Transform with statement items to bindings
   defp transform_with_items(items) when is_list(items) do
@@ -1294,4 +1826,37 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   end
 
   defp add_location(ast, _node), do: ast
+
+  defp transform_list_comp(
+         %{"_type" => "ListComp", "elt" => elt, "generators" => generators} = node
+       ) do
+    with {:ok, elt_meta, _} <- transform(elt),
+         {:ok, gens_and_filters} <- transform_comprehension_generators(generators) do
+      {:ok,
+       add_location(
+         {:comprehension, [comp_type: :list], [elt_meta | gens_and_filters]},
+         node
+       ), %{}}
+    end
+  end
+
+  defp transform_simple_list_comp(node, target, iter, elt) do
+    with {:ok, target_meta, _} <- transform(target),
+         {:ok, iter_meta, _} <- transform(iter),
+         {:ok, elt_meta, _} <- transform(elt) do
+      # Convert to: {:collection_op, [op_type: :map], [lambda, collection]}
+      #
+      # A tuple target (`[x for x, y in pairs]`) cannot be named, so it is
+      # kept as a `:pattern` param rather than collapsed to a placeholder —
+      # `_x` used to replace the real destructuring.
+      params =
+        case target_meta do
+          {:variable, _, name} -> [{:param, [], name}]
+          pattern -> [{:param, [pattern: pattern], "_"}]
+        end
+
+      lambda = {:lambda, [params: params, captures: []], [elt_meta]}
+      {:ok, add_location({:collection_op, [op_type: :map], [lambda, iter_meta]}, node), %{}}
+    end
+  end
 end

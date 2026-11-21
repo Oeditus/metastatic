@@ -265,8 +265,12 @@ defmodule Metastatic.Adapters.PythonTest do
         ]
       }
 
-      assert {:ok, {:binary_op, [category: :boolean, operator: :and], _}, %{}} =
-               ToMeta.transform(ast)
+      # The chain is binary in M2 but marked `:chained`, so `FromMeta` can
+      # rebuild Python's n-ary `BoolOp` instead of nesting.
+      assert {:ok, {:binary_op, meta, _}, %{}} = ToMeta.transform(ast)
+      assert Keyword.get(meta, :category) == :boolean
+      assert Keyword.get(meta, :operator) == :and
+      assert Keyword.get(meta, :chained) == true
     end
   end
 
@@ -892,9 +896,11 @@ defmodule Metastatic.Adapters.PythonTest do
       assert Keyword.get(try_meta, :name) == "risky"
 
       # Rescue clauses are `:match_arm` nodes (the shape `AST.conforms?/1`
-      # requires) carrying the exception type in metadata.
+      # requires) carrying the exception type in metadata. The concrete
+      # exception class is preserved (it used to be flattened to `:error`,
+      # which reified back as `except Exception`).
       assert [{:match_arm, arm_meta, [_]} = _clause] = rescue_clauses
-      assert Keyword.get(arm_meta, :exception_type) == :error
+      assert Keyword.get(arm_meta, :exception_type) == :Exception
       assert {:variable, _, "e"} = Keyword.get(arm_meta, :pattern)
 
       assert nil == finally_block
@@ -966,15 +972,30 @@ defmodule Metastatic.Adapters.PythonTest do
     test "preserves unknown constructs as language_specific instead of failing" do
       # Regression: an unmodelled node aborted the whole file. It is now
       # preserved verbatim so the rest of the tree stays usable.
+      # `x: int` (a type-only annotation) is still unmodelled.
+      source = "x: int"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, result, _metadata} = Python.to_meta(ast)
+      assert Metastatic.AST.conforms?(result)
+
+      assert {:language_specific, meta, native} = result
+      assert Keyword.get(meta, :language) == :python
+      assert Keyword.get(meta, :hint) == :type_annotation
+      assert native["_type"] == "AnnAssign"
+    end
+
+    test "transforms an f-string into string_interpolation" do
+      # Regression: `JoinedStr` fell through to the catch-all, so every
+      # f-string became an opaque native node.
       source = "x = f'{a}'"
 
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, result, _metadata} = Python.to_meta(ast)
       assert Metastatic.AST.conforms?(result)
 
-      assert {:assignment, _, [_, {:language_specific, meta, native}]} = result
-      assert Keyword.get(meta, :language) == :python
-      assert native["_type"] == "JoinedStr"
+      assert {:assignment, _, [_, {:string_interpolation, _, parts}]} = result
+      assert [{:variable, _, "a"}] = parts
     end
   end
 
@@ -1534,7 +1555,10 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
-      assert {:block, [], [import1, import2]} = meta_ast
+      # The block is marked so `FromMeta` can merge it back into a single
+      # `import os, sys` statement.
+      assert {:block, block_meta, [import1, import2]} = meta_ast
+      assert Keyword.get(block_meta, :original_form) == :multi_import
       assert {:import, meta1, []} = import1
       assert Keyword.get(meta1, :source) == "os"
       assert {:import, meta2, []} = import2
@@ -1996,8 +2020,10 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:ok, ast} = Python.parse(source)
       assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
 
-      # Verify MetaAST structure - 3-tuple format
-      assert {:block, [], _statements} = meta_ast
+      # Verify MetaAST structure - 3-tuple format. The fixture opens with a
+      # module docstring, which is recorded in the block's metadata.
+      assert {:block, block_meta, _statements} = meta_ast
+      assert is_binary(Keyword.get(block_meta, :docstring))
 
       # Round-trip back to Python
       assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
@@ -2017,7 +2043,7 @@ defmodule Metastatic.Adapters.PythonTest do
       assert {:ok, meta_ast, _metadata} = Python.to_meta(ast)
 
       # Verify comparison operators are parsed - 3-tuple format
-      assert {:block, [], _statements} = meta_ast
+      assert {:block, _block_meta, _statements} = meta_ast
     end
 
     test "round-trips boolean logic fixture" do
@@ -2358,5 +2384,557 @@ defmodule Metastatic.Adapters.PythonTest do
     same_structure?(c1, c2) and same_structure?(t1, t2) and same_structure?(e1, e2)
   end
 
+  describe "round-trip fidelity: match, comprehensions and walrus" do
+    test "match statements with every pattern form round-trip" do
+      cases = [
+        # value / wildcard / or
+        "match x:\n    case 1:\n        y = 1",
+        "match x:\n    case _:\n        y = 1",
+        "match x:\n    case 1 | 2:\n        y = 1",
+        # capture, with and without a guard
+        "match x:\n    case n:\n        y = n",
+        "match x:\n    case n if n > 0:\n        y = n",
+        "match x:\n    case n if n > 0 and n < 10:\n        y = 1",
+        # sequence, with a star pattern
+        "match x:\n    case [a, b]:\n        y = a",
+        "match x:\n    case [a, *mid, b]:\n        y = a",
+        # mapping, with a rest pattern
+        "match x:\n    case {'k': v, **rest}:\n        y = v",
+        # class patterns, positional and keyword
+        "match p:\n    case Point(0, 1):\n        y = 1",
+        "match p:\n    case Point(x=0):\n        y = 1",
+        # as-patterns
+        "match x:\n    case [a] as whole:\n        y = whole",
+        # multiple arms
+        "match x:\n    case 1:\n        a = 1\n    case 2:\n        a = 2\n    case _:\n        a = 3",
+        # a compound body
+        "match x:\n    case 1:\n        if a:\n            b = 1"
+      ]
+
+      for source <- cases do
+        assert {:ok, result} = round_trip_source(source), "failed to round-trip: #{source}"
+        # The reified source must be valid Python and keep the match shape.
+        assert {:ok, _} = Python.parse(result)
+        assert result =~ "match "
+        assert result =~ "case "
+      end
+    end
+
+    test "a match arm body may contain a try statement" do
+      source =
+        "match x:\n    case 1:\n        try:\n            a()\n        except E:\n            b()"
+
+      assert {:ok, result} = round_trip_source(source)
+      assert {:ok, _} = Python.parse(result)
+      assert result =~ "try:"
+    end
+
+    test "comprehensions with several generators and filters round-trip" do
+      cases = [
+        "m = [x + y + z for x in a for y in b for z in c]",
+        "m = [x for x in a if x if x > 1]",
+        "m = [x for x in a if x for y in b]",
+        "m = {k: [y for y in v] for k, v in items}",
+        "m = {k: v for k, v in items if v > 0}",
+        "m = {(x, y) for x in a for y in b}",
+        "m = sum(x for x in a)",
+        "m = [[y for y in x if y] for x in a]",
+        "m = [1 if x else 2 for x in a]",
+        "m = [f(x, y=1) for x in a]"
+      ]
+
+      for source <- cases do
+        assert {:ok, result} = round_trip_source(source), "failed to round-trip: #{source}"
+        assert {:ok, _} = Python.parse(result)
+      end
+    end
+
+    test "a dict comprehension body is a :pair node, not a tuple" do
+      assert {:ok, ast} = Python.parse("m = {k: v for k, v in items if k}")
+
+      assert {:ok, {:assignment, _, [_, {:comprehension, meta, [body | _]}]}, _} =
+               Python.to_meta(ast)
+
+      assert Keyword.get(meta, :comp_type) == :dict
+      assert {:pair, _, [_, _]} = body
+    end
+
+    test "a destructuring comprehension target is preserved, not renamed" do
+      # Regression: a tuple target collapsed to the placeholder `_x`, so
+      # `[x for x, y in pairs]` reified as `[x for _x in pairs]`.
+      assert {:ok, "m = [x for x, y in pairs]"} =
+               round_trip_source("m = [x for x, y in pairs]")
+    end
+
+    test "walrus expressions round-trip in every position" do
+      cases = [
+        "while (n := next()) is not None:\n    pass",
+        "while (chunk := f.read(8192)):\n    process(chunk)",
+        "while (a := f()) and (b := g()):\n    pass",
+        "if (n := len(a)) > 10:\n    pass",
+        "m = [x for x in a if (y := x)]",
+        "foo(x := 1)",
+        "def f():\n    return (n := 1)"
+      ]
+
+      for source <- cases do
+        assert {:ok, result} = round_trip_source(source), "failed to round-trip: #{source}"
+        assert {:ok, _} = Python.parse(result)
+        assert result =~ ":="
+      end
+    end
+  end
+
+  describe "round-trip fidelity: statement nesting" do
+    test "try / with / for nest inside each other" do
+      cases = [
+        "for i in x:\n    try:\n        f()\n    except E:\n        g()",
+        "while a:\n    try:\n        f()\n    except E:\n        g()",
+        "if a:\n    try:\n        b()\n    finally:\n        c()",
+        "try:\n    try:\n        a()\n    except E:\n        b()\nexcept F:\n    c()",
+        "with a as b:\n    try:\n        c()\n    except E:\n        d()",
+        "for i in x:\n    with a as b:\n        c()",
+        "with a as b:\n    with c as d:\n        e()",
+        "while a:\n    with b as c:\n        d()",
+        "if a:\n    b()\nelse:\n    with c as d:\n        e()",
+        "with a as b:\n    for i in x:\n        c()",
+        "try:\n    for i in x:\n        a()\nexcept E:\n    b()",
+        "class A:\n    try:\n        x = 1\n    except E:\n        x = 2",
+        "class A:\n    with a as b:\n        c = 1"
+      ]
+
+      for source <- cases do
+        assert {:ok, result} = round_trip_source(source), "failed to round-trip: #{source}"
+        assert {:ok, _} = Python.parse(result)
+      end
+    end
+
+    test "a with statement inside an if body keeps its statement form" do
+      source = "if a:\n    with open(x) as f:\n        y = f.read()"
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "with open(x) as f:"
+      assert {:ok, _} = Python.parse(result)
+    end
+
+    test "a realistic context-manager loop round-trips" do
+      source = """
+      def f():
+          with open(p) as h:
+              for line in h:
+                  if (n := len(line)) > 80:
+                      yield line
+      """
+
+      assert {:ok, result} = round_trip_source(source)
+      assert {:ok, _} = Python.parse(result)
+      assert result =~ "with open(p) as h:"
+      assert result =~ "for line in h:"
+      assert result =~ ":="
+    end
+  end
+
+  describe "round-trip fidelity: real-world constructs" do
+    test "chained assignment flattens into one Assign" do
+      # Regression: the nesting reified as `a = \nb = c`, a syntax error.
+      assert {:ok, "a = b = c"} = round_trip_source("a = b = c")
+      assert {:ok, "self.x = y = 1"} = round_trip_source("self.x = y = 1")
+    end
+
+    test "a subscript callee keeps its index" do
+      # Regression: `a['k'].split(',')` reified as `a[].split(',')`.
+      assert {:ok, "x = a['commands'].split(',')"} =
+               round_trip_source(~s|x = a["commands"].split(",")|)
+    end
+
+    test "a bare * keyword-only marker is not a parameter" do
+      assert {:ok, result} = round_trip_source("def f(error, *, encoder):\n    pass")
+      assert result =~ "def f(error, *, encoder):"
+      assert {:ok, _} = Python.parse(result)
+    end
+
+    test "parameter and return annotations survive" do
+      assert {:ok, "def f(a: int) -> str:\n    pass"} =
+               round_trip_source("def f(a: int) -> str:\n    pass")
+
+      assert {:ok, "def f(*, a: int):\n    pass"} =
+               round_trip_source("def f(*, a: int):\n    pass")
+
+      assert {:ok, "def f(*args: int, **kw: str):\n    pass"} =
+               round_trip_source("def f(*args: int, **kw: str):\n    pass")
+    end
+
+    test "positional-only parameters survive" do
+      assert {:ok, "def f(self, /, x):\n    pass"} =
+               round_trip_source("def f(self, /, x):\n    pass")
+    end
+
+    test "annotated assignment stays an AnnAssign" do
+      assert {:ok, "x: int = 1"} = round_trip_source("x: int = 1")
+      assert {:ok, "class A:\n    x: int = 1"} = round_trip_source("class A:\n    x: int = 1")
+    end
+
+    test "from-import aliases survive" do
+      assert {:ok, "from gettext import gettext as _"} =
+               round_trip_source("from gettext import gettext as _")
+
+      assert {:ok, "from a import b as c"} = round_trip_source("from a import b as c")
+    end
+
+    test "a multi-module import stays one statement" do
+      assert {:ok, "import socket, struct"} = round_trip_source("import socket, struct")
+    end
+
+    test "class bases keep their full expression" do
+      # Regression: `B[int]` collapsed to the literal name `unknown`.
+      assert {:ok, "class A(B[int]):\n    pass"} = round_trip_source("class A(B[int]):\n    pass")
+    end
+
+    test "class keyword arguments survive" do
+      assert {:ok, "class A(metaclass=abc.ABCMeta):\n    pass"} =
+               round_trip_source("class A(metaclass=abc.ABCMeta):\n    pass")
+    end
+
+    test "decorators with keyword arguments survive" do
+      assert {:ok, "@dataclass(frozen=True)\nclass A:\n    pass"} =
+               round_trip_source("@dataclass(frozen=True)\nclass A:\n    pass")
+    end
+
+    test "a decorator whose callee is a call survives" do
+      assert {:ok, "@a.b(1)(2)\ndef f():\n    pass"} =
+               round_trip_source("@a.b(1)(2)\ndef f():\n    pass")
+    end
+
+    test "f-string conversions and format specs survive" do
+      for source <- [
+            ~s|s = f"{v:06d}"|,
+            ~s|s = f"a{v:06d}b"|,
+            ~s|s = f"{v!r:>10}"|,
+            ~s|s = f"{a}{b:.2f}"|
+          ] do
+        assert {:ok, result} = round_trip_source(source), "failed: #{source}"
+        assert {:ok, _} = Python.parse(result)
+      end
+    end
+
+    test "raise ... from keeps its cause" do
+      source = "def f():\n    try:\n        a()\n    except E as e:\n        raise G() from e"
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "raise G() from e"
+    end
+
+    test "a bare except stays bare" do
+      assert {:ok, "try:\n    a()\nexcept:\n    b()"} =
+               round_trip_source("try:\n    a()\nexcept:\n    b()")
+    end
+
+    test "a chained boolean expression rebuilds an n-ary BoolOp" do
+      assert {:ok, ast} = Python.parse("x = a and b and c")
+      assert {:ok, {:assignment, _, [_, op]}, _} = Python.to_meta(ast)
+      assert {:binary_op, meta, _} = op
+      assert Keyword.get(meta, :chained) == true
+
+      assert {:ok, "x = a and b and c"} = round_trip_source("x = a and b and c")
+    end
+
+    test "a nested boolean expression keeps its nesting" do
+      # `a and (b and c)` is genuinely nested in Python's AST; it must not be
+      # flattened into `a and b and c`.
+      assert {:ok, ast} = Python.parse("x = a and (b and c)")
+      assert {:ok, {:assignment, _, [_, {:binary_op, meta, [_, right]}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :chained) == nil
+      assert {:binary_op, _, _} = right
+    end
+
+    test "lambda parameters may be variadic" do
+      assert {:ok, "f = lambda *values: values"} =
+               round_trip_source("f = lambda *values: values")
+
+      assert {:ok, "f = lambda *a, **k: a"} = round_trip_source("f = lambda *a, **k: a")
+    end
+
+    test "a multi-statement body is not concatenated onto one line" do
+      # Regression: bare expression statements were not wrapped in `Expr`,
+      # so `def m(): print(1); print(2)` reified as `def m():print(1)print(2)`.
+      source = "def m():\n    x = 1\n    print(x)\n    return x"
+      assert {:ok, result} = round_trip_source(source)
+      assert {:ok, _} = Python.parse(result)
+      assert result =~ "print(x)\n    return x"
+    end
+
+    test "a module docstring stays a docstring" do
+      source = "\"\"\"Module doc.\"\"\"\nimport os\n"
+      assert {:ok, result} = round_trip_source(source)
+      assert {:ok, _} = Python.parse(result)
+      assert result =~ "\"\"\"Module doc.\"\"\""
+    end
+  end
+
   defp same_structure?(a, b), do: a == b
+
+  describe "round-trip fidelity: previously lossy constructs" do
+    # Each of these used to either abort the whole file, silently drop
+    # information, or reify into invalid Python. The assertion is on the
+    # *unparsed* output, since that is what a caller actually consumes.
+
+    defp round_trip_source(source) do
+      with {:ok, ast} <- Python.parse(source),
+           {:ok, meta_ast, metadata} <- Python.to_meta(ast),
+           {:ok, ast2} <- Python.from_meta(meta_ast, metadata),
+           {:ok, result} <- Python.unparse(ast2) do
+        {:ok, String.trim(result)}
+      end
+    end
+
+    test "f-string becomes string_interpolation and round-trips" do
+      assert {:ok, result} = round_trip_source(~s|x = f"{a} and {b}"|)
+      assert result == ~s|x = f'{a} and {b}'|
+    end
+
+    test "f-string with only literal text reifies as a plain string" do
+      assert {:ok, ast} = Python.parse(~s|x = f"plain"|)
+
+      assert {:ok, {:assignment, _, [_, {:string_interpolation, _, parts}]}, _} =
+               Python.to_meta(ast)
+
+      assert [{:literal, lit_meta, "plain"}] = parts
+      assert Keyword.get(lit_meta, :subtype) == :string
+
+      # A single literal part is not an f-string on the way back.
+      assert {:ok, "x = 'plain'"} = round_trip_source(~s|x = f"plain"|)
+    end
+
+    test "call keyword arguments and ** unpacking are preserved" do
+      assert {:ok, ast} = Python.parse("foo(1, x=2, **kw)")
+      assert {:ok, {:function_call, meta, [_]}, _} = Python.to_meta(ast)
+
+      assert [
+               {:param, [kind: :keyword, default: {:literal, _, 2}], "x"},
+               {:param, [kind: :keyword_variadic, default: {:variable, _, "kw"}], "**"}
+             ] = Keyword.get(meta, :kwargs)
+
+      assert {:ok, "foo(1, x=2, **kw)"} = round_trip_source("foo(1, x=2, **kw)")
+    end
+
+    test "bitwise operators and unary invert map to the :bitwise category" do
+      assert {:ok, ast} = Python.parse("x = ~a")
+      assert {:ok, {:assignment, _, [_, {:unary_op, meta, _}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :category) == :bitwise
+      assert Keyword.get(meta, :operator) == :bnot
+
+      assert {:ok, ast} = Python.parse("x = a & b")
+      assert {:ok, {:assignment, _, [_, {:binary_op, meta, _}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :category) == :bitwise
+      assert Keyword.get(meta, :operator) == :band
+    end
+
+    test "matrix multiplication round-trips" do
+      assert {:ok, "m = a @ b"} = round_trip_source("m = a @ b")
+      assert {:ok, "a @= b"} = round_trip_source("a @= b")
+    end
+
+    test "bytes, complex and ellipsis literals no longer crash the parser" do
+      # `json.dumps` used to raise on these values, failing the whole file.
+      assert {:ok, ast} = Python.parse(~s|b = b"abc"|)
+      assert {:ok, {:assignment, _, [_, {:literal, lit_meta, "abc"}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(lit_meta, :subtype) == :bytes
+
+      assert {:ok, ast} = Python.parse("z = 1j")
+      assert {:ok, {:assignment, _, [_, {:language_specific, meta, _}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :hint) == :complex_literal
+
+      assert {:ok, ast} = Python.parse("x = ...")
+      assert {:ok, {:assignment, _, [_, {:language_specific, meta, _}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :hint) == :ellipsis
+    end
+
+    test "set literals round-trip as sets" do
+      assert {:ok, ast} = Python.parse("s = {1, 2, 3}")
+      assert {:ok, {:assignment, _, [_, {:list, meta, [_, _, _]}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :collection_type) == :set
+      assert {:ok, "s = {1, 2, 3}"} = round_trip_source("s = {1, 2, 3}")
+    end
+
+    test "function parameter defaults and keyword-only params round-trip" do
+      source = "def f(a, b=2, *args, c=3, **kw):\n    return a"
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:function_def, meta, _}, _} = Python.to_meta(ast)
+
+      assert [
+               {:param, [kind: :positional], "a"},
+               {:param, [kind: :positional, default: {:literal, _, 2}], "b"},
+               {:param, [kind: :keyword, default: {:literal, _, 3}], "c"},
+               {:param, [kind: :variadic], "*args"},
+               {:param, [kind: :keyword_variadic], "**kw"}
+             ] = Keyword.get(meta, :params)
+
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "def f(a, b=2, *args, c=3, **kw):"
+    end
+
+    test "lambda parameter defaults round-trip" do
+      assert {:ok, ast} = Python.parse("f = lambda a=1: a")
+      assert {:ok, {:assignment, _, [_, {:lambda, meta, _}]}, _} = Python.to_meta(ast)
+      assert [{:param, param_meta, "a"}] = Keyword.get(meta, :params)
+      assert {:literal, _, 1} = Keyword.get(param_meta, :default)
+      assert {:ok, "f = lambda a=1: a"} = round_trip_source("f = lambda a=1: a")
+    end
+
+    test "if/elif/else reifies as a statement, not a ternary" do
+      source = "if a:\n    x = 1\nelif b:\n    x = 2\nelse:\n    x = 3"
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:conditional, meta, _}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :statement) == true
+
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "elif b:"
+      refute result =~ "if a else"
+    end
+
+    test "ternary expressions stay expressions" do
+      assert {:ok, ast} = Python.parse("x = 1 if a else 2")
+      assert {:ok, {:assignment, _, [_, {:conditional, meta, _}]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :statement) == nil
+      assert {:ok, "x = 1 if a else 2"} = round_trip_source("x = 1 if a else 2")
+    end
+
+    test "loop else clauses are preserved" do
+      assert {:ok, "while a:\n    break\nelse:\n    x = 1"} =
+               round_trip_source("while a:\n    break\nelse:\n    x = 1")
+
+      assert {:ok, "for i in x:\n    break\nelse:\n    y = 1"} =
+               round_trip_source("for i in x:\n    break\nelse:\n    y = 1")
+    end
+
+    test "with statements reify as with statements" do
+      source = "with open(a) as f, open(b) as g:\n    pass"
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:block, meta, _}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :original_form) == :with
+      assert Keyword.get(meta, :with_items) == 2
+
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "with open(a) as f, open(b) as g:"
+    end
+
+    test "try/except/else/finally preserves the exception class and else block" do
+      source =
+        "try:\n    a()\nexcept ValueError as e:\n    b()\nelse:\n    d()\nfinally:\n    e()"
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:exception_handling, meta, [_, [arm], _]}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :orelse) != nil
+      assert {:match_arm, arm_meta, _} = arm
+      assert Keyword.get(arm_meta, :exception_type) == :ValueError
+
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "except ValueError as e:"
+      assert result =~ "else:"
+    end
+
+    test "decorators with arguments round-trip" do
+      source = "@app.route(\"/\")\ndef index():\n    return 1"
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:function_def, meta, _}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :decorators) == ["app.route"]
+      assert [[{:literal, lit_meta, "/"}]] = Keyword.get(meta, :decorator_args)
+      assert Keyword.get(lit_meta, :subtype) == :string
+
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "@app.route"
+      assert result =~ "/"
+    end
+
+    test "async functions stay async" do
+      assert {:ok, ast} = Python.parse("async def f():\n    return await g()")
+      assert {:ok, {:function_def, meta, _}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :async) == true
+
+      assert {:ok, result} = round_trip_source("async def f():\n    return await g()")
+      assert result =~ "async def f():"
+    end
+
+    test "docstrings are preserved as docstrings" do
+      source = "def f():\n    \"\"\"Doc.\"\"\"\n    return 1"
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:function_def, meta, _}, _} = Python.to_meta(ast)
+      assert Keyword.get(meta, :docstring) == "Doc."
+
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "\"\"\"Doc.\"\"\""
+    end
+
+    test "nested and filtered comprehensions round-trip" do
+      source = "m = [x*y for x in a for y in b if x > y]"
+      assert {:ok, ast} = Python.parse(source)
+
+      assert {:ok, {:assignment, _, [_, {:comprehension, meta, children}]}, _} =
+               Python.to_meta(ast)
+
+      assert Keyword.get(meta, :comp_type) == :list
+      assert [_, {:generator, _, _}, {:generator, _, _}, {:filter, _, _}] = children
+
+      assert {:ok, "m = [x * y for x in a for y in b if x > y]"} = round_trip_source(source)
+    end
+
+    test "starred assignment targets round-trip" do
+      assert {:ok, "a, *rest = items"} = round_trip_source("a, *rest = items")
+    end
+
+    test "dict unpacking is preserved verbatim instead of dropped" do
+      assert {:ok, ast} = Python.parse(~s|d = {**a, "b": 1}|)
+
+      assert {:ok, {:assignment, _, [_, {:language_specific, meta, native}]}, _} =
+               Python.to_meta(ast)
+
+      assert Keyword.get(meta, :hint) == :dict_unpacking
+      assert native["_type"] == "Dict"
+      assert {:ok, ~s|d = {**a, 'b': 1}|} = round_trip_source(~s|d = {**a, "b": 1}|)
+    end
+
+    test "match statements round-trip" do
+      source = "match x:\n    case n if n > 0:\n        y = 1"
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, {:pattern_match, _, [_, {:match_arm, _, _}]}, _} = Python.to_meta(ast)
+
+      assert {:ok, result} = round_trip_source(source)
+      assert result =~ "match x:"
+      assert result =~ "case n if n > 0:"
+    end
+
+    test "a whole realistic module round-trips through every layer" do
+      source = """
+      import os
+      from typing import List
+
+      class Point:
+          def __init__(self, x, y=0):
+              self.x = x
+              self.y = y
+
+          def __repr__(self):
+              return f"Point({self.x}, {self.y})"
+
+      def total(items, *, start=0):
+          acc = start
+          for item in items:
+              acc += item
+          return acc
+      """
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert Metastatic.AST.conforms?(meta_ast)
+
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert {:ok, result} = Python.unparse(ast2)
+
+      # The reified module must still be valid Python and keep its shape.
+      assert {:ok, _} = Python.parse(result)
+      assert result =~ "class Point:"
+      assert result =~ "def __init__(self, x, y=0):"
+      assert result =~ "f'Point({self.x}, {self.y})'"
+      assert result =~ "def total(items, *, start=0):"
+      assert result =~ "acc += item"
+    end
+  end
 end

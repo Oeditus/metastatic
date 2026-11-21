@@ -7,9 +7,40 @@ Uses only standard library (no external dependencies).
 """
 
 import ast
+import base64
 import json
 import sys
 from typing import Any, Dict, List, Union
+
+
+# Python values that have no direct JSON representation. Dropping them (or
+# letting `json.dumps` raise) made whole files unparseable: a single `b"abc"`
+# literal crashed the parser with a `TypeError` from `json.dumps`.
+#
+# `bytes` is transported as a tagged object so the Elixir side can rebuild the
+# exact value instead of guessing; `Ellipsis` and complex numbers are tagged
+# with a ``__python_repr__`` marker that carries their source spelling.
+_BYTES_TAG = '__bytes__'
+_REPR_TAG = '__python_repr__'
+
+
+def encode_value(value: Any) -> Any:
+    """
+    Encode a non-JSON Python value into a tagged, JSON-safe representation.
+
+    Args:
+        value: A `bytes`, `complex`, `Ellipsis`, or `set` value
+
+    Returns:
+        A JSON-serializable dictionary or list
+    """
+    if isinstance(value, bytes):
+        return {_BYTES_TAG: base64.b64encode(value).decode('ascii')}
+    if isinstance(value, (complex, type(Ellipsis))):
+        return {_REPR_TAG: repr(value)}
+    if isinstance(value, (set, frozenset)):
+        return [{_REPR_TAG: repr(value)}]
+    return repr(value)
 
 
 def ast_to_dict(node: Any) -> Union[Dict, List, Any]:
@@ -45,9 +76,11 @@ def ast_to_dict(node: Any) -> Union[Dict, List, Any]:
         return result
     elif isinstance(node, list):
         return [ast_to_dict(x) for x in node]
-    else:
-        # Primitive values (strings, numbers, None, etc.)
+    elif node is None or isinstance(node, (bool, int, float, str)):
+        # Primitive values (strings, numbers, booleans, None)
         return node
+    else:
+        return encode_value(node)
 
 
 def parse_source(source: str) -> Dict[str, Any]:
