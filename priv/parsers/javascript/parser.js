@@ -64,7 +64,14 @@ const JS_PLUGINS = [
   "bigInt",
   "dynamicImport",
   "classStaticBlock",
-  "importAssertions"
+  // `importAttributes` (not `importAssertions`): the `importAssertions` plugin
+  // was removed in Babel 8, which makes the whole parser fail to load with
+  // "`importAssertions` has been removed in Babel 8, please use import
+  // attributes instead" -- so *every* JavaScript file failed to parse on a
+  // Babel 8 install. `importAttributes` is accepted by both Babel 7.29 and
+  // Babel 8, so a single plugin list works across the supported range and no
+  // version detection is needed.
+  "importAttributes"
 ];
 
 const TS_PLUGINS = [
