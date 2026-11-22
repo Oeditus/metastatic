@@ -1135,16 +1135,25 @@ AST.node_visibility(node)  # => :public
 ### M2.1 Core (all languages)
 
 `:literal`, `:variable`, `:binary_op`, `:unary_op`, `:function_call`,
-`:conditional`, `:early_return`, `:block`, `:list`, `:map`, `:pair`,
-`:tuple`, `:assignment`, `:inline_match`, `:range`,
-`:string_interpolation`, `:bin_segment`, `:comment`
+`:conditional`, `:early_return`, `:return`, `:throw`, `:block`, `:list`,
+`:map`, `:pair`, `:collection`, `:tuple`, `:assignment`, `:inline_match`,
+`:range`, `:string_interpolation`, `:bin_segment`, `:comment`, `:wildcard`
+
+> `:collection` is the array/object literal form emitted by the JavaScript
+> adapter (`subtype: :list` or `:map`); `:pattern: true` marks a destructuring
+> binding. `:list`/`:map` remain equally valid alternatives.
 
 ### M2.2 Extended (most languages)
 
 `:loop`, `:lambda`, `:collection_op`, `:pattern_match`, `:match_arm`,
-`:exception_handling`, `:async_operation`, `:comprehension`, `:generator`,
-`:filter`
+`:exception_handling`, `:try_catch`, `:rescue_clause`, `:export`,
+`:async_operation`, `:yield`, `:comprehension`, `:generator`, `:filter`,
+`:pipe`, `:pin`, `:assert_type`, `:spread`, `:labeled`
 
+> `:spread` carries `context: :expression` for a splice (`...xs` in an
+> argument list) and `context: :pattern` for a binding rest (`...rest` in a
+> parameter list or destructuring pattern). `:labeled` carries `:label` in
+> metadata and the labelled statement as its single child.
 ### M2.2s Structural (organizational)
 
 `:container`, `:function_def`, `:param`, `:attribute_access`,

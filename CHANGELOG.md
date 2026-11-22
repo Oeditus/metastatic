@@ -1,5 +1,62 @@
 ## Unreleased
 
+### Added — JavaScript / TypeScript first-class support
+
+JavaScript and TypeScript were already registered adapters, but a large part of
+ordinary JavaScript fell through to the `:language_specific` escape hatch and
+the resulting MetaAST did not conform to the M2 meta-model. Both are now
+first-class source languages.
+
+**Two dialects, one adapter pair.** `JavaScript` and `TypeScript` remain two
+separate language modules (`:javascript`, `:typescript`) sharing
+`JavaScript.ToMeta` / `JavaScript.FromMeta`. They are *not* merged because they
+do not share an AST: the Babel plugin sets are disjoint, and the TypeScript
+plugin reserves identifiers and accepts type syntax that plain JavaScript must
+reject. The bridge therefore takes a `--dialect` flag
+(`Subprocess.parse/2`), so `let x: number = 1` is a syntax error in JavaScript
+and valid TypeScript. Bare expressions (`1 + 2`) are accepted by both.
+
+**Newly abstracted constructs** (previously `:language_specific`):
+
+- `await` → `:async_operation` (`op_type: :await`), so the awaited expression
+  stays reachable by the `:http` / `:db` domain patterns.
+- `yield` / `yield*` → `:yield` with `:delegate` metadata.
+- `...xs` → `:spread` (`context: :expression`); `...rest` in a pattern →
+  `:spread` (`context: :pattern`).
+- `switch` → `:pattern_match` (`style: :switch`) with one `:match_arm` per
+  `case`, `:_` for `default`, and `:falls_through` recording whether the arm
+  ends in `break`/`return`/`throw`/`continue`.
+- `label: stmt` → `:labeled`, keeping the body as a traversable child.
+- `a, b, c` → `:block` (`scope: :sequence`).
+- `tag\`a ${b}\`` → `:function_call` with `:tagged_template`.
+- Object/array destructuring → `:collection` with `pattern: true`;
+  shorthand properties record `shorthand: true`.
+
+**Function parameters are now `:param` nodes.** They were emitted as raw
+expressions in the children list, with no `:params` metadata, which failed
+conformance for every function. `:function_def` and `:lambda` now carry
+`params` (and `arity`) in metadata and only the body as children, matching the
+M2 specification. Defaults (`:default`), rest (`:rest`) and destructured
+(`:pattern`) parameters are preserved.
+
+**Parser correctness.** `errorRecovery` made Babel return a partial tree for
+invalid input — `interface I { a: number }` parsed as three unrelated
+statements — so recovered errors are now reported as parse failures.
+
+**Meta-model additions.** The following were emitted by the JavaScript adapter
+but absent from `Metastatic.AST`, so `conforms?/1` rejected them:
+
+- node types `:collection`, `:return`, `:try_catch`, `:rescue_clause`,
+  `:export`, `:spread`, `:labeled`
+- literal subtype `:template_string`
+- operator category `:update` (`i++` / `i--`)
+- `:loop` with `loop_type: :for_in` / `:for_of`, and C-style `:for` with any
+  of its three header slots absent
+
+`AST.canonicalize/1` now also canonicalises MetaAST nodes held *inside*
+metadata (`:pattern`, `:default`, `:params`), so two semantically identical
+trees no longer differ because the generated source used different line
+numbers.
 ### Added — Rust language adapter (Phases 0–1)
 
 Rust is now a first-class source language: `.rs` files are discovered, parsed,

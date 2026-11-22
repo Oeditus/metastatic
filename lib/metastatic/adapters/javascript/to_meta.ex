@@ -2,11 +2,31 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
   @moduledoc """
   Transform JavaScript/TypeScript Babel AST (M1) to MetaAST (M2).
 
-  Converts serialized Babel AST JSON maps into standard MetaAST 3-element tuples:
+  Converts serialized Babel AST JSON maps into standard MetaAST 3-element
+  tuples:
+
       {type_atom, keyword_meta, children_or_value}
 
-  Supports M2.1 Core, M2.2 Extended (classes, functions, loops, try/catch, ES modules),
-  and M2.3 TypeScript type metadata preservation.
+  Supports M2.1 Core, M2.2 Extended (classes, functions, loops, try/catch,
+  ES modules, `switch`, labels, spread/rest, generators, async) and M2.3
+  TypeScript type metadata preservation.
+
+  ## Conventions
+
+  Two shapes are worth calling out because they are easy to get wrong:
+
+    * **Functions.** `:function_def` and `:lambda` carry `params` (a list of
+      `:param` nodes) and `arity` in *metadata*; the children are just the
+      body. Putting the parameter list in the children made every function
+      fail conformance.
+    * **Collections.** Array and object literals are `:collection` with
+      `subtype: :list` or `:map`. A destructuring binding adds
+      `pattern: true`, which is what tells `FromMeta` to reify an
+      `ObjectPattern`/`ArrayPattern` instead of a literal.
+
+  Constructs with no cross-language analogue (JSX, private names, static
+  blocks, `debugger`) are preserved as `:language_specific` carrying the
+  original M1 node, so they round-trip exactly.
   """
 
   @doc """
@@ -177,6 +197,62 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
     end
   end
 
+  # `await expr` -- an async operation, not a call. Lowering it to
+  # `:async_operation` keeps the awaited expression reachable by analyzers
+  # (an `:language_specific` blob hid the whole subtree, so `await fetch(url)`
+  # was invisible to the `:http` domain patterns).
+  def transform(%{"type" => "AwaitExpression", "argument" => arg} = node) do
+    with {:ok, arg_ast, _} <- transform(arg) do
+      ast = {:async_operation, [op_type: :await], [arg_ast]}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `yield expr` / bare `yield`. `yield*` delegates to another iterable, which
+  # is a distinct operation and is kept in metadata rather than lost.
+  def transform(%{"type" => "YieldExpression", "argument" => arg} = node) do
+    with {:ok, arg_ast, _} <- if(arg, do: transform(arg), else: {:ok, nil, %{}}) do
+      meta = [kind: :yield, delegate: node["delegate"] || false]
+      ast = {:yield, meta, if(arg_ast, do: [arg_ast], else: [])}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `...expr` in an argument list or array literal.
+  def transform(%{"type" => "SpreadElement", "argument" => arg} = node) do
+    with {:ok, arg_ast, _} <- transform(arg) do
+      ast = {:spread, [context: :expression], [arg_ast]}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `...rest` in a parameter list or destructuring pattern.
+  def transform(%{"type" => "RestElement", "argument" => arg} = node) do
+    with {:ok, arg_ast, _} <- transform(arg) do
+      ast = {:spread, [context: :pattern], [arg_ast]}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `a = default` in a parameter list or destructuring pattern. The default is
+  # a full expression, so it travels in metadata and the binding stays the
+  # `:param` leaf, matching the M2 `:param` shape.
+  def transform(%{"type" => "AssignmentPattern", "left" => left, "right" => right} = node) do
+    with {:ok, left_ast, _} <- transform(left),
+         {:ok, right_ast, _} <- transform(right) do
+      ast =
+        case left_ast do
+          {:variable, _, name} when is_binary(name) ->
+            {:param, [default: right_ast], name}
+
+          other ->
+            {:param, [default: right_ast, pattern: other], "_"}
+        end
+
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
   def transform(
         %{"type" => "UpdateExpression", "operator" => op, "argument" => arg, "prefix" => prefix} =
           node
@@ -254,17 +330,19 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
       ) do
     func_name = if id, do: id["name"], else: "anonymous"
 
-    with {:ok, params_ast} <- transform_list(params),
+    with {:ok, params_ast} <- transform_params(params),
          {:ok, body_ast, _} <- transform(body) do
       meta =
         [
           name: func_name,
+          params: params_ast,
+          arity: length(params_ast),
           async: node["async"] || false,
           generator: node["generator"] || false,
           visibility: :public
         ] ++ extract_ts_type(node)
 
-      ast = {:function_def, meta, [params_ast, body_ast]}
+      ast = {:function_def, meta, [body_ast]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -274,30 +352,32 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
       ) do
     func_name = if id, do: id["name"], else: nil
 
-    with {:ok, params_ast} <- transform_list(params),
+    with {:ok, params_ast} <- transform_params(params),
          {:ok, body_ast, _} <- transform(body) do
       meta =
         [
           name: func_name,
+          params: params_ast,
           async: node["async"] || false,
           generator: node["generator"] || false
         ] ++ extract_ts_type(node)
 
-      ast = {:lambda, meta, [params_ast, body_ast]}
+      ast = {:lambda, meta, [body_ast]}
       {:ok, add_location(ast, node), %{}}
     end
   end
 
   def transform(%{"type" => "ArrowFunctionExpression", "params" => params, "body" => body} = node) do
-    with {:ok, params_ast} <- transform_list(params),
+    with {:ok, params_ast} <- transform_params(params),
          {:ok, body_ast, _} <- transform(body) do
       meta =
         [
+          params: params_ast,
           async: node["async"] || false,
           arrow: true
         ] ++ extract_ts_type(node)
 
-      ast = {:lambda, meta, [params_ast, body_ast]}
+      ast = {:lambda, meta, [body_ast]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -445,18 +525,20 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
     method_name = extract_key_name(key)
     kind = String.to_atom(node["kind"] || "method")
 
-    with {:ok, params_ast} <- transform_list(params),
+    with {:ok, params_ast} <- transform_params(params),
          {:ok, body_ast, _} <- transform(body) do
       meta =
         [
           name: method_name,
+          params: params_ast,
+          arity: length(params_ast),
           kind: kind,
           static: node["static"] || false,
           async: node["async"] || false,
           visibility: if(String.starts_with?(method_name, "_"), do: :private, else: :public)
         ] ++ extract_ts_type(node)
 
-      ast = {:function_def, meta, [params_ast, body_ast]}
+      ast = {:function_def, meta, [body_ast]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -504,6 +586,107 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
     with {:ok, arg_ast, _} <- transform(arg) do
       ast = {:throw, [], [arg_ast]}
       {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `switch (subject) { case p: ...; default: ... }`
+  #
+  # This is a `:pattern_match`: the subject is the scrutinee and each `case`
+  # becomes a `:match_arm`. Fall-through is real JavaScript semantics, so the
+  # arm bodies are emitted as written and `:falls_through` records whether the
+  # arm ends in an explicit exit (`break`/`return`/`throw`/`continue`).
+  def transform(
+        %{"type" => "SwitchStatement", "discriminant" => subject, "cases" => cases} = node
+      ) do
+    with {:ok, subject_ast, _} <- transform(subject),
+         {:ok, arms} <- transform_switch_cases(cases) do
+      ast = {:pattern_match, [style: :switch], [subject_ast | arms]}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `label: statement` -- a jump target for `break`/`continue`.
+  #
+  # M2 has no labelled-statement node, so the label travels in metadata and the
+  # wrapped statement stays a first-class child. That keeps the body analyzable
+  # (the old fallback hid it inside an opaque native map).
+  def transform(%{"type" => "LabeledStatement", "label" => label, "body" => body} = node) do
+    with {:ok, body_ast, _} <- transform(body) do
+      ast = {:labeled, [label: label["name"]], [body_ast]}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `a, b, c` -- the comma operator evaluates left to right and yields the last
+  # value. Modelled as a `:block` with `scope: :sequence` so every operand stays
+  # reachable rather than being collapsed to one expression.
+  def transform(%{"type" => "SequenceExpression", "expressions" => exprs} = node) do
+    with {:ok, exprs_ast} <- transform_list(exprs) do
+      ast = {:block, [scope: :sequence], exprs_ast}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `debugger;` -- no runtime semantics beyond a breakpoint hint.
+  def transform(%{"type" => "DebuggerStatement"} = node) do
+    {:ok,
+     add_location({:language_specific, [language: :javascript, hint: :debugger], node}, node),
+     %{}}
+  end
+
+  # `;` -- a no-op statement. Preserved so statement counts stay faithful.
+  def transform(%{"type" => "EmptyStatement"} = node) do
+    {:ok, add_location({:block, [scope: :empty], []}, node), %{}}
+  end
+
+  # `` tag`a ${b}` `` -- a template literal invoked as a function.
+  # Lowered to a call whose callee is the tag and whose single argument is the
+  # template, so the interpolation expressions remain traversable.
+  def transform(%{"type" => "TaggedTemplateExpression", "tag" => tag, "quasi" => quasi} = node) do
+    with {:ok, tag_ast, _} <- transform(tag),
+         {:ok, quasi_ast, _} <- transform(quasi) do
+      ast =
+        {:function_call, [name: extract_callee_name(tag_ast), tagged_template: true],
+         [tag_ast, quasi_ast]}
+
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # Destructuring patterns in binding position: `const {a, b: c} = o`,
+  # `const [x, ...rest] = xs`. M2 has no pattern node, so the pattern is
+  # carried as a `:collection` whose `:pattern` metadata tells `FromMeta` to
+  # reify an ObjectPattern/ArrayPattern instead of a literal.
+  def transform(%{"type" => "ObjectPattern", "properties" => properties} = node) do
+    with {:ok, props} <- transform_list(properties) do
+      ast = {:collection, [subtype: :map, pattern: true], props}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  def transform(%{"type" => "ArrayPattern", "elements" => elements} = node) do
+    with {:ok, elems} <- transform_list(elements) do
+      ast = {:collection, [subtype: :list, pattern: true], elems}
+      {:ok, add_location(ast, node), %{}}
+    end
+  end
+
+  # `{a, b: c}` inside a pattern list. The shorthand form (`{a}`) binds `a` to
+  # `a`; the renamed form binds `c` to `a`. `:shorthand` preserves which one was
+  # written so the two do not reify identically.
+  def transform(%{
+        "type" => "ObjectProperty",
+        "key" => key,
+        "value" => value,
+        "shorthand" => short
+      })
+      when is_boolean(short) do
+    key_name = extract_key_name(key)
+
+    with {:ok, val_ast, _} <- transform(value) do
+      meta = [key: key_name, shorthand: short]
+      ast = {:pair, meta, [{:literal, [subtype: :string], key_name}, val_ast]}
+      {:ok, ast, %{}}
     end
   end
 
@@ -563,15 +746,17 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
       ) do
     method_name = extract_key_name(key)
 
-    with {:ok, params_ast} <- transform_list(params),
+    with {:ok, params_ast} <- transform_params(params),
          {:ok, body_ast, _} <- transform(body) do
       meta = [
         name: method_name,
+        params: params_ast,
+        arity: length(params_ast),
         async: node["async"] || false,
         generator: node["generator"] || false
       ]
 
-      ast = {:function_def, meta, [params_ast, body_ast]}
+      ast = {:function_def, meta, [body_ast]}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -617,6 +802,114 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
   def transform(other), do: {:ok, other, %{}}
 
   # Private Helpers
+
+  defp transform_switch_cases(cases) when is_list(cases) do
+    results =
+      Enum.reduce_while(cases, {:ok, []}, fn switch_case, {:ok, acc} ->
+        case transform_switch_case(switch_case) do
+          {:ok, arm} -> {:cont, {:ok, [arm | acc]}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case results do
+      {:ok, arms} -> {:ok, Enum.reverse(arms)}
+      err -> err
+    end
+  end
+
+  # One `case`/`default` clause. `test` is `nil` for `default`, which M2 spells
+  # as the `:_` wildcard pattern.
+  defp transform_switch_case(%{"type" => "SwitchCase", "test" => test, "consequent" => body}) do
+    with {:ok, pattern} <- switch_case_pattern(test),
+         {:ok, body_ast} <- transform_list(body) do
+      meta = [pattern: pattern, falls_through: not exits?(body)]
+      {:ok, {:match_arm, meta, body_ast}}
+    end
+  end
+
+  # `default` has no test, which M2 spells as the `:_` wildcard pattern.
+  defp switch_case_pattern(nil), do: {:ok, :_}
+
+  defp switch_case_pattern(test) do
+    case transform(test) do
+      {:ok, ast, _} -> {:ok, ast}
+      err -> err
+    end
+  end
+
+  # A `case` body falls through unless its last statement transfers control.
+  defp exits?([]), do: false
+
+  defp exits?(body) when is_list(body) do
+    case List.last(body) do
+      %{"type" => type} ->
+        type in ["BreakStatement", "ReturnStatement", "ThrowStatement", "ContinueStatement"]
+
+      _ ->
+        false
+    end
+  end
+
+  # Function parameters become `:param` nodes, as M2 requires. Emitting the
+  # raw parameter expressions (the previous behaviour) produced a list of
+  # lists, which failed conformance and made every downstream consumer treat
+  # JS functions as malformed.
+  #
+  #   Identifier        -> {:param, [], "name"}
+  #   AssignmentPattern -> {:param, [default: expr], "name"}
+  #   RestElement       -> {:param, [rest: true], "name"}
+  #   Object/ArrayPattern -> {:param, [pattern: ast], "_"}
+  defp transform_params(params) when is_list(params) do
+    results =
+      Enum.reduce_while(params, {:ok, []}, fn param, {:ok, acc} ->
+        case transform_param(param) do
+          {:ok, meta_param} -> {:cont, {:ok, [meta_param | acc]}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case results do
+      {:ok, list} -> {:ok, Enum.reverse(list)}
+      err -> err
+    end
+  end
+
+  defp transform_param(%{"type" => "Identifier", "name" => name} = node) do
+    {:ok, add_location({:param, [], name}, node)}
+  end
+
+  defp transform_param(%{"type" => "AssignmentPattern", "left" => left, "right" => right} = node) do
+    with {:ok, name, _} <- transform(left),
+         {:ok, default, _} <- transform(right) do
+      {:ok, add_location({:param, [default: default], param_name(name)}, node)}
+    end
+  end
+
+  defp transform_param(%{"type" => "RestElement", "argument" => arg} = node) do
+    with {:ok, name, _} <- transform(arg) do
+      {:ok, add_location({:param, [rest: true], param_name(name)}, node)}
+    end
+  end
+
+  # A destructured parameter (`function f({a, b})`). The binding is a pattern,
+  # not a name, so the pattern travels in metadata and the name is a placeholder.
+  defp transform_param(%{"type" => type} = node) when type in ["ObjectPattern", "ArrayPattern"] do
+    with {:ok, pattern, _} <- transform(node) do
+      {:ok, add_location({:param, [pattern: pattern], "_"}, node)}
+    end
+  end
+
+  # TypeScript parameter properties / `this` parameters and anything else the
+  # grammar allows: keep the expression as the pattern rather than dropping it.
+  defp transform_param(node) do
+    with {:ok, ast, _} <- transform(node) do
+      {:ok, {:param, [pattern: ast], "_"}}
+    end
+  end
+
+  defp param_name({:variable, _, name}) when is_binary(name), do: name
+  defp param_name(_), do: "_"
 
   defp transform_list(nodes) when is_list(nodes) do
     results =

@@ -43,21 +43,24 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
   end
 
   # Blocks & Modules
-  defp to_babel({:block, _meta, statements}) when is_list(statements) do
-    with {:ok, babel_stmts} <- to_babel_list(statements) do
-      wrapped = Enum.map(babel_stmts, &wrap_statement/1)
-
-      {:ok,
-       %{
-         "type" => "Program",
-         "sourceType" => "module",
-         "body" => wrapped
-       }}
+  #
+  # A bare `:block` at the top of a reification is a module body. A block with
+  # `scope: :sequence` is the comma operator and is handled by the clause near
+  # the collections section, which must therefore be matched first.
+  defp to_babel({:block, meta, statements}) when is_list(statements) do
+    if meta[:scope] == :sequence do
+      to_babel_sequence(statements)
+    else
+      to_babel_program(statements)
     end
   end
 
   # Literals
-  defp to_babel({:literal, meta, val}) do
+  #
+  # A template string with interpolations is handled by the list clause below,
+  # so it is excluded here. A template with no interpolations is a plain
+  # string and falls through to the `:string` branch of the generic clause.
+  defp to_babel({:literal, meta, val}) when not is_list(val) do
     subtype = meta[:subtype]
 
     node =
@@ -93,6 +96,31 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
       end
 
     {:ok, node}
+  end
+
+  # A template literal with interpolations: `quasis` holds the literal
+  # fragments (n + 1 of them for n expressions) and the children are the
+  # expressions.
+  defp to_babel({:literal, meta, exprs}) when is_list(exprs) do
+    if meta[:subtype] == :template_string do
+      with {:ok, exprs_b} <- to_babel_list(exprs) do
+        quasis = meta[:quasis] || []
+
+        quasi_nodes =
+          quasis
+          |> pad_quasis(length(exprs) + 1)
+          |> Enum.map(fn raw -> template_element(raw) end)
+
+        {:ok,
+         %{
+           "type" => "TemplateLiteral",
+           "quasis" => quasi_nodes,
+           "expressions" => exprs_b
+         }}
+      end
+    else
+      {:error, "Unsupported list-valued literal: #{inspect(meta[:subtype])}"}
+    end
   end
 
   # Variables
@@ -204,6 +232,16 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
     name = meta[:name]
 
     cond do
+      # A tagged template (`tag`a ${b}``) is a call whose argument is the
+      # template literal, but Babel spells it as its own node.
+      meta[:tagged_template] == true and match?([_, _], children) ->
+        [tag, quasi] = children
+
+        with {:ok, tag_b} <- to_babel(tag),
+             {:ok, quasi_b} <- to_babel(quasi) do
+          {:ok, %{"type" => "TaggedTemplateExpression", "tag" => tag_b, "quasi" => quasi_b}}
+        end
+
       name == "member_access" and match?([_, _], children) ->
         [obj, prop] = children
         computed = meta[:computed] || false
@@ -247,11 +285,11 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
   end
 
   # Function Definitions & Lambdas
-  defp to_babel({:function_def, meta, [params, body]}) do
+  defp to_babel({:function_def, meta, body}) do
     name = meta[:name]
 
-    with {:ok, params_babel} <- to_babel_list(params),
-         {:ok, body_babel} <- to_babel_body(body) do
+    with {:ok, params_babel} <- to_babel_list(meta[:params] || []),
+         {:ok, body_babel} <- to_babel_body_from(body) do
       if meta[:kind] in [:method, :constructor, :get, :set] do
         {:ok,
          %{
@@ -280,9 +318,9 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
     end
   end
 
-  defp to_babel({:lambda, meta, [params, body]}) do
-    with {:ok, params_babel} <- to_babel_list(params),
-         {:ok, body_babel} <- to_babel_body(body) do
+  defp to_babel({:lambda, meta, body}) do
+    with {:ok, params_babel} <- to_babel_list(meta[:params] || []),
+         {:ok, body_babel} <- to_babel_body_from(body) do
       if meta[:arrow] != false do
         {:ok,
          %{
@@ -528,27 +566,120 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
 
   # Collections & Objects
   defp to_babel({:collection, meta, elements}) do
+    pattern? = meta[:pattern] == true
+    map? = meta[:subtype] == :map
+
     with {:ok, babel_elements} <- to_babel_list(elements) do
-      if meta[:subtype] == :map do
-        {:ok, %{"type" => "ObjectExpression", "properties" => babel_elements}}
-      else
-        {:ok, %{"type" => "ArrayExpression", "elements" => babel_elements}}
+      cond do
+        pattern? and map? ->
+          {:ok, %{"type" => "ObjectPattern", "properties" => babel_elements}}
+
+        pattern? ->
+          {:ok, %{"type" => "ArrayPattern", "elements" => babel_elements}}
+
+        map? ->
+          {:ok, %{"type" => "ObjectExpression", "properties" => babel_elements}}
+
+        true ->
+          {:ok, %{"type" => "ArrayExpression", "elements" => babel_elements}}
       end
     end
   end
 
-  defp to_babel({:pair, _meta, [{:literal, _, key}, val]}) do
+  defp to_babel({:pair, meta, [{:literal, _, key}, val]}) do
     with {:ok, val_b} <- to_babel(val) do
+      key_name = to_string(key)
+      shorthand? = meta[:shorthand] == true
+
+      # A shorthand property (`{a}`) has one node serving as both key and
+      # value; a renamed one (`{a: b}`) has two distinct identifiers.
+      value_node =
+        if shorthand? and match?(%{"type" => "Identifier"}, val_b),
+          do: %{"type" => "Identifier", "name" => key_name},
+          else: val_b
+
       {:ok,
        %{
          "type" => "ObjectProperty",
-         "key" => %{"type" => "Identifier", "name" => to_string(key)},
-         "value" => val_b
+         "key" => %{"type" => "Identifier", "name" => key_name},
+         "value" => value_node,
+         "shorthand" => shorthand?
        }}
     end
   end
 
-  # Native & TypeScript fallback
+  # Spread / rest splice. `:expression` is an argument or array element;
+  # `:pattern` is a binding rest (`function f(...xs)`, `const [...xs] = ys`).
+  defp to_babel({:spread, meta, [inner]}) do
+    with {:ok, inner_b} <- to_babel(inner) do
+      type = if meta[:context] == :pattern, do: "RestElement", else: "SpreadElement"
+      {:ok, %{"type" => type, "argument" => inner_b}}
+    end
+  end
+
+  # A function parameter. The third element is the binding name; `:pattern`
+  # holds a destructuring pattern, `:default` the default expression and
+  # `:rest` marks a rest parameter. These compose: `...{a} = {}` is a rest
+  # parameter whose binding is a pattern with a default.
+  defp to_babel({:param, meta, name}) do
+    with {:ok, binding} <- param_binding(meta, name),
+         {:ok, binding} <- maybe_rest(meta, binding) do
+      maybe_default(meta, binding)
+    end
+  end
+
+  # `await expr`
+  defp to_babel({:async_operation, meta, [operation]}) do
+    with {:ok, op_b} <- to_babel(operation) do
+      case meta[:op_type] do
+        :await -> {:ok, %{"type" => "AwaitExpression", "argument" => op_b}}
+        _ -> {:error, "Unsupported async operation for JavaScript: #{inspect(meta[:op_type])}"}
+      end
+    end
+  end
+
+  # `yield expr` / `yield* expr`
+  defp to_babel({:yield, meta, children}) do
+    case children do
+      [] ->
+        {:ok,
+         %{"type" => "YieldExpression", "argument" => nil, "delegate" => meta[:delegate] || false}}
+
+      [arg] ->
+        with {:ok, arg_b} <- to_babel(arg) do
+          {:ok,
+           %{
+             "type" => "YieldExpression",
+             "argument" => arg_b,
+             "delegate" => meta[:delegate] || false
+           }}
+        end
+    end
+  end
+
+  # `switch` -- reified from a `:pattern_match` carrying `style: :switch`.
+  defp to_babel({:pattern_match, meta, [subject | arms]}) do
+    if meta[:style] == :switch do
+      with {:ok, subject_b} <- to_babel(subject),
+           {:ok, cases} <- to_babel_switch_cases(arms) do
+        {:ok, %{"type" => "SwitchStatement", "discriminant" => subject_b, "cases" => cases}}
+      end
+    else
+      {:error, "JavaScript has no general pattern match; only switch is supported"}
+    end
+  end
+
+  defp to_babel({:labeled, meta, [body]}) do
+    with {:ok, body_b} <- to_babel(body) do
+      {:ok,
+       %{
+         "type" => "LabeledStatement",
+         "label" => %{"type" => "Identifier", "name" => meta[:label]},
+         "body" => wrap_statement(body_b)
+       }}
+    end
+  end
+
   defp to_babel({:language_specific, _meta, native_ast}) when is_map(native_ast) do
     {:ok, native_ast}
   end
@@ -558,6 +689,63 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
   end
 
   # Private Helpers
+
+  defp param_binding(meta, name) do
+    case {Keyword.get(meta, :pattern), name} do
+      {nil, name} when is_binary(name) -> {:ok, %{"type" => "Identifier", "name" => name}}
+      {nil, _} -> {:error, "A :param needs a binary name or a :pattern"}
+      {pattern, _} -> to_babel(pattern)
+    end
+  end
+
+  defp maybe_rest(meta, binding) do
+    if meta[:rest],
+      do: {:ok, %{"type" => "RestElement", "argument" => binding}},
+      else: {:ok, binding}
+  end
+
+  defp maybe_default(meta, binding) do
+    case Keyword.get(meta, :default) do
+      nil ->
+        {:ok, binding}
+
+      default ->
+        with {:ok, default_b} <- to_babel(default) do
+          {:ok, %{"type" => "AssignmentPattern", "left" => binding, "right" => default_b}}
+        end
+    end
+  end
+
+  defp pad_quasis(quasis, count) do
+    quasis ++ List.duplicate("", max(count - length(quasis), 0))
+  end
+
+  defp template_element(raw) do
+    %{
+      "type" => "TemplateElement",
+      "value" => %{"raw" => raw, "cooked" => raw},
+      "tail" => false
+    }
+  end
+
+  defp to_babel_program(statements) when is_list(statements) do
+    with {:ok, babel_stmts} <- to_babel_list(statements) do
+      wrapped = Enum.map(babel_stmts, &wrap_statement/1)
+
+      {:ok,
+       %{
+         "type" => "Program",
+         "sourceType" => "module",
+         "body" => wrapped
+       }}
+    end
+  end
+
+  defp to_babel_sequence(exprs) do
+    with {:ok, exprs_b} <- to_babel_list(exprs) do
+      {:ok, %{"type" => "SequenceExpression", "expressions" => exprs_b}}
+    end
+  end
 
   defp to_babel_list(nodes) when is_list(nodes) do
     results =
@@ -573,6 +761,41 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
       err -> err
     end
   end
+
+  # Reify `:match_arm` nodes back into Babel `SwitchCase` nodes. A `:_`
+  # wildcard pattern is the `default` clause, which Babel spells as `test: nil`.
+  defp to_babel_switch_cases(arms) when is_list(arms) do
+    results =
+      Enum.reduce_while(arms, {:ok, []}, fn
+        {:match_arm, meta, body}, {:ok, acc} ->
+          with {:ok, test_b} <- switch_case_test(Keyword.get(meta, :pattern)),
+               {:ok, body_b} <- to_babel_list(body) do
+            wrapped = Enum.map(body_b, &wrap_statement/1)
+
+            {:cont,
+             {:ok, [%{"type" => "SwitchCase", "test" => test_b, "consequent" => wrapped} | acc]}}
+          else
+            {:error, _} = err -> {:halt, err}
+          end
+
+        other, _acc ->
+          {:halt, {:error, "Expected :match_arm in a switch, got: #{inspect(other)}"}}
+      end)
+
+    case results do
+      {:ok, cases} -> {:ok, Enum.reverse(cases)}
+      err -> err
+    end
+  end
+
+  defp switch_case_test(:_), do: {:ok, nil}
+  defp switch_case_test(nil), do: {:ok, nil}
+  defp switch_case_test(pattern), do: to_babel(pattern)
+  # A function body is a single-element list holding the body node
+  # (`:block` or an expression for concise arrow bodies).
+  defp to_babel_body_from([single]), do: to_babel_body(single)
+  defp to_babel_body_from([]), do: {:ok, %{"type" => "BlockStatement", "body" => []}}
+  defp to_babel_body_from(other), do: to_babel_body(other)
 
   defp to_babel_body({:block, _, stmts}) do
     with {:ok, babel_stmts} <- to_babel_list(stmts) do

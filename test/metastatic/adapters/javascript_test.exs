@@ -90,9 +90,10 @@ defmodule Metastatic.Adapters.JavaScriptTest do
         }
       }
 
-      assert {:ok, {:function_def, meta, [params, body]}, %{}} = ToMeta.transform(ast_node)
+      assert {:ok, {:function_def, meta, [body]}, %{}} = ToMeta.transform(ast_node)
       assert meta[:name] == "add"
-      assert length(params) == 2
+      assert meta[:arity] == 2
+      assert [{:param, _, "a"}, {:param, _, "b"}] = meta[:params]
 
       assert body ==
                {:block, [],

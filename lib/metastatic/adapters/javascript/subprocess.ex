@@ -17,7 +17,17 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   @unparser_path "parsers/javascript/unparser.js"
 
   @doc """
-  Parse JS/TS source code to Babel AST JSON.
+  Parse JavaScript or TypeScript source to Babel AST JSON.
+
+  `dialect` selects the Babel plugin set and therefore the grammar:
+
+    * `:javascript` (default) — JSX plus the standard ECMAScript proposals,
+      with no type syntax. `let x: number = 1` is a syntax error.
+    * `:typescript` — the `typescript` plugin, which accepts type syntax and
+      reserves identifiers JavaScript allows.
+
+  Both dialects accept a bare expression (`1 + 2`), which is wrapped in a
+  synthetic `Program` so the shape stays uniform across adapters.
 
   ## Examples
 
@@ -26,14 +36,22 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
 
       iex> Metastatic.Adapters.JavaScript.Subprocess.parse("const x =")
       {:error, "SyntaxError: ..."}
+
+      iex> {:error, _} = Metastatic.Adapters.JavaScript.Subprocess.parse("let x: number = 1;")
+      iex> {:ok, _} = Metastatic.Adapters.JavaScript.Subprocess.parse("let x: number = 1;", :typescript)
   """
-  @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
-  def parse(source) when is_binary(source) do
+  @spec parse(String.t(), :javascript | :typescript) :: {:ok, map()} | {:error, String.t()}
+  def parse(source, dialect \\ :javascript) when is_binary(source) do
     with :ok <- available?(),
-         {:ok, result} <- run_node_script(@parser_path, source, ".js") do
+         {:ok, result} <- run_node_script(@parser_path, source, ".js", dialect_args(dialect)) do
       Bridge.decode(result)
     end
   end
+
+  # Babel rejects `typescript` + `flow` together, and the TypeScript plugin
+  # reserves identifiers (`yield`, `await`, `<T>`) that plain JavaScript
+  # accepts. The dialect therefore has to be chosen per adapter rather than
+  # baked into the bridge.
 
   @doc """
   Unparse Babel AST JSON back to JS/TS source code.
@@ -48,7 +66,7 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   def unparse(ast) when is_map(ast) do
     with {:ok, json} <- Bridge.encode(ast),
          :ok <- available?(),
-         {:ok, result} <- run_node_script(@unparser_path, json, ".json") do
+         {:ok, result} <- run_node_script(@unparser_path, json, ".json", []) do
       Bridge.decode(result)
     end
   end
@@ -68,12 +86,15 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
     end
   end
 
-  defp run_node_script(script_path, input, ext) do
+  defp dialect_args(:typescript), do: ["--dialect=typescript"]
+  defp dialect_args(_), do: ["--dialect=javascript"]
+
+  defp run_node_script(script_path, input, ext, args) do
     script_full_path = Priv.parser_path(script_path)
     parser_dir = Path.dirname(script_full_path)
 
     with :ok <- ensure_node_modules(parser_dir) do
-      Subprocess.run(Priv.find_executable("node"), [script_full_path], input,
+      Subprocess.run(Priv.find_executable("node"), [script_full_path | args], input,
         ext: ext,
         prefix: "metastatic_js",
         cd: parser_dir

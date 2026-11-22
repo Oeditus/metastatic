@@ -265,12 +265,14 @@ defmodule Metastatic.AST do
           | :list
           | :map
           | :pair
+          | :collection
           | :tuple
           | :binary_op
           | :unary_op
           | :function_call
           | :conditional
           | :early_return
+          | :return
           | :throw
           | :block
           | :assignment
@@ -290,6 +292,9 @@ defmodule Metastatic.AST do
           | :pattern_match
           | :match_arm
           | :exception_handling
+          | :try_catch
+          | :rescue_clause
+          | :export
           | :async_operation
           | :yield
           | :comprehension
@@ -298,6 +303,8 @@ defmodule Metastatic.AST do
           | :pipe
           | :pin
           | :assert_type
+          | :spread
+          | :labeled
 
   @typedoc """
   Node type atoms for M2.2s Structural Layer - organizational constructs.
@@ -358,11 +365,13 @@ defmodule Metastatic.AST do
           | :regex
           | :char
           | :bytes
+          | :template_string
 
   @typedoc """
   Category for binary/unary operators.
   """
-  @type operator_category :: :arithmetic | :comparison | :boolean | :bitwise | :range | :string
+  @type operator_category ::
+          :arithmetic | :comparison | :boolean | :bitwise | :range | :string | :update
 
   @typedoc """
   Container type classification.
@@ -502,12 +511,14 @@ defmodule Metastatic.AST do
     :list,
     :map,
     :pair,
+    :collection,
     :tuple,
     :binary_op,
     :unary_op,
     :function_call,
     :conditional,
     :early_return,
+    :return,
     :throw,
     :block,
     :assignment,
@@ -527,6 +538,9 @@ defmodule Metastatic.AST do
     :pattern_match,
     :match_arm,
     :exception_handling,
+    :try_catch,
+    :rescue_clause,
+    :export,
     :async_operation,
     :yield,
     :comprehension,
@@ -534,7 +548,9 @@ defmodule Metastatic.AST do
     :filter,
     :pipe,
     :pin,
-    :assert_type
+    :assert_type,
+    :spread,
+    :labeled
   ]
 
   @structural_types [
@@ -558,9 +574,20 @@ defmodule Metastatic.AST do
 
   @all_types @core_types ++ @extended_types ++ @structural_types ++ @native_types
 
-  @literal_subtypes [:integer, :float, :string, :boolean, :null, :symbol, :regex, :char, :bytes]
+  @literal_subtypes [
+    :integer,
+    :float,
+    :string,
+    :boolean,
+    :null,
+    :symbol,
+    :regex,
+    :char,
+    :bytes,
+    :template_string
+  ]
 
-  @operator_categories [:arithmetic, :comparison, :boolean, :bitwise, :range, :string]
+  @operator_categories [:arithmetic, :comparison, :boolean, :bitwise, :range, :string, :update]
 
   @container_types [
     :module,
@@ -1039,6 +1066,20 @@ defmodule Metastatic.AST do
     is_list(elements) and Enum.all?(elements, &conforms?/1)
   end
 
+  # Collection: a list or map literal, optionally a destructuring *pattern*.
+  #
+  # `:collection` is the M2.1 form the JavaScript adapter emits for array and
+  # object literals; `:list`/`:map` remain valid alternatives. `:pattern: true`
+  # marks a binding pattern (`const {a} = o`), which reifies differently from
+  # a literal even though the shape is identical.
+  defp valid_node?(:collection, meta, elements) do
+    subtype = Keyword.get(meta, :subtype)
+    pattern = Keyword.get(meta, :pattern, false)
+
+    subtype in [:list, :map] and is_boolean(pattern) and is_list(elements) and
+      Enum.all?(elements, &conforms?/1)
+  end
+
   defp valid_node?(:map, _meta, pairs) do
     is_list(pairs) and Enum.all?(pairs, &conforms?/1)
   end
@@ -1197,6 +1238,18 @@ defmodule Metastatic.AST do
       {:infinite, [body]} ->
         conforms?(body)
 
+      # `for (const x of xs)` / `for (const k in o)` -- a binding, a collection
+      # and a body. The binding may itself be a pattern or a `:spread`.
+      {t, [binding, collection, body]} when t in [:for_in, :for_of] ->
+        conforms?(binding) and conforms?(collection) and conforms?(body)
+
+      # C-style `for (init; test; update) body`. Any of the three header slots
+      # may be absent, which the AST spells as `nil`.
+      {:for, [init, test, update, body]} ->
+        (is_nil(init) or conforms?(init)) and
+          (is_nil(test) or conforms?(test)) and
+          (is_nil(update) or conforms?(update)) and conforms?(body)
+
       _ ->
         false
     end
@@ -1239,6 +1292,38 @@ defmodule Metastatic.AST do
     conforms?(try_block) and
       valid_exception_handlers?(handlers) and
       (is_nil(finally) or conforms?(finally))
+  end
+
+  # `:return` -- an explicit return statement, distinct from `:early_return`
+  # (which models an early exit from the middle of a block). The value is
+  # optional: `return;` is valid in JavaScript.
+  defp valid_node?(:return, _meta, []), do: true
+  defp valid_node?(:return, _meta, [value]), do: is_nil(value) or conforms?(value)
+  defp valid_node?(:return, _meta, _), do: false
+
+  # `:try_catch` -- try / handler / finalizer, each optional except the try
+  # block. JavaScript spells `catch {}` with a nil binding, so the handler may
+  # be a `:rescue_clause` or `nil`.
+  defp valid_node?(:try_catch, _meta, [try_block, handler, finalizer]) do
+    conforms?(try_block) and
+      (is_nil(handler) or conforms?(handler)) and
+      (is_nil(finalizer) or conforms?(finalizer))
+  end
+
+  defp valid_node?(:try_catch, _meta, _), do: false
+
+  # `:rescue_clause` -- the exception binding and the handler body.
+  defp valid_node?(:rescue_clause, _meta, [binding, body]) do
+    (is_nil(binding) or conforms?(binding)) and conforms?(body)
+  end
+
+  defp valid_node?(:rescue_clause, _meta, _), do: false
+
+  # `:export` -- an ES module export. `:export_type` is `:named` or `:default`;
+  # the children are the exported declarations (possibly empty for a re-export).
+  defp valid_node?(:export, meta, children) do
+    export_type = Keyword.get(meta, :export_type, :named)
+    export_type in [:named, :default] and is_list(children) and Enum.all?(children, &conforms?/1)
   end
 
   defp valid_node?(:exception_handling, _meta, _), do: false
@@ -1297,6 +1382,30 @@ defmodule Metastatic.AST do
   end
 
   defp valid_node?(:assert_type, _meta, _), do: false
+
+  # Spread: {:spread, [context: :expression | :pattern], [inner]} -- the
+  # variadic splice operator (`...xs` in JS, `*xs` in Python/Ruby).
+  # `:context` records where the splice appears, because the same operator
+  # means "expand into a list" in expression position and "collect the rest"
+  # in pattern position; collapsing them would make the two reify identically.
+  @spread_contexts [:expression, :pattern]
+
+  defp valid_node?(:spread, meta, [inner]) do
+    context = Keyword.get(meta, :context, :expression)
+    context in @spread_contexts and conforms?(inner)
+  end
+
+  defp valid_node?(:spread, _meta, _), do: false
+
+  # Labeled statement: {:labeled, [label: "outer"], [body]} -- a jump target for
+  # `break label` / `continue label`. The label is metadata, the statement is
+  # the single child, so the body stays analyzable.
+  defp valid_node?(:labeled, meta, [body]) do
+    label = Keyword.get(meta, :label)
+    is_binary(label) and conforms?(body)
+  end
+
+  defp valid_node?(:labeled, _meta, _), do: false
 
   # M2.2s Structural types
   defp valid_node?(:container, meta, body) do
@@ -1506,6 +1615,13 @@ defmodule Metastatic.AST do
   defp valid_literal_value?(:regex, _value), do: true
   defp valid_literal_value?(:char, value), do: is_binary(value) or is_integer(value)
 
+  # A template string with interpolations (`a${x}b`). The value is the list of
+  # interpolated expressions; the literal fragments live in `:quasis`
+  # metadata, so the node stays composite and its expressions are traversable.
+  defp valid_literal_value?(:template_string, value) do
+    is_list(value) and Enum.all?(value, &conforms?/1)
+  end
+
   # `:bytes` accepts two shapes (Cure v0.20.0+):
   #   * a raw `binary()` -- the legacy payload for languages that do not
   #     expose bitstring segment grammar (or that serialise the bytes for
@@ -1619,7 +1735,21 @@ defmodule Metastatic.AST do
     :id,
     :parent,
     :bases,
-    :decorators
+    :decorators,
+    :falls_through,
+    :static,
+    :tagged_template,
+    :rest,
+    :delegate,
+    :shorthand,
+    :pattern,
+    :style,
+    :computed,
+    :optional,
+    :constructor,
+    :arrow,
+    :generator,
+    :quasis
   ]
 
   @doc """
@@ -1668,13 +1798,32 @@ defmodule Metastatic.AST do
   """
   @spec canonicalize(meta_ast() | term()) :: meta_ast() | term()
   def canonicalize({type, meta, children}) when is_atom(type) and is_list(meta) do
-    canonical_meta = Keyword.take(meta, @semantic_meta_keys)
+    # Semantic metadata may itself hold MetaAST nodes (`:pattern` on a
+    # `:match_arm`, `:default` on a `:param`, `:params` on a `:function_def`).
+    # Those embedded nodes carry their own source locations, so they must be
+    # canonicalised too — otherwise two semantically identical trees differ
+    # purely because the generated source was laid out on different lines.
+    canonical_meta =
+      meta
+      |> Keyword.take(@semantic_meta_keys)
+      |> Enum.map(fn {key, value} -> {key, canonicalize_meta_value(value)} end)
+
     {type, canonical_meta, canonicalize(children)}
   end
 
   def canonicalize(list) when is_list(list), do: Enum.map(list, &canonicalize/1)
   def canonicalize(other), do: other
 
+  # Canonicalise a metadata value only when it actually contains a MetaAST
+  # node. Scalars, atoms and plain lists are returned untouched so that
+  # `:quasis`, `:operator` and friends keep their exact values.
+  defp canonicalize_meta_value(value) do
+    if meta_value_has_node?(value), do: canonicalize(value), else: value
+  end
+
+  defp meta_value_has_node?({type, meta, _}) when is_atom(type) and is_list(meta), do: true
+  defp meta_value_has_node?(list) when is_list(list), do: Enum.any?(list, &meta_value_has_node?/1)
+  defp meta_value_has_node?(_), do: false
   # ----- Location Helpers -----
   # ----- Location Helpers -----
 
