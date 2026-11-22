@@ -106,6 +106,8 @@ defmodule Metastatic.MixProject do
         priv/parsers/agda/Makefile
         priv/parsers/agda/Parser.hs
         priv/parsers/english/parser.js
+        priv/parsers/go/go.mod
+        priv/parsers/go/*.go
         priv/parsers/haskell/Parser.hs
         priv/parsers/haskell/README.md
         priv/parsers/haskell/metastatic-haskell-parser.cabal
@@ -264,6 +266,10 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapters.Erlang,
         Metastatic.Adapters.Erlang.FromMeta,
         Metastatic.Adapters.Erlang.ToMeta,
+        Metastatic.Adapters.Go,
+        Metastatic.Adapters.Go.FromMeta,
+        Metastatic.Adapters.Go.Subprocess,
+        Metastatic.Adapters.Go.ToMeta,
         Metastatic.Adapters.Java,
         Metastatic.Adapters.Java.FromMeta,
         Metastatic.Adapters.Java.Subprocess,

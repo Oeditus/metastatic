@@ -1,5 +1,23 @@
 ## Unreleased
 
+### Added — Go adapter
+
+- `Metastatic.Adapters.Go` implements the full source → M1 → M2 → M1 → source
+  pipeline for `.go` files and bare expressions, registered automatically as
+  `:go`.
+- A dependency-free standard-library bridge uses `go/parser` and `go/format`,
+  with structured parse/reification errors and a native self-test.
+- The subprocess layer supports prebuilt executables and builds bundled sources
+  into a content-addressed user cache, without writing into the installed
+  package. Requires Go 1.21 or newer when no prebuilt executable is supplied.
+- Portable constructs are abstracted to MetaAST, with native syntax details
+  retained for reification. Edited MetaAST children are reified recursively;
+  round trips do not simply replay an original source file.
+- Go bridge tests, adapter conformance tests, expression/mutation tests and
+  realistic generic/collection/concurrency fixtures exercise the complete
+  pipeline. CI installs Go and checks the bridge with `go test`, `go vet` and
+  `gofmt`.
+
 ### Added — JavaScript / TypeScript first-class support
 
 JavaScript and TypeScript were already registered adapters, but a large part of

@@ -10,7 +10,7 @@ Metastatic provides a unified MetaAST (Meta-level Abstract Syntax Tree) intermed
 
 Parse once, use everywhere. A universal meta-model for program syntax that enables cross-language code transformation and tooling.
 
-**Metastatic provides the foundation** - the MetaAST meta-model and 10 language adapters. Cross-language analysis and linting tools are provided by the companion Elixir library [MetaCredo](https://github.com/Oeditus/metacredo), which can handle and lint whatever sources `metastatic` understands.
+**Metastatic provides the foundation** - the MetaAST meta-model and its language adapters. Cross-language analysis and linting tools are provided by the companion Elixir library [MetaCredo](https://github.com/Oeditus/metacredo), which can handle and lint whatever sources `metastatic` understands.
 
 ## Key Features
 
@@ -26,7 +26,7 @@ Parse once, use everywhere. A universal meta-model for program syntax that enabl
 **What Metastatic Provides:**
 - MetaAST meta-model (M2 level) with three layers
 - Natural Language MetaAST (NL-MetaAST) for prose and documentation analysis (see [METAST_NL_SPEC.md](METAST_NL_SPEC.md))
-- Language adapters (Agda, Cure, Elixir, Erlang, Haskell, JavaScript, LFE, March, Markdown, Python, Ruby, SQL, TypeScript; English and Spanish for prose)
+- Language adapters (Agda, Cure, Elixir, Erlang, Go, Haskell, Java, JavaScript, LFE, March, Markdown, Python, Ruby, Rust, SQL, TypeScript; English and Spanish for prose)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
 - Semantic enrichment (OpKind metadata for code; voice, hedging, and readability for prose)
@@ -88,7 +88,43 @@ Every `mix metastatic.*` task distinguishes a **usage error** from a
 
 ### Using Language Adapters
 
-Metastatic currently supports 13 language adapters: Agda, Cure, Elixir, Erlang, Haskell, JavaScript, LFE, March, Markdown, Python, Ruby, SQL, and TypeScript.
+Source and document adapters are discovered automatically from the installed modules. Go is registered as `:go` and handles `.go` files.
+
+#### Go
+
+The Go adapter uses `go/parser` and `go/format` from the Go standard library;
+it has no third-party Go module dependencies. Install **Go 1.21 or newer**,
+or provide a prebuilt `metastatic-go-parser` executable on PATH. On first use,
+the adapter builds the bundled sources into the user's cache directory
+(`metastatic/go` under the platform user-cache root); subsequent calls reuse
+the executable until the sources change. The installed package can be read-only,
+but the cache directory must be writable when building from source.
+
+Complete Go files and bare expressions are accepted. Common constructs map to
+portable MetaAST nodes, while Go-specific details are retained for reification.
+Output is formatted by `go/format`, not byte-identical to the input. Ordinary
+inline comments may move to safe syntax boundaries; build constraints, compiler
+directives and cgo preambles retain their required attachment. Parsing
+checks syntax, not package resolution or type correctness; use `go test` or
+`go build` to validate the generated program in its project.
+
+```elixir
+{:ok, doc} = Metastatic.Builder.from_source("a + 2", :go)
+{:ok, "a + 2"} = Metastatic.Builder.to_source(doc)
+
+# File extensions select the adapter automatically.
+{:ok, doc} = Metastatic.Builder.from_file("main.go")
+{:ok, source} = Metastatic.Builder.to_source(doc)
+```
+
+For a deployment without a Go toolchain, prebuild the bridge before deploying:
+
+```bash
+go -C priv/parsers/go build -o /your/bin/metastatic-go-parser .
+```
+
+`Metastatic.Adapters.Go.Subprocess.format/1` formats source directly, and
+`selftest/0` checks the parser/printer protocol on the selected executable.
 
 #### Agda & Haskell
 
