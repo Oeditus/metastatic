@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 The Gleam contributors
+#
+# A *trimmed* copy of the upstream `hexpm` crate, vendored next to the Gleam
+# crates the bridge links against.
+#
+# `gleam-core` depends on `hexpm` for exactly two things:
+#
+#   * `hexpm::version::{Version, Range, Identifier, LowestVersion}` — the
+#     version type that appears in manifests, requirements and the
+#     "wrong compiler version" diagnostic;
+#   * `hexpm::ApiError` — a variant list that `gleam_core::error::Error`
+#     matches exhaustively.
+#
+# Those are the only symbols `gleam-core` names. Everything else upstream —
+# the HTTP client, the protobuf payloads, the RSA signature verification, the
+# OAuth flow — is dead weight for a parser that never talks to Hex, and it
+# drags in `ring`, `prost` and a `build.rs`. This crate therefore keeps the
+# version algebra and the error enum and drops the rest.
+#
+# `vendor.sh` copies the upstream `version/` module verbatim and writes the
+# `ApiError` list from the upstream `lib.rs`, so the semantics stay upstream's;
+# only the unreachable API surface is gone. The trimming is recorded in
+# `vendor/README.md`.
+
+[package]
+name = "hexpm"
+version = "1.19.2"
+authors = ["Louis Pilfold <louis@lpil.uk>"]
+edition = "2024"
+license = "Apache-2.0"
+
+description = "Trimmed Hex version algebra, vendored for the Metastatic Gleam parser bridge"
+repository = "https://github.com/gleam-lang/hexpm-rust"
+
+[dependencies]
+# Version ranges are represented with pubgrub's range algebra, exactly as
+# upstream does, so `Range::to_pubgrub` returns the same type.
+pubgrub = "0.3"
+# Compact clone-on-write string, the credential payload type upstream uses.
+ecow = "0"
+# HTTP request/response types. `gleam_core::hex` builds request objects and
+# hands them to its own `HttpClient`; the types must match, but nothing here
+# ever opens a socket.
+http = "1"
+# Data (de)serialisation, for `Version`'s `Deserialize` impl.
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+# `std::error::Error` definition macro, used by `ApiError`.
+thiserror = "2"

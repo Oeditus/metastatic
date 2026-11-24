@@ -1,0 +1,15 @@
+# Build artefacts. The bridge is compiled on demand into the user's cache
+# directory (see `Metastatic.Adapters.Gleam.Subprocess`), never into the
+# package, so nothing here should be committed.
+/target
+
+# A nested target directory appears whenever cargo is run from inside
+# `vendor/` (e.g. to check the vendored crates in isolation). It is ~700 MB
+# and would push the Hex package past its 134 MB uncompressed limit, so it is
+# ignored rather than merely untracked.
+vendor/target
+
+# `vendor/Cargo.lock` is written by running cargo inside `vendor/`. The
+# bridge's own `Cargo.lock` already pins the vendored graph, so this one is a
+# byproduct and would otherwise ship as a second, potentially stale lock file.
+vendor/Cargo.lock

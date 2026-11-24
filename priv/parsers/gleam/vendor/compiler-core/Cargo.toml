@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2020 The Gleam contributors
+
+[package]
+name = "gleam-core"
+version = "1.19.2"
+authors = ["Louis Pilfold <louis@lpil.uk>"]
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+# Error message and warning formatting
+codespan-reporting = "0"
+# Graph data structures
+petgraph = "0.8"
+# Template rendering
+askama = "0"
+# Markdown parsing
+pulldown-cmark = { version = "0", default-features = false, features = [
+  "html",
+] }
+# XDG directory locations
+dirs-next = "2"
+# SPDX license parsing
+spdx = "0"
+# Binary format de-serialization
+bitcode = { version = "0.6", features = ["serde"] }
+# cross platform single glob and glob set matching
+globset = { version = "0", features = ["serde1"] }
+# Checksums
+xxhash-rust.workspace = true
+# Pubgrub dependency resolution algorithm
+pubgrub = "0.3"
+# Used for converting absolute path to relative path
+pathdiff = { version = "0", features = ["camino"] }
+# Memory arena using ids rather than references
+id-arena = "2"
+# Bijective (bi-directional) hashmap
+bimap = { version = "0.6.3", features = ["serde"] }
+# Encryption
+age = { version = "0.12", features = ["armor"] }
+radix_trie = "0.3"
+# Ensuring recursive type-checking doesn't stack overflow
+stacker = "0.1.21"
+# Manipulating bit arrays
+bitvec = { version = "1", features = ["serde"] }
+# Sourcemap generation
+sourcemap = "9"
+indexmap = "2.12.1"
+
+src-span.workspace = true
+num-bigint.workspace = true
+num-traits.workspace = true
+async-trait.workspace = true
+base16.workspace = true
+camino = { workspace = true, features = ["serde1"] }
+clap = { workspace = true, features = ["derive"] }
+debug-ignore.workspace = true
+ecow = { workspace = true, features = ["serde"] }
+flate2.workspace = true
+futures.workspace = true
+hexpm = { path = "../hexpm" }
+pretty-arena = { path = "../pretty-arena" }
+erlang-generation = { path = "../erlang-generation" }
+http.workspace = true
+imbl.workspace = true
+itertools.workspace = true
+lsp-server.workspace = true
+lsp-types.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+strum.workspace = true
+tar.workspace = true
+termcolor.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+tracing.workspace = true
+vec1.workspace = true
+unicode-segmentation.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+insta.workspace = true
+# Random value generation
+rand = "0.9"
+# Time types
+time = "0.3"
+ignore.workspace = true
+
+[build-dependencies]
+# Data (de)serialisation
+serde_derive = "1"

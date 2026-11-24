@@ -31,6 +31,7 @@ defmodule Metastatic.LanguagesTest do
         :cure,
         :elixir,
         :erlang,
+        :gleam,
         :go,
         :haskell,
         :java,

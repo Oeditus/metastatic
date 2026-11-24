@@ -1,0 +1,64 @@
+[package]
+name = "metastatic-gleam-parser"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Gleam AST bridge for Metastatic: parses Gleam source into JSON (M1) and prints it back."
+license = "GPL-3.0"
+
+[[bin]]
+name = "metastatic-gleam-parser"
+path = "src/main.rs"
+
+# Two builds from one source tree:
+#
+#   * **default** (`vendored`) — links the Gleam compiler's own parser and
+#     printer, vendored under `vendor/`. Full M1 fidelity, no `gleam` toolchain
+#     at runtime, ~4.9 MB in the package.
+#
+#   * **`--no-default-features --features external-gleam`** — links nothing
+#     vendored. `format`/`unparse` shell out to `gleam format --stdin`, and
+#     `parse` reports that a full M1 needs the compiler crates. This is what
+#     `HEX_BUILD=1` ships.
+#
+# The feature gates which `src/` modules are compiled and which code paths
+# exist; it does **not** gate the dependencies, because Cargo resolves a `path`
+# dependency's manifest even when the feature that enables it is off:
+#
+#     error: no matching package named `gleam-core` found
+#     location searched: vendor/compiler-core
+#
+# So a package that ships without `vendor/` must also ship a manifest that
+# does not reference it. `Cargo.source-only.toml` is that manifest; the
+# `HEX_BUILD=1` package build swaps it in for this one (see `mix.exs`).
+[features]
+default = ["vendored"]
+vendored = []
+external-gleam = []
+
+[dependencies]
+# The Gleam compiler's own parser and untyped AST. Vendored under `vendor/`
+# (see `vendor.sh`) so the bridge parses exactly what `gleam build` parses,
+# including future syntax, without requiring a `gleam` toolchain at runtime.
+gleam-core = { path = "vendor/compiler-core" }
+# The reference Gleam printer. It consumes the same parsed AST the parser
+# produced, so a reified tree prints as `gleam format` would print it.
+gleam-format = { path = "vendor/format" }
+# Gleam's compact clone-on-write string, the input type of `pretty`. Pinned to
+# the same major the vendored crates resolve to: a second `ecow` in the graph
+# makes `EcoString` two distinct types and `pretty/3` un-callable.
+ecow = "0.3"
+# `SrcSpan` is the position type `gleam_core` re-exports from here; the bridge
+# needs to name it to accept a span in a helper signature.
+src-span = { path = "vendor/src-span" }
+
+# UTF-8 paths, which is what `parse_module` and `pretty` take.
+camino = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# The bridge is a short-lived CLI: optimise for a fast cold start and a small
+# binary rather than peak throughput.
+opt-level = 2
+lto = true
