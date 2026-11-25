@@ -89,6 +89,44 @@ jobs:
         run: cargo build --release --locked
         working-directory: priv/parsers/rust
 
+      # The Gleam adapter shells out to `priv/parsers/gleam`, which links
+      # against the *vendored* Gleam compiler crates. Building it here keeps the
+      # adapter's tests off the cold-build path and proves the vendored tree
+      # compiles on a clean checkout.
+      - name: Build the Gleam parser bridge
+        run: cargo build --release --locked
+        working-directory: priv/parsers/gleam
+
+      - name: Test the Gleam parser bridge
+        run: cargo test --release --locked
+        working-directory: priv/parsers/gleam
+
+      # The source-only build is what `HEX_BUILD=1` ships. It must compile
+      # without `vendor/`, so it is built from the source-only manifest exactly
+      # as an unpacked package would be.
+      - name: Build the source-only Gleam bridge
+        run: |
+          mkdir -p /tmp/gleam-source-only/src
+          cp Cargo.source-only.toml /tmp/gleam-source-only/Cargo.toml
+          cp src/*.rs /tmp/gleam-source-only/src/
+          cargo build --release --manifest-path /tmp/gleam-source-only/Cargo.toml
+        working-directory: priv/parsers/gleam
+
+      - name: Check the source-only bridge reports the right build
+        run: |
+          /tmp/gleam-source-only/target/release/metastatic-gleam-parser selftest x \
+            | grep -q '"build":"external-gleam"'
+        working-directory: priv/parsers/gleam
+
+      # The source-only package must be buildable as shipped: the manifest swap
+      # is the step most likely to break silently.
+      - name: Build the source-only Hex package
+        run: |
+          mix metastatic.package.gleam --source-only -o /tmp/pkg-source-only
+          test -f /tmp/pkg-source-only/priv/parsers/gleam/Cargo.toml
+          test ! -d /tmp/pkg-source-only/priv/parsers/gleam/vendor
+          ! grep -q 'gleam-core = ' /tmp/pkg-source-only/priv/parsers/gleam/Cargo.toml
+
       - name: Cache cargo artifacts
         uses: actions/cache@v4
         with:
@@ -96,9 +134,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             priv/parsers/rust/target
-          key: ${{ runner.os }}-cargo-rust-${{ hashFiles('priv/parsers/rust/Cargo.lock') }}
+            priv/parsers/gleam/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('priv/parsers/rust/Cargo.lock', 'priv/parsers/gleam/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-rust-
+            ${{ runner.os }}-cargo-
 
       - name: Restore dependencies cache
         uses: actions/cache@v4

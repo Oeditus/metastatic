@@ -1,0 +1,13 @@
+{#
+  SPDX-License-Identifier: Apache-2.0
+  SPDX-FileCopyrightText: 2020 The Gleam contributors
+#}
+{% extends "documentation_layout.html" %}
+
+{% block title %}
+{{ title }} - {{ project_name }}
+{% endblock %}
+
+{% block content %}
+{{ content|safe }}
+{% endblock %}

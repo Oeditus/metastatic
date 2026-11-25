@@ -1,0 +1,26 @@
+# Paths removed from the vendored gleam-lang/gleam sources by `vendor.sh`.
+# They are test fixtures, snapshot files and compiler backends the bridge never
+# calls; keeping them would add ~14 MB to the Hex package for no benefit.
+# Run that script after updating the copy.
+#
+# NOTE: `compiler-core/templates` is deliberately *not* listed. It is not a
+# test fixture: `askama` resolves `#[template(path = "gleam@@main.erl")]` and
+# `docs.rs` `include_str!`s the CSS/JS/fonts at *compile* time, so removing the
+# directory makes the vendored crate fail to build with
+# "template not found in directories". It is 460 KB, which is the price of
+# compiling `gleam-core` at all.
+compiler-core/src/parse/snapshots
+compiler-core/src/parse/tests.rs
+compiler-core/src/type_/tests
+compiler-core/src/type_/tests.rs
+compiler-core/src/type_/snapshots
+compiler-core/src/ast/tests.rs
+compiler-core/src/javascript/tests
+compiler-core/src/javascript/tests.rs
+compiler-core/src/docs/snapshots
+compiler-core/src/erlang/tests
+compiler-core/src/erlang/tests.rs
+compiler-core/src/erlang/snapshots
+format/src/tests.rs
+format/src/tests
+

@@ -463,8 +463,8 @@ def to_meta(native_ast) do
 end
 ```
 
-`enrich/3` is the single implementation of "transform then enrich" — all eleven
-built-in adapters delegate to it. It passes `{:error, reason}` through
+`enrich/3` is the single implementation of "transform then enrich" — every
+built-in adapter delegates to it. It passes `{:error, reason}` through
 untouched, honours `enrich: false`, and is a no-op for a language with no
 registered patterns (one traversal, not a wrong answer). Calling
 `Enricher.enrich_tree/2` directly still works but loses those guarantees.

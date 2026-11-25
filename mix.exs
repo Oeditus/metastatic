@@ -94,14 +94,65 @@ defmodule Metastatic.MixProject do
     """
     Cross-language code meta-model library using unified MetaAST representation.
     Parse, transform, and translate code across Python, Elixir, Ruby, Erlang,
-    Haskell, and more via a shared three-tuple AST format.
+    Go, Gleam, Rust, Haskell, and more via a shared three-tuple AST format.
     """
+  end
+
+  # `HEX_BUILD=1` produces the *source-only* Gleam bridge package: the bridge's
+  # own sources ship, the ~4.9 MB vendored Gleam compiler crates do not. That
+  # build needs `gleam` on `PATH` at runtime and cannot produce a MetaAST (see
+  # `Metastatic.Adapters.Gleam`), but `format` and `unparse` still work.
+  #
+  # The flag is read here, at `package/0` time, so `HEX_BUILD=1 mix hex.build`
+  # picks the right file list with no extra step. It is *not* sufficient on its
+  # own: the manifest swap described below needs
+  # `mix metastatic.package.gleam --source-only`, which sets this variable and
+  # performs the swap.
+  @hex_build System.get_env("HEX_BUILD") in ["1", "true"]
+
+  @gleam_parser_files ~w(
+    priv/parsers/gleam/Cargo.toml
+    priv/parsers/gleam/Cargo.source-only.toml
+    priv/parsers/gleam/Cargo.lock
+    priv/parsers/gleam/rust-toolchain.toml
+    priv/parsers/gleam/src
+    priv/parsers/gleam/vendor.sh
+    priv/parsers/gleam/.vendor-excludes
+    priv/parsers/gleam/.gitignore
+  )
+
+  # The vendored crates are what make the package ~4.9 MB larger, and they are
+  # exactly what `HEX_BUILD=1` drops.
+  @gleam_vendor_files ~w(priv/parsers/gleam/vendor)
+
+  # `Cargo.toml` references the vendored crates by path, and Cargo resolves a
+  # `path` dependency's manifest even when the feature enabling it is off — so
+  # a package shipping without `vendor/` must also ship a manifest that does
+  # not mention it. `Cargo.source-only.toml` is that manifest.
+  #
+  # Hex has no rename syntax for `:files` (only paths and globs), so the swap
+  # cannot be expressed here. `mix metastatic.package.gleam --source-only`
+  # writes `Cargo.source-only.toml` over `Cargo.toml` on disk *before* running
+  # `mix hex.build`, so by the time this list is evaluated the manifest at
+  # `priv/parsers/gleam/Cargo.toml` is already the source-only one and is
+  # packaged under its normal name.
+  #
+  # `Cargo.source-only.toml` is excluded from the source-only package: shipping
+  # both manifests would leave the unpacked package with a stray file that
+  # looks authoritative but is not the one Cargo reads.
+  defp gleam_parser_files do
+    if @hex_build do
+      List.delete(@gleam_parser_files, "priv/parsers/gleam/Cargo.source-only.toml")
+    else
+      @gleam_parser_files ++ @gleam_vendor_files
+    end
   end
 
   defp package do
     [
       name: @app,
-      files: ~w(
+      files:
+        ~w(
         lib
         priv/parsers/agda/Makefile
         priv/parsers/agda/Parser.hs
@@ -151,7 +202,8 @@ defmodule Metastatic.MixProject do
         RESEARCH.md
         CONTRIBUTING_SUPPLEMENTALS.md
         LICENSE
-      ),
+      )
+        |> Kernel.++(gleam_parser_files()),
       licenses: ["GPL-3.0", "CC-BY-SA-4.0"],
       maintainers: ["Aleksei Matiushkin"],
       links: %{
@@ -266,6 +318,10 @@ defmodule Metastatic.MixProject do
         Metastatic.Adapters.Erlang,
         Metastatic.Adapters.Erlang.FromMeta,
         Metastatic.Adapters.Erlang.ToMeta,
+        Metastatic.Adapters.Gleam,
+        Metastatic.Adapters.Gleam.FromMeta,
+        Metastatic.Adapters.Gleam.Subprocess,
+        Metastatic.Adapters.Gleam.ToMeta,
         Metastatic.Adapters.Go,
         Metastatic.Adapters.Go.FromMeta,
         Metastatic.Adapters.Go.Subprocess,

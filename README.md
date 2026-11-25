@@ -26,7 +26,7 @@ Parse once, use everywhere. A universal meta-model for program syntax that enabl
 **What Metastatic Provides:**
 - MetaAST meta-model (M2 level) with three layers
 - Natural Language MetaAST (NL-MetaAST) for prose and documentation analysis (see [METAST_NL_SPEC.md](METAST_NL_SPEC.md))
-- Language adapters (Agda, Cure, Elixir, Erlang, Go, Haskell, Java, JavaScript, LFE, March, Markdown, Python, Ruby, Rust, SQL, TypeScript; English and Spanish for prose)
+- Language adapters (Agda, Cure, Elixir, Erlang, Gleam, Go, Haskell, Java, JavaScript, LFE, March, Markdown, Python, Ruby, Rust, SQL, TypeScript; English and Spanish for prose)
 - Parsing, transformation, and unparsing infrastructure
 - Cross-language semantic equivalence validation
 - Semantic enrichment (OpKind metadata for code; voice, hedging, and readability for prose)
@@ -88,7 +88,7 @@ Every `mix metastatic.*` task distinguishes a **usage error** from a
 
 ### Using Language Adapters
 
-Source and document adapters are discovered automatically from the installed modules. Go is registered as `:go` and handles `.go` files.
+Source and document adapters are discovered automatically from the installed modules. Go is registered as `:go` and handles `.go` files; Gleam is registered as `:gleam` and handles `.gleam` files.
 
 #### Go
 
@@ -125,6 +125,79 @@ go -C priv/parsers/go build -o /your/bin/metastatic-go-parser .
 
 `Metastatic.Adapters.Go.Subprocess.format/1` formats source directly, and
 `selftest/0` checks the parser/printer protocol on the selected executable.
+
+#### Gleam
+
+The Gleam adapter links against the **Gleam compiler's own** parser and
+printer, vendored under `priv/parsers/gleam/vendor/`. What it sees is therefore
+exactly what `gleam build` sees, and what it prints is exactly what
+`gleam format` prints — including syntax the bridge itself does not model, and
+without a `gleam` toolchain at runtime.
+
+Install **Rust/Cargo**, or provide a prebuilt `metastatic-gleam-parser`
+executable on PATH. On first use the adapter builds the bundled sources into the
+user's cache directory (`metastatic/gleam` under the platform user-cache root);
+subsequent calls reuse the executable until the sources change. The installed
+package can be read-only, but the cache directory must be writable when building
+from source.
+
+```elixir
+{:ok, doc} = Metastatic.Builder.from_source("pub fn add(a: Int, b: Int) { a + b }", :gleam)
+{:ok, source} = Metastatic.Builder.to_source(doc)
+
+# File extensions select the adapter automatically.
+{:ok, doc} = Metastatic.Builder.from_file("main.gleam")
+{:ok, source} = Metastatic.Builder.to_source(doc)
+```
+
+Common constructs map to portable MetaAST nodes (`:function_def`, `:container`,
+`:pattern_match`, `:pipe`, `:lambda`, `:binary_op`, `:bin_segment`, …), while
+Gleam-specific details are retained for reification. Constructs with no portable
+analogue — `assert`, `echo`, clause guards, string-prefix patterns — keep their
+native payload, so reification is lossless.
+
+Output is formatted by `gleam format`, not byte-identical to the input: an
+import's unqualified list is sorted and a redundant `as` alias is elided. The
+target is *semantic* equivalence, which the fixture suite asserts on every
+construct.
+
+For a deployment without a Rust toolchain, prebuild the bridge before deploying:
+
+```bash
+cd priv/parsers/gleam && cargo build --release --locked
+# then copy target/release/metastatic-gleam-parser onto PATH
+```
+
+`Metastatic.Adapters.Gleam.Subprocess.format/1` formats source directly, and
+`selftest/0` checks the parse/render protocol on the selected executable.
+
+##### Source-only package (`HEX_BUILD=1`)
+
+The vendored compiler crates are ~4.9 MB of the package. If that matters more
+than MetaAST support, build the source-only package:
+
+```bash
+mix metastatic.package.gleam --source-only
+```
+
+That package carries the bridge's own sources but not `vendor/`, which takes it
+from **7.7 MB to 3.0 MB**. What it can do changes accordingly:
+
+| | full | `HEX_BUILD=1` |
+| :--- | :--- | :--- |
+| `parse/1` → MetaAST | yes | **no** — returns `{:error, reason}` |
+| `format/1`, `unparse/1` | yes | yes, via `gleam format --stdin` |
+| Runtime requirement | Rust/Cargo once, or a prebuilt binary | **`gleam` on `PATH`** |
+
+`Metastatic.Adapters.Gleam.Subprocess.build/0` reports which one is installed
+(`:vendored` or `:external_gleam`), and `Gleam.available?/0` is `false` in the
+source-only build so a caller can branch before attempting a parse.
+
+The limitation is deliberate and unavoidable: `gleam-core` is not published to
+crates.io, and the `gleam` CLI exposes no AST — `gleam export
+package-interface` emits type signatures with no function bodies. There is
+therefore no way to build a MetaAST from `gleam` alone, so the source-only
+build says so rather than returning a partial tree.
 
 #### Agda & Haskell
 

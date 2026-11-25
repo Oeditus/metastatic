@@ -1,5 +1,73 @@
 ## Unreleased
 
+### Added — Gleam adapter
+
+- `Metastatic.Adapters.Gleam` implements the full source → M1 → M2 → M1 → source
+  pipeline for `.gleam` files, registered automatically as `:gleam`.
+- The bridge does **not** hand-write a parser: it links against the Gleam
+  compiler's own `gleam_core::parse::parse_module/3` and `gleam_format::pretty/3`,
+  vendored under `priv/parsers/gleam/vendor/` by `vendor.sh`. What the adapter
+  sees is therefore exactly what `gleam build` sees, and what it prints is
+  exactly what `gleam format` prints — including syntax the bridge itself does
+  not model.
+- `to_json` matches every `UntypedExpr`, `UntypedStatement`, `UntypedDefinition`,
+  `Pattern`, `TypeAst`, `Constant`, `ClauseGuard` and `BitArrayOption` variant
+  with **no wildcard arm**, so a Gleam release that adds a construct fails to
+  *compile* the bridge rather than mis-parsing it silently. The Elixir side
+  mirrors that discipline: an unrecognised node kind is an `{:error, reason}`,
+  never a silent `:language_specific`.
+- The subprocess layer supports prebuilt executables and builds the bundled
+  sources into a content-addressed user cache, without writing into the
+  installed package. Requires Rust/Cargo when no prebuilt executable is
+  supplied.
+- Portable constructs are abstracted to MetaAST (`:function_def`, `:container`,
+  `:pattern_match`, `:pipe`, `:lambda`, `:binary_op`, `:bin_segment`, …), with
+  native syntax details retained for reification. Edited MetaAST children are
+  reified recursively; round trips do not replay an original source file.
+- Constructs with no portable analogue — `assert`, `echo`, clause guards,
+  string-prefix patterns — keep their M1 payload, which is what makes
+  reification lossless.
+- `gleam format`'s normalisations are absorbed rather than fought: an import's
+  unqualified list is sorted and a redundant `as` alias is elided, both of which
+  would otherwise make an identical re-parse compare unequal. The fixture suite
+  asserts *semantic* round-trip equality on every construct.
+- Bridge tests (42 Rust unit tests, including a per-construct round-trip suite),
+  adapter conformance tests, and 12 realistic fixtures across
+  `core/`, `extended/`, `structural/` and `native/` exercise the complete
+  pipeline. CI builds and tests the bridge with `cargo build`/`cargo test`.
+
+### Added — Gleam source-only package (`HEX_BUILD=1`)
+
+The Gleam bridge ships in two configurations from one source tree:
+
+- **`vendored`** (default) — links the Gleam compiler's own parser and printer
+  from `priv/parsers/gleam/vendor/`. Full MetaAST support, no `gleam` toolchain
+  at runtime.
+- **`external_gleam`** (`HEX_BUILD=1`) — no vendored crates. `format/1` and
+  `unparse/1` delegate to `gleam format --stdin`; `parse/1` returns
+  `{:error, reason}`. The package drops from **7.7 MB to 3.0 MB** (the Gleam
+  directory from 5.0 MB to 260 KB) and needs `gleam` on `PATH`.
+
+`mix metastatic.package.gleam [--source-only] [--tarball]` builds either one.
+`Subprocess.build/0` reports which is installed, and `Gleam.available?/0` is
+`false` in the source-only build so callers can branch before parsing.
+
+Two details worth recording:
+
+- The feature flag alone is not enough. Cargo resolves a `path` dependency's
+  manifest even when the feature enabling it is off, so a package shipping
+  without `vendor/` fails with `no matching package named gleam-core found`
+  unless it also ships a manifest that omits the dependency.
+  `Cargo.source-only.toml` is that manifest; the task swaps it in for
+  `Cargo.toml` on disk before calling `hex.build`, and restores the original in
+  an `after` block so a failed build cannot leave the checkout modified.
+- Hex's `:files` accepts only paths and globs — there is no rename syntax — so
+  the swap cannot be expressed in `mix.exs` and needs the task.
+
+The source-only build cannot parse, and this is not a shortcut that could be
+closed later: `gleam-core` is not on crates.io, and the `gleam` CLI exposes no
+AST (`export package-interface` emits type signatures with no bodies).
+
 ### Added — Go adapter
 
 - `Metastatic.Adapters.Go` implements the full source → M1 → M2 → M1 → source
