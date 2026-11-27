@@ -271,4 +271,444 @@ defmodule Metastatic.Adapters.CureTest do
       end
     end
   end
+
+  describe "Cure v0.36.0 source_info handling" do
+    test "moves %Cure.MetaAST.SourceInfo{} to :cure_source_info" do
+      info = %{__struct__: Cure.MetaAST.SourceInfo, whole: :span}
+      ast = {:variable, [source_info: info, line: 3], "x"}
+
+      assert {:variable, meta, "x"} = ToMeta.normalize(ast)
+      assert Keyword.get(meta, :cure_source_info) == info
+      refute Keyword.has_key?(meta, :source_info)
+      assert Keyword.get(meta, :line) == 3
+    end
+
+    test "drops source_info when preserve_source_info: false" do
+      info = %{__struct__: Cure.MetaAST.SourceInfo, whole: :span}
+      ast = {:variable, [source_info: info], "x"}
+
+      assert {:variable, meta, "x"} = ToMeta.normalize(ast, preserve_source_info: false)
+      refute Keyword.has_key?(meta, :cure_source_info)
+    end
+  end
+
+  describe "Cure v0.36.0 node rendering (FromMeta)" do
+    test "pattern_match renders `match` with indented arms" do
+      ast =
+        {:pattern_match, [],
+         [
+           {:variable, [], "x"},
+           {:match_arm, [pattern: {:literal, [subtype: :integer], 0}],
+            [{:literal, [subtype: :integer], 1}]},
+           {:match_arm, [pattern: {:variable, [], "_"}], [{:literal, [subtype: :integer], 2}]}
+         ]}
+
+      assert FromMeta.to_source(ast) ==
+               "match x\n  0 -> 1\n  _ -> 2"
+    end
+
+    test "match_arm with a guard" do
+      ast =
+        {:match_arm,
+         [
+           pattern: {:variable, [], "n"},
+           guard: {:binary_op, [operator: :>], [{:variable, [], "n"}, {:literal, [subtype: :integer], 0}]}
+         ], [{:literal, [subtype: :integer], 1}]}
+
+      assert FromMeta.to_source(ast) == "n when n > 0 -> 1"
+    end
+
+    test "pickup replaces if/elif" do
+      ast =
+        {:pickup, [],
+         [
+           {:pickup_clause, [],
+            [
+              {:binary_op, [operator: :<], [{:variable, [], "a"}, {:variable, [], "b"}]},
+              {:literal, [subtype: :boolean], true}
+            ]},
+           {:pickup_else, [], [{:literal, [subtype: :boolean], false}]}
+         ]}
+
+      assert FromMeta.to_source(ast) ==
+               "pickup\n  a < b -> true\n  else -> false"
+    end
+
+    test "with_abs renders the convoy pattern" do
+      ast =
+        {:with_abs, [],
+         [
+           {:variable, [], "n"},
+           {:match_arm, [pattern: {:function_call, [name: "Z"], []}],
+            [{:function_call, [name: "empty"], []}]},
+           {:match_arm, [pattern: {:function_call, [name: "S"], [{:variable, [], "k"}]}],
+            [{:variable, [], "k"}]}
+         ]}
+
+      assert FromMeta.to_source(ast) ==
+               "with n\n  Z() -> empty()\n  S(k) -> k"
+    end
+
+    test "comprehension with a generator" do
+      ast =
+        {:comprehension, [],
+         [
+           {:binary_op, [operator: :*], [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]},
+           {:generator, [], [{:variable, [], "x"}, {:variable, [], "xs"}]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "[x * 2 for x <- xs]"
+    end
+
+    test "binary comprehension keeps the generator inside <<>>" do
+      ast =
+        {:comprehension, [],
+         [
+           {:variable, [], "b"},
+           {:binary_generator, [],
+            [
+              {:literal, [subtype: :bytes], [{:bin_segment, [], [{:variable, [], "b"}]}]},
+              {:variable, [], "buf"}
+            ]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "[b for <<b <- buf>>]"
+    end
+
+    test "refinement_type renders `{x: T | pred}`" do
+      ast =
+        {:refinement_type, [binder: "x"],
+         [
+           {:variable, [], "Int"},
+           {:binary_op, [operator: :!=], [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "{x: Int | x != 0}"
+    end
+
+    test "sigma_type renders a dependent pair" do
+      ast = {:sigma_type, [binder: "x"], [{:variable, [], "Int"}, {:variable, [], "Bool"}]}
+      assert FromMeta.to_source(ast) == "Sigma(x: Int, Bool)"
+    end
+
+    test "union_type renders members joined by |" do
+      ast = {:union_type, [], [{:variable, [], "Int"}, {:variable, [], "Bool"}]}
+      assert FromMeta.to_source(ast) == "Int | Bool"
+    end
+
+    test "tuple_type renders Tuple(...)" do
+      ast = {:tuple_type, [arity: 2], [{:variable, [], "Int"}, {:variable, [], "Bool"}]}
+      assert FromMeta.to_source(ast) == "Tuple(Int, Bool)"
+    end
+
+    test "arrow_chain renders a function type" do
+      ast = {:arrow_chain, [], [{:variable, [], "Int"}, {:variable, [], "Bool"}]}
+      assert FromMeta.to_source(ast) == "Int -> Bool"
+    end
+
+    test "hole renders ?name" do
+      assert FromMeta.to_source({:hole, [name: "goal"], []}) == "?goal"
+    end
+
+    test "quoted_syntax and splice" do
+      ast =
+        {:quoted_syntax, [],
+         [{:tuple, [], [{:literal, [subtype: :symbol], :ok}, {:splice, [], [{:variable, [], "p"}]}]}]}
+
+      assert FromMeta.to_source(ast) == "quote %[:ok, $(p)]"
+    end
+
+    test "proof_chain with a simplify justification" do
+      ast =
+        {:proof_chain, [],
+         [
+           {:literal, [subtype: :integer], 1},
+           {:proof_step, [],
+            [
+              {:proof_chain_previous, [], []},
+              {:literal, [subtype: :integer], 1},
+              {:simplify_command, [], []}
+            ]}
+         ]}
+
+      assert FromMeta.to_source(ast) ==
+               "proof chain\n  1 == 1\n  because simplify"
+    end
+
+    test "solver_command renders `by decide`" do
+      assert FromMeta.to_source({:solver_command, [solver: :decide], []}) == "by decide"
+    end
+
+    test "rewrite_command renders direction and target" do
+      ast = {:rewrite_command, [direction: :forward], [{:variable, [], "h"}]}
+      assert FromMeta.to_source(ast) == "rewrite using h"
+    end
+
+    test "induction with cases" do
+      ast =
+        {:induction, [],
+         [
+           {:variable, [], "n"},
+           {:induction_case, [], [{:variable, [], "Z"}, {:variable, [], "refl"}]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "induction n\n  case Z =>\n    refl"
+    end
+
+    test "interface renders `interface Name(params)`" do
+      ast =
+        {:interface, [name: "Show", params: ["t"], requires: []],
+         [{:function_def, [name: "show", params: [{:param, [], "x"}], return_type: {:variable, [], "String"}], []}]}
+
+      assert FromMeta.to_source(ast) ==
+               "interface Show(t)\n  fn show(x) -> String"
+    end
+
+    test "implementation renders `implementation I for T`" do
+      ast =
+        {:implementation, [interface: "Show", for_type: {:variable, [], "Int"}],
+         [{:function_def, [name: "show", params: [{:param, [], "x"}]], [{:literal, [subtype: :string], "i"}]}]}
+
+      assert FromMeta.to_source(ast) ==
+               "implementation Show for Int\n  fn show(x) = \"i\""
+    end
+
+    test "declarations_block renders a declarations section" do
+      ast =
+        {:declarations_block, [],
+         [{:function_def, [name: "a", params: []], [{:literal, [subtype: :integer], 1}]}]}
+
+      assert FromMeta.to_source(ast) == "declarations\n  fn a() = 1"
+    end
+
+    test "typed_pattern renders `name: Type`" do
+      ast = {:typed_pattern, [], ["y", {:variable, [], "Int"}]}
+      assert FromMeta.to_source(ast) == "y: Int"
+    end
+
+    test "exception_handling renders try/catch" do
+      ast =
+        {:exception_handling, [],
+         [
+           {:function_call, [name: "risky"], []},
+           {:match_arm, [pattern: {:variable, [], "e"}], [{:literal, [subtype: :integer], 0}]}
+         ]}
+
+      assert FromMeta.to_source(ast) ==
+               "try\n  risky()\n  catch\n  e -> 0"
+    end
+  end
+
+  describe "Cure v0.36.0 record & GADT rendering" do
+    test "record construction renders `Name{field: value}`" do
+      ast =
+        {:function_call, [name: "Point", record: true],
+         [
+           {:pair, [field: :x], [{:literal, [subtype: :symbol], :x}, {:literal, [subtype: :integer], 0}]},
+           {:pair, [field: :y], [{:literal, [subtype: :symbol], :y}, {:literal, [subtype: :integer], 1}]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "Point{x: 0, y: 1}"
+    end
+
+    test "GADT constructor with named parameters" do
+      ast =
+        {:gadt_ctor, [name: "mk_pool"],
+         [
+           {:arrow_chain, [],
+            [
+              {:named_dom, [name: "capacity"], [{:variable, [], "Int"}]},
+              {:function_call, [name: "Pool"], []}
+            ]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "mk_pool : (capacity: Int) -> Pool()"
+    end
+
+    test "GADT constructor with a function-type body keeps arrows" do
+      ast =
+        {:gadt_ctor, [name: "bs"],
+         [
+           {:arrow_chain, [],
+            [
+              {:function_call, [name: "Below"], [{:variable, [], "n"}]},
+              {:function_call, [name: "Below"], [{:function_call, [name: "S"], [{:variable, [], "n"}]}]}
+            ]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "bs : Below(n) -> Below(S(n))"
+    end
+
+    test "operator function names are backticked" do
+      ast = {:function_def, [name: "==", params: [{:param, [], "a"}, {:param, [], "b"}]], []}
+      assert FromMeta.to_source(ast) == "fn `==`(a, b)"
+    end
+
+    test "reserved-word function names are backticked" do
+      ast = {:function_def, [name: "not", params: [{:param, [], "a"}]], []}
+      assert FromMeta.to_source(ast) == "fn `not`(a)"
+    end
+  end
+
+  describe "Cure v0.36.0 container nesting" do
+    test "a module container regroups the declarations that follow it" do
+      ast =
+        {:block, [],
+         [
+           {:container, [container_type: :module, name: "M"], []},
+           {:function_def, [name: "f", params: []], [{:literal, [subtype: :integer], 1}]}
+         ]}
+
+      assert FromMeta.to_source(ast) == "mod M\n  fn f() = 1"
+    end
+
+    test "an empty module container renders without a trailing body line" do
+      ast = {:block, [], [{:container, [container_type: :module, name: "M"], []}]}
+      assert FromMeta.to_source(ast) == "mod M"
+    end
+  end
+
+  describe "Cure v0.36.0 round-trip against the live compiler" do
+    @tag :cure_compiler
+    test "round-trips representative source through parse -> unparse" do
+      if ToMeta.available?() do
+        sources = [
+          "mod M\n  fn add(a: Int, b: Int) -> Int = a + b\n",
+          "mod M\n  rec Point\n    x: Int\n    y: Int\n",
+          "mod M\n  fn f(x: Int) -> Int =\n    match x\n      0 -> 1\n      _ -> 2\n",
+          "mod M\n  interface Show(t)\n    fn show(x: t) -> String\n"
+        ]
+
+        for source <- sources do
+          assert {:ok, out} = Cure.round_trip(source), "round-trip failed for #{inspect(source)}"
+          assert {:ok, _} = Cure.parse(out), "re-parse failed for #{inspect(out)}"
+        end
+      end
+    end
+  end
+
+  describe "Cure v0.36.0 normaliser coverage" do
+    test "normalises with_rematch_arm parent patterns" do
+      pattern = {:variable, [], "Some"}
+      ast = {:with_rematch_arm, [parent_patterns: [pattern], pattern: pattern], []}
+
+      assert {:with_rematch_arm, meta, []} = ToMeta.normalize(ast)
+      assert [normalised] = Keyword.get(meta, :parent_patterns)
+      assert normalised == pattern
+    end
+
+    test "normalises indexed_type params and indices" do
+      ast =
+        {:indexed_type, [name: "Vec", params: ["a"], indices: [{:param, [], "n"}]],
+         [{:gadt_ctor, [name: "Nil"], []}]}
+
+      assert {:indexed_type, meta, _body} = ToMeta.normalize(ast)
+      assert [{:param, [], "n"}] = Keyword.get(meta, :indices)
+      assert [{:param, [], "a"}] = Keyword.get(meta, :params)
+    end
+
+    test "normalises implementation for_type" do
+      ast = {:implementation, [interface: "Show", for_type: {:variable, [], "Int"}], []}
+      assert {:implementation, meta, []} = ToMeta.normalize(ast)
+      assert {:variable, _, "Int"} = Keyword.get(meta, :for_type)
+    end
+
+    test "flattens tactic invocation tokens into portable maps" do
+      token = %{__struct__: __MODULE__.FakeToken, type: :identifier, value: "simplify", line: 3, col: 5}
+      ast = {:tactic_script, [tactic_use_tokens: [token]], [{:simplify_command, [], []}]}
+
+      assert {:tactic_script, meta, _} = ToMeta.normalize(ast)
+
+      assert [%{type: :identifier, value: "simplify", line: 3, col: 5}] =
+               Keyword.get(meta, :tactic_use_tokens)
+    end
+
+    test "distils macro rule segments into a portable shape" do
+      rule = %{
+        kind: :syntax,
+        keyword: "transition",
+        segments: [
+          {:hole, %{name: "from", kind: "State"}},
+          {:lit, "-"},
+          {:lit, "->"},
+          {:repeat, {:hole, %{name: "to"}}}
+        ],
+        template: {:literal, [subtype: :integer], 1}
+      }
+
+      ast = {:macro_def, [name: "M"], [rule]}
+      assert {:macro_def, _meta, [normalised]} = ToMeta.normalize(ast)
+
+      assert normalised.segments == [
+               {:hole, "from"},
+               {:lit, "-"},
+               {:lit, "->"},
+               {:repeat, {:hole, "to"}}
+             ]
+    end
+  end
+
+  describe "Cure v0.36.0 FSM family rendering" do
+    test "renders transition rows from the distilled family grammar" do
+      grammar = %{
+        "definition" => %{
+          "transitions" => %{
+            fields: ["from", "event", "payload", "to", "when", "update"],
+            field_records: [
+              %{name: "from", shape: "Name", cardinality: :optional},
+              %{name: "event", shape: "Name", cardinality: :required},
+              %{name: "payload", shape: "Parameters", cardinality: :optional},
+              %{name: "to", shape: "Name", cardinality: :required},
+              %{name: "when", shape: "Expression", cardinality: :optional},
+              %{name: "update", shape: "Expression", cardinality: :optional}
+            ],
+            productions: [
+              %{
+                fields: ["from", "event", "to"],
+                segments: [
+                  {:hole, "from"},
+                  {:lit, "-"},
+                  {:lit, "-"},
+                  {:hole, "event"},
+                  {:lit, "-"},
+                  {:lit, "->"},
+                  {:hole, "to"}
+                ]
+              }
+            ]
+          }
+        }
+      }
+
+      element =
+        {:family_input, [family: "TransitionDefinition"],
+         [
+           {:variable, [], "Red"},
+           {:variable, [], "Timer"},
+           {:family_option, [present: false], []},
+           {:variable, [], "Green"},
+           {:family_option, [present: false], []},
+           {:family_option, [present: false], []}
+         ]}
+
+      computed =
+        {:computed_use, [keyword: "fsm", family_grammar: grammar],
+         [
+           {:variable, [], "derive_transition_table"},
+           {:macro_input, [keyword: "fsm"],
+            [
+              {:literal, [subtype: :symbol], :"Cure.P.Light"},
+              {:variable, [], "Data"},
+              {:family_input, [family: "TransitionTableDefinition"],
+               [
+                 {:family_option, [present: false], []},
+                 [],
+                 [element]
+               ]}
+            ]}
+         ]}
+
+      assert FromMeta.to_source(computed) =~ "Red --Timer--> Green"
+    end
+  end
 end

@@ -40,6 +40,7 @@ metastatic-*.tar
 /priv/parsers/javascript/node_modules/
 /priv/parsers/march/_build/
 /priv/parsers/sql/target/
+/priv/parsers/gleam/target/
 
 # Haskell parser artifacts
 *.hi
