@@ -218,6 +218,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
         emit_named_container(to_string(other || "container"), meta, body, indent)
     end
   end
+
   defp emit({:import, meta, _}, _indent) do
     source = meta[:source]
     items = meta[:items]
@@ -566,9 +567,14 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
 
     indices_str =
       case Keyword.fetch(meta, :indices) do
-        {:ok, []} -> " indices ()"
-        {:ok, indices} -> " indices (#{Enum.map_join(indices, ", ", &emit_type_param(&1, indent))})"
-        :error -> ""
+        {:ok, []} ->
+          " indices ()"
+
+        {:ok, indices} ->
+          " indices (#{Enum.map_join(indices, ", ", &emit_type_param(&1, indent))})"
+
+        :error ->
+          ""
       end
 
     header = "type #{name}#{params_str}#{indices_str}"
@@ -922,6 +928,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
     do: "update #{emit(value, indent)}"
 
   defp emit_clause(value, indent), do: "when #{emit(value, indent)}"
+
   defp emit_element_value({:payload, group}, indent) do
     Enum.map_join(group, ", ", &emit_payload(&1, indent))
   end
@@ -984,8 +991,11 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
         grammar
         |> Map.values()
         |> Enum.flat_map(fn
-          fields when is_map(fields) -> fields |> Map.values() |> Enum.flat_map(&field_records_of/1)
-          _ -> []
+          fields when is_map(fields) ->
+            fields |> Map.values() |> Enum.flat_map(&field_records_of/1)
+
+          _ ->
+            []
         end)
     end
   end
@@ -1280,6 +1290,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
 
     header <> blocks_str <> rows_str <> repeated_str
   end
+
   # A module-name argument in a macro header (`fsm Cure.Main.T`) is carried as
   # a symbol literal but renders as a bare dotted name, matching Cure's own
   # formatter.
@@ -1308,8 +1319,9 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   # A value that renders across several lines (a `case`/`match`/`pickup`
   # block) must be placed on its own indented lines rather than joined onto
   # the macro header.
-  defp multiline?({type, _meta, _}) when type in [:case_block, :pattern_match, :pickup, :with_abs],
-    do: true
+  defp multiline?({type, _meta, _})
+       when type in [:case_block, :pattern_match, :pickup, :with_abs],
+       do: true
 
   defp multiline?({:block, _meta, [_ | _]}), do: true
   defp multiline?(_), do: false
@@ -1357,9 +1369,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   # fields: an absent `:family_option` and an empty payload group
   # (`--Coin()-->`) are not surface syntax.
   defp drop_absent_values(values) do
-    values
-    |> Enum.reject(&absent_option?/1)
-    |> Enum.reject(&empty_payload_group?/1)
+    Enum.reject(values, &(absent_option?(&1) or empty_payload_group?(&1)))
   end
 
   # The trailing `when`/`update` continuation clauses of an element: the
@@ -1479,11 +1489,11 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   defp family_productions(grammar, family) when is_map(grammar) do
     direct = Map.get(grammar, family)
 
-    cond do
-      is_map(direct) and extract_productions(direct) != [] ->
-        extract_productions(direct)
+    case extract_productions(direct) do
+      [_ | _] = productions ->
+        productions
 
-      true ->
+      [] ->
         # The grammar is keyed by the *family* that owns the field (for
         # example "definition"), not by the element family itself, so the
         # element's productions live in a nested `grammar` record under one
@@ -1500,6 +1510,7 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
         end)
     end
   end
+
   defp family_productions(_grammar, _family), do: []
 
   # A distilled family field is `%{productions: [...], fields: [...]}`.
@@ -1551,7 +1562,10 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   # records it glued to the separator run that follows (`*--`), so split it
   # back out before the literals are coalesced.
   defp split_wildcard_marker([{:lit, "*"} | tail]), do: [{:lit, "*"} | tail]
-  defp split_wildcard_marker([{:lit, "*" <> rest} | tail]) when rest != "", do: [{:lit, "*"}, {:lit, rest} | tail]
+
+  defp split_wildcard_marker([{:lit, "*" <> rest} | tail]) when rest != "",
+    do: [{:lit, "*"}, {:lit, rest} | tail]
+
   defp split_wildcard_marker(segments), do: segments
 
   # Fold consecutive `{:lit, _}` segments into one.
@@ -1600,10 +1614,13 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   defp separator_run?(text), do: Regex.match?(~r/\A[-=<>|:]+\z/, text)
 
   defp render_hole(nil, _indent), do: ""
-  defp render_hole({:payload, group}, indent), do: Enum.map_join(group, ", ", &emit_payload(&1, indent))
+
+  defp render_hole({:payload, group}, indent),
+    do: Enum.map_join(group, ", ", &emit_payload(&1, indent))
 
   defp render_hole({:payload_group, group}, indent),
     do: Enum.map_join(group, ", ", &emit_payload(&1, indent))
+
   defp render_hole(value, indent), do: emit(value, indent)
 
   # A transition payload is a list of `:param` nodes; only the parameter
@@ -1629,7 +1646,15 @@ defmodule Metastatic.Adapters.Cure.FromMeta do
   # A function body that renders across several lines (`match`, `pickup`,
   # `with`, a `case` block) starts on its own line after the `=`.
   defp multiline_body?({type, _meta, _})
-       when type in [:pattern_match, :pickup, :with_abs, :case_block, :exception_handling, :proof_chain, :induction],
+       when type in [
+              :pattern_match,
+              :pickup,
+              :with_abs,
+              :case_block,
+              :exception_handling,
+              :proof_chain,
+              :induction
+            ],
        do: true
 
   defp multiline_body?({:block, _meta, [_ | _]}), do: true

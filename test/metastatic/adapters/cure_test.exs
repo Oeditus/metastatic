@@ -312,7 +312,9 @@ defmodule Metastatic.Adapters.CureTest do
         {:match_arm,
          [
            pattern: {:variable, [], "n"},
-           guard: {:binary_op, [operator: :>], [{:variable, [], "n"}, {:literal, [subtype: :integer], 0}]}
+           guard:
+             {:binary_op, [operator: :>],
+              [{:variable, [], "n"}, {:literal, [subtype: :integer], 0}]}
          ], [{:literal, [subtype: :integer], 1}]}
 
       assert FromMeta.to_source(ast) == "n when n > 0 -> 1"
@@ -353,7 +355,8 @@ defmodule Metastatic.Adapters.CureTest do
       ast =
         {:comprehension, [],
          [
-           {:binary_op, [operator: :*], [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]},
+           {:binary_op, [operator: :*],
+            [{:variable, [], "x"}, {:literal, [subtype: :integer], 2}]},
            {:generator, [], [{:variable, [], "x"}, {:variable, [], "xs"}]}
          ]}
 
@@ -380,7 +383,8 @@ defmodule Metastatic.Adapters.CureTest do
         {:refinement_type, [binder: "x"],
          [
            {:variable, [], "Int"},
-           {:binary_op, [operator: :!=], [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]}
+           {:binary_op, [operator: :!=],
+            [{:variable, [], "x"}, {:literal, [subtype: :integer], 0}]}
          ]}
 
       assert FromMeta.to_source(ast) == "{x: Int | x != 0}"
@@ -413,7 +417,10 @@ defmodule Metastatic.Adapters.CureTest do
     test "quoted_syntax and splice" do
       ast =
         {:quoted_syntax, [],
-         [{:tuple, [], [{:literal, [subtype: :symbol], :ok}, {:splice, [], [{:variable, [], "p"}]}]}]}
+         [
+           {:tuple, [],
+            [{:literal, [subtype: :symbol], :ok}, {:splice, [], [{:variable, [], "p"}]}]}
+         ]}
 
       assert FromMeta.to_source(ast) == "quote %[:ok, $(p)]"
     end
@@ -458,7 +465,11 @@ defmodule Metastatic.Adapters.CureTest do
     test "interface renders `interface Name(params)`" do
       ast =
         {:interface, [name: "Show", params: ["t"], requires: []],
-         [{:function_def, [name: "show", params: [{:param, [], "x"}], return_type: {:variable, [], "String"}], []}]}
+         [
+           {:function_def,
+            [name: "show", params: [{:param, [], "x"}], return_type: {:variable, [], "String"}],
+            []}
+         ]}
 
       assert FromMeta.to_source(ast) ==
                "interface Show(t)\n  fn show(x) -> String"
@@ -467,7 +478,10 @@ defmodule Metastatic.Adapters.CureTest do
     test "implementation renders `implementation I for T`" do
       ast =
         {:implementation, [interface: "Show", for_type: {:variable, [], "Int"}],
-         [{:function_def, [name: "show", params: [{:param, [], "x"}]], [{:literal, [subtype: :string], "i"}]}]}
+         [
+           {:function_def, [name: "show", params: [{:param, [], "x"}]],
+            [{:literal, [subtype: :string], "i"}]}
+         ]}
 
       assert FromMeta.to_source(ast) ==
                "implementation Show for Int\n  fn show(x) = \"i\""
@@ -504,8 +518,10 @@ defmodule Metastatic.Adapters.CureTest do
       ast =
         {:function_call, [name: "Point", record: true],
          [
-           {:pair, [field: :x], [{:literal, [subtype: :symbol], :x}, {:literal, [subtype: :integer], 0}]},
-           {:pair, [field: :y], [{:literal, [subtype: :symbol], :y}, {:literal, [subtype: :integer], 1}]}
+           {:pair, [field: :x],
+            [{:literal, [subtype: :symbol], :x}, {:literal, [subtype: :integer], 0}]},
+           {:pair, [field: :y],
+            [{:literal, [subtype: :symbol], :y}, {:literal, [subtype: :integer], 1}]}
          ]}
 
       assert FromMeta.to_source(ast) == "Point{x: 0, y: 1}"
@@ -532,7 +548,8 @@ defmodule Metastatic.Adapters.CureTest do
            {:arrow_chain, [],
             [
               {:function_call, [name: "Below"], [{:variable, [], "n"}]},
-              {:function_call, [name: "Below"], [{:function_call, [name: "S"], [{:variable, [], "n"}]}]}
+              {:function_call, [name: "Below"],
+               [{:function_call, [name: "S"], [{:variable, [], "n"}]}]}
             ]}
          ]}
 
@@ -614,7 +631,14 @@ defmodule Metastatic.Adapters.CureTest do
     end
 
     test "flattens tactic invocation tokens into portable maps" do
-      token = %{__struct__: __MODULE__.FakeToken, type: :identifier, value: "simplify", line: 3, col: 5}
+      token = %{
+        __struct__: __MODULE__.FakeToken,
+        type: :identifier,
+        value: "simplify",
+        line: 3,
+        col: 5
+      }
+
       ast = {:tactic_script, [tactic_use_tokens: [token]], [{:simplify_command, [], []}]}
 
       assert {:tactic_script, meta, _} = ToMeta.normalize(ast)

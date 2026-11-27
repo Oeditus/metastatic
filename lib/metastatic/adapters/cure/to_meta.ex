@@ -534,6 +534,7 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
 
     {type, meta, normalize_children(children, opts)}
   end
+
   def normalize({:variable, meta, name}, opts) when is_binary(name) or is_atom(name) do
     {:variable, clean_meta(meta, opts), name}
   end
@@ -705,7 +706,11 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
   defp normalize_timeout(meta, opts) do
     case Keyword.get(meta, :timeout) do
       {timeout_expr, timeout_body} ->
-        Keyword.put(meta, :timeout, {normalize(timeout_expr, opts), normalize(timeout_body, opts)})
+        Keyword.put(
+          meta,
+          :timeout,
+          {normalize(timeout_expr, opts), normalize(timeout_body, opts)}
+        )
 
       _ ->
         meta
@@ -861,8 +866,8 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
     grammar = Map.get(field, :grammar)
     name = Map.get(field, :name)
 
-    cond do
-      is_map(grammar) ->
+    case grammar do
+      %{} ->
         productions =
           grammar
           |> Map.get(:productions, [])
@@ -873,11 +878,14 @@ defmodule Metastatic.Adapters.Cure.ToMeta do
         field_records = grammar |> Map.get(:fields, []) |> Enum.map(&distill_field_record/1)
 
         case {productions, field_names} do
-          {[], []} -> nil
-          _ -> {name, %{productions: productions, fields: field_names, field_records: field_records}}
+          {[], []} ->
+            nil
+
+          _ ->
+            {name, %{productions: productions, fields: field_names, field_records: field_records}}
         end
 
-      true ->
+      _ ->
         nil
     end
   end
