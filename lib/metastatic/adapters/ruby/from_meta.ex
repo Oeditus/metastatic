@@ -167,14 +167,15 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   # M2.1 Core Layer - Assignment (New 3-tuple format)
 
   def transform({:assignment, meta, [target, value]}, _metadata) when is_list(meta) do
-    scope = Keyword.get(meta, :scope, :local)
-
-    # Extract variable name from target
-    name =
+    # Extract variable name and scope from target, falling back to assignment meta
+    {name, target_scope} =
       case target do
-        {:variable, _, n} -> n
-        n when is_binary(n) -> n
+        {:variable, var_meta, n} when is_list(var_meta) -> {n, Keyword.get(var_meta, :scope)}
+        {:variable, _, n} -> {n, nil}
+        n when is_binary(n) -> {n, nil}
       end
+
+    scope = target_scope || Keyword.get(meta, :scope, :local)
 
     with {:ok, value_ast} <- transform(value, %{}) do
       case scope do

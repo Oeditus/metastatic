@@ -48,6 +48,16 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
     end
   end
 
+  @doc """
+  Returns `true` when a compiled Agda parser or `ghc` + bundled sources are available.
+  """
+  @spec available?() :: boolean()
+  def available? do
+    File.exists?(Priv.parser_path(@bin_rel_path)) or
+      Priv.find_executable("metastatic-agda-parser") != nil or
+      (File.dir?(Priv.parser_path(@parser_rel_dir)) and Priv.find_executable("ghc") != nil)
+  end
+
   defp ensure_compiled_and_run(source, parser_dir, bin_path, ghc) do
     File.mkdir_p!(Path.dirname(bin_path))
 

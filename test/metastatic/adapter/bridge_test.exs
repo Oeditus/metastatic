@@ -18,6 +18,18 @@ defmodule Metastatic.Adapter.BridgeTest do
                Bridge.decode(~s({"ok": true, "ast": {"type": "File"}}))
     end
 
+    test "extracts partial-parse unsupported metadata when non-empty" do
+      payload =
+        ~s({"ok": true, "ast": [{"Select": {}}], "unsupported": [{"source": "DO $$", "reason": "unsupported"}]})
+
+      assert {:ok, [%{"Select" => %{}}], %{unsupported: [%{"source" => "DO $$"}]}} =
+               Bridge.decode(payload)
+    end
+
+    test "omits metadata when unsupported list is empty" do
+      assert {:ok, []} = Bridge.decode(~s({"ok": true, "ast": [], "unsupported": []}))
+    end
+
     test "extracts the source payload" do
       assert {:ok, "x + 5"} = Bridge.decode(~s({"ok": true, "source": "x + 5"}))
     end

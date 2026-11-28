@@ -59,7 +59,6 @@ defmodule Metastatic.Adapters.Go.ToMeta do
 
     meta =
       [
-        language: :go,
         go_kind: kind,
         original_go: Map.drop(node, ["children", "type_node", "pattern", "imports"])
       ]
@@ -72,6 +71,12 @@ defmodule Metastatic.Adapters.Go.ToMeta do
 
     {type, attributes, value} = abstract(kind, node, children)
     meta = Keyword.merge(meta, attributes)
+
+    meta =
+      if type in [:container, :function_def, :import, :language_specific],
+        do: Keyword.put_new(meta, :language, :go),
+        else: meta
+
     meta = if type == :literal, do: Keyword.put(meta, :go_baseline, value), else: meta
     {type, meta, value}
   end

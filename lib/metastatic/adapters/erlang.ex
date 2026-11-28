@@ -113,6 +113,8 @@ defmodule Metastatic.Adapters.Erlang do
     end
   end
 
+  def parse(other), do: {:error, "Erlang source must be a binary, got: #{inspect(other)}"}
+
   defp parse_tokens(tokens) do
     case :erl_parse.parse_exprs(tokens) do
       {:ok, [single]} ->
@@ -171,19 +173,19 @@ defmodule Metastatic.Adapters.Erlang do
   end
 
   @impl true
-  def to_meta(erlang_ast) do
+  def to_meta(erlang_ast, opts \\ []) do
     erlang_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:erlang)
+    |> Metastatic.Adapter.enrich(:erlang, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
-  def unparse(erlang_ast) do
+  def unparse(erlang_ast) when is_tuple(erlang_ast) do
     # Use erl_pp (Erlang pretty printer) to format the AST.
     # `:erl_pp.expr/1` renders an expression *without* its terminating
     # period, so we append one to keep the output re-parseable by
@@ -195,6 +197,8 @@ defmodule Metastatic.Adapters.Erlang do
     e -> {:error, "Unparse failed: #{Exception.message(e)}"}
   end
 
+  def unparse(other), do: {:error, "Invalid Erlang AST: #{inspect(other)}"}
+
   # Append the Erlang expression terminator (`.`) unless one is present.
   defp ensure_terminator(source) do
     if String.ends_with?(source, "."), do: source, else: source <> "."
@@ -203,5 +207,10 @@ defmodule Metastatic.Adapters.Erlang do
   @impl true
   def file_extensions do
     [".erl", ".hrl"]
+  end
+
+  @impl true
+  def available? do
+    Code.ensure_loaded?(:erl_scan) and Code.ensure_loaded?(:erl_parse)
   end
 end

@@ -26,7 +26,7 @@ defmodule Metastatic.Adapters.Python.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
-    with :ok <- available?(),
+    with :ok <- check_available(),
          {:ok, result} <- run_script(@parser_path, source, ".py") do
       Bridge.decode(result)
     end
@@ -44,15 +44,21 @@ defmodule Metastatic.Adapters.Python.Subprocess do
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
     with {:ok, json} <- Bridge.encode(ast),
-         :ok <- available?(),
+         :ok <- check_available(),
          {:ok, result} <- run_script(@unparser_path, json, ".json") do
       Bridge.decode(result)
     end
   end
 
+  @doc """
+  Returns `true` when the Python parser script and runtime are available.
+  """
+  @spec available?() :: boolean()
+  def available?, do: check_available() == :ok
+
   # Private Functions
 
-  defp available? do
+  defp check_available do
     cond do
       not File.exists?(Priv.parser_path(@parser_path)) ->
         {:error, "Python parser unavailable: #{@parser_path} is missing from the package"}

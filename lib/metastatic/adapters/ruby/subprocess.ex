@@ -26,7 +26,7 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   """
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
-    with :ok <- available?(),
+    with :ok <- check_available(),
          {:ok, result} <- run_ruby_script(@parser_path, source, ".rb") do
       decode_parse(result)
     end
@@ -58,16 +58,22 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
     # the other bridges which take the bare AST. `Bridge.encode/1` encodes the
     # value as given, so the wrapper is applied here.
     with {:ok, json} <- Bridge.encode(%{ast: ast}),
-         :ok <- available?(),
+         :ok <- check_available(),
          {:ok, result} <- run_ruby_script(@unparser_path, json, ".json") do
       # The unparser emits source directly, not JSON.
       {:ok, String.trim(result)}
     end
   end
 
+  @doc """
+  Returns `true` when the Ruby parser script and runtime are available.
+  """
+  @spec available?() :: boolean()
+  def available?, do: check_available() == :ok
+
   # Private Functions
 
-  defp available? do
+  defp check_available do
     cond do
       not File.exists?(Priv.parser_path(@parser_path)) ->
         {:error, "Ruby parser unavailable: #{@parser_path} is missing from the package"}

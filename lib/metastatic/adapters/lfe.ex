@@ -118,6 +118,8 @@ defmodule Metastatic.Adapters.Lfe do
     Reader.parse(source)
   end
 
+  def parse(other), do: {:error, "LFE source must be a binary, got: #{inspect(other)}"}
+
   @doc """
   Transform LFE forms to MetaAST, optionally expanding macros.
 
@@ -152,11 +154,15 @@ defmodule Metastatic.Adapters.Lfe do
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
+  def unparse(ref) when is_reference(ref) or is_pid(ref) or is_port(ref) do
+    {:error, "Invalid LFE AST: #{inspect(ref)}"}
+  end
+
   def unparse(forms) do
     Printer.print(forms)
   end
@@ -215,6 +221,7 @@ defmodule Metastatic.Adapters.Lfe do
       iex> is_boolean(Metastatic.Adapters.Lfe.available?())
       true
   """
+  @impl true
   @spec available?() :: boolean()
   def available?, do: Reader.available?()
 

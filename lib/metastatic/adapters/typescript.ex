@@ -33,25 +33,34 @@ defmodule Metastatic.Adapters.TypeScript do
     Subprocess.parse(source, :typescript)
   end
 
+  def parse(other), do: {:error, "TypeScript source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(ts_ast) do
+  def to_meta(ts_ast, opts \\ []) do
     ts_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:typescript)
+    |> Metastatic.Adapter.enrich(:typescript, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
-  def unparse(ts_ast) do
+  def unparse(ts_ast) when is_map(ts_ast) do
     Subprocess.unparse(ts_ast)
   end
+
+  def unparse(other), do: {:error, "Invalid TypeScript AST: #{inspect(other)}"}
 
   @impl true
   def file_extensions do
     [".ts", ".tsx"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

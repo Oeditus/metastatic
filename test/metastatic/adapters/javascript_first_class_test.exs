@@ -159,7 +159,7 @@ defmodule Metastatic.Adapters.JavaScriptFirstClassTest do
       {:function_def, meta, _} = ast
 
       assert [{:param, param_meta, "_"}] = Keyword.get(meta, :params)
-      assert {:collection, coll_meta, _} = Keyword.get(param_meta, :pattern)
+      assert {:map, coll_meta, _} = Keyword.get(param_meta, :pattern)
       assert Keyword.get(coll_meta, :pattern) == true
     end
 
@@ -179,13 +179,12 @@ defmodule Metastatic.Adapters.JavaScriptFirstClassTest do
     test "object destructuring preserves the pattern marker" do
       ast = assert_first_class("const {a, b: c} = o;")
 
-      assert [{:collection, meta, _}] =
+      assert [{:map, meta, _}] =
                ast
                |> AST.prewalker()
-               |> Enum.filter(&match?({:collection, _, _}, &1))
+               |> Enum.filter(&match?({:map, _, _}, &1))
 
       assert Keyword.get(meta, :pattern) == true
-      assert Keyword.get(meta, :subtype) == :map
     end
 
     test "shorthand properties are marked as shorthand" do
@@ -202,7 +201,7 @@ defmodule Metastatic.Adapters.JavaScriptFirstClassTest do
 
     test "an object literal is not marked as a pattern" do
       ast = assert_first_class("const o = {a: 1};")
-      {:assignment, _, [_, {:collection, meta, _}]} = ast
+      {:assignment, _, [_, {:map, meta, _}]} = ast
 
       refute Keyword.get(meta, :pattern)
     end

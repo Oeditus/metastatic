@@ -33,10 +33,13 @@ defmodule Metastatic.CrossLanguageConformanceTest do
   # across the listed languages. All use literals so that no identifier-scope
   # ambiguity (see moduledoc) can affect the result.
   @matrix [
-    {"1 + 2", [:python, :elixir, :erlang, :ruby, :javascript, :rust]},
-    {"3 * 4", [:python, :elixir, :erlang, :ruby, :javascript, :rust]},
-    {"10 - 7", [:python, :elixir, :erlang, :ruby, :javascript, :rust]},
-    {"8 / 2", [:python, :elixir, :erlang, :ruby, :javascript, :rust]}
+    {"1 + 2", [:python, :elixir, :erlang, :ruby, :javascript, :typescript, :rust, :go, :cure, :haskell, :agda, :march]},
+    {"3 * 4", [:python, :elixir, :erlang, :ruby, :javascript, :typescript, :rust, :go, :cure, :haskell, :agda, :march]},
+    {"10 - 7", [:python, :elixir, :erlang, :ruby, :javascript, :typescript, :rust, :go, :cure, :haskell, :agda, :march]},
+    {"8 / 2", [:python, :elixir, :erlang, :ruby, :javascript, :typescript, :rust, :go, :cure, :haskell, :agda, :march]},
+    {"foo(1, 2)", [:python, :elixir, :erlang, :ruby, :javascript, :typescript, :rust, :go]},
+    {"[1, 2, 3]", [:python, :elixir, :erlang, :ruby, :javascript, :typescript]},
+    {"x = 42", [:python, :ruby]}
   ]
 
   describe "cross-language MetaAST equivalence" do
@@ -85,6 +88,27 @@ defmodule Metastatic.CrossLanguageConformanceTest do
       b = {:literal, [subtype: :integer, line: 99, col: 7], 42}
 
       assert AST.canonicalize(a) == AST.canonicalize(b)
+    end
+
+    test "metadata key order does not affect canonical equivalence" do
+      a =
+        {:binary_op, [operator: :+, category: :arithmetic, line: 1],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+
+      b =
+        {:binary_op, [category: :arithmetic, operator: :+, line: 5],
+         [{:literal, [subtype: :integer], 1}, {:literal, [subtype: :integer], 2}]}
+
+      assert AST.canonicalize(a) == AST.canonicalize(b)
+    end
+
+    test "LFE single-expression arithmetic matches Python and Elixir" do
+      if adapter_available?(:lfe) do
+        {:ok, lfe} = Adapter.abstract(Metastatic.Adapters.Lfe, "(+ 1 2)", :lfe)
+        {:ok, ex} = Adapter.abstract(Metastatic.Adapters.Elixir, "1 + 2", :elixir)
+
+        assert AST.canonicalize(lfe.ast) == AST.canonicalize(ex.ast)
+      end
     end
 
     test "semantic metadata differences are detected" do

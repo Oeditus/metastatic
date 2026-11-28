@@ -80,25 +80,34 @@ defmodule Metastatic.Adapters.Ruby do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "Ruby source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(ruby_ast) do
+  def to_meta(ruby_ast, opts \\ []) do
     ruby_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:ruby)
+    |> Metastatic.Adapter.enrich(:ruby, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
-  def unparse(ruby_ast) do
+  def unparse(ruby_ast) when is_map(ruby_ast) do
     Subprocess.unparse(ruby_ast)
   end
+
+  def unparse(other), do: {:error, "Invalid Ruby AST: #{inspect(other)}"}
 
   @impl true
   def file_extensions do
     [".rb"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

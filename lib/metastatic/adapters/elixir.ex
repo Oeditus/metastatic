@@ -116,6 +116,8 @@ defmodule Metastatic.Adapters.Elixir do
     end
   end
 
+  def parse(other), do: {:error, "Elixir source must be a binary, got: #{inspect(other)}"}
+
   @doc """
   Transform Elixir AST to MetaAST, optionally expanding macros via ExPanda.
 
@@ -151,11 +153,15 @@ defmodule Metastatic.Adapters.Elixir do
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
+  def unparse(ref) when is_reference(ref) or is_pid(ref) or is_port(ref) do
+    {:error, "Invalid Elixir AST: #{inspect(ref)}"}
+  end
+
   def unparse(elixir_ast) do
     {:ok, Macro.to_string(elixir_ast)}
   rescue
@@ -166,6 +172,9 @@ defmodule Metastatic.Adapters.Elixir do
   def file_extensions do
     [".ex", ".exs"]
   end
+
+  @impl true
+  def available?, do: true
 
   @impl true
   def extract_children(ast) when is_tuple(ast) do

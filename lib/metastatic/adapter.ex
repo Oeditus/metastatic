@@ -149,7 +149,8 @@ defmodule Metastatic.Adapter do
       parse("x + 5")
       # => {:ok, %{"type" => "BinaryExpression", "operator" => "+", ...}}
   """
-  @callback parse(source) :: {:ok, native_ast} | {:error, reason :: term()}
+  @callback parse(source) ::
+              {:ok, native_ast} | {:ok, native_ast, metadata} | {:error, reason :: term()}
 
   @doc """
   Transform native AST to MetaAST (M1 → M2 abstraction).
@@ -315,7 +316,21 @@ defmodule Metastatic.Adapter do
   """
   @callback extract_children(native_ast) :: [native_ast]
 
-  @optional_callbacks validate_mutation: 2, extract_children: 1, to_meta: 2
+  @doc """
+  Returns `true` when the adapter's underlying parser toolchain is available
+  in the current environment.
+
+  Native BEAM adapters (Elixir, Erlang, Markdown) return `true` unconditionally;
+  subprocess-backed adapters check for their bridge binary or runtime without
+  raising.
+
+  ## Default Implementation
+
+  When not implemented, `Metastatic.Adapter.available?/1` assumes `true`.
+  """
+  @callback available?() :: boolean()
+
+  @optional_callbacks validate_mutation: 2, extract_children: 1, to_meta: 2, available?: 0
 
   # ----- Helper Functions -----
 
@@ -467,6 +482,27 @@ defmodule Metastatic.Adapter do
   def reify(adapter, %Document{ast: meta_ast, metadata: metadata}) do
     with {:ok, native_ast} <- adapter.from_meta(meta_ast, metadata) do
       adapter.unparse(native_ast)
+    end
+  end
+
+  @doc """
+  Returns `true` when `adapter`'s underlying toolchain is available.
+
+  Calls `adapter.available?/0` when exported; otherwise assumes `true`.
+
+  ## Examples
+
+      iex> Metastatic.Adapter.available?(Metastatic.Adapters.Elixir)
+      true
+  """
+  @spec available?(module()) :: boolean()
+  def available?(adapter) when is_atom(adapter) do
+    Code.ensure_loaded(adapter)
+
+    if function_exported?(adapter, :available?, 0) do
+      adapter.available?()
+    else
+      true
     end
   end
 

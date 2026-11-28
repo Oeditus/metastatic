@@ -31,11 +31,13 @@ defmodule Metastatic.Adapters.Agda do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "Agda source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(agda_ast) do
+  def to_meta(agda_ast, opts \\ []) do
     agda_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:agda)
+    |> Metastatic.Adapter.enrich(:agda, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
@@ -55,5 +57,10 @@ defmodule Metastatic.Adapters.Agda do
   @impl true
   def file_extensions do
     [".agda", ".lagda"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

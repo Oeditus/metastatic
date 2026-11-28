@@ -113,6 +113,12 @@ defmodule Metastatic.Adapters.Java.Subprocess do
     if File.regular?(path), do: path, else: nil
   end
 
+  @doc """
+  Returns `true` when the Java bridge source and a working JDK are available.
+  """
+  @spec available?() :: boolean()
+  def available?, do: bridge_available?() == :ok
+
   # Private
 
   defp bridge_available? do

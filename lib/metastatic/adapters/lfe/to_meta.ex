@@ -97,6 +97,12 @@ defmodule Metastatic.Adapters.Lfe.ToMeta do
       :block
   """
   @spec transform([{term(), integer()}] | term()) :: {:ok, term(), map()} | {:error, String.t()}
+  def transform([{sexpr, line}]) do
+    with {:ok, node} <- transform(sexpr, line, :expr) do
+      {:ok, node, %{language: :lfe}}
+    end
+  end
+
   def transform([{_sexpr, _line} | _] = forms) do
     {:ok, statements} = transform_forms(forms)
     {:ok, {:block, [scope: :module], statements}, %{language: :lfe}}

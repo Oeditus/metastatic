@@ -34,6 +34,16 @@ defmodule Metastatic.Adapters.March.Subprocess do
     end
   end
 
+  @doc """
+  Returns `true` when compiled March binaries or `dune` are available.
+  """
+  @spec available?() :: boolean()
+  def available? do
+    File.exists?(Priv.parser_path(@parser_bin)) or
+      Priv.find_executable("metastatic-march-parser") != nil or
+      Priv.find_executable("dune") != nil
+  end
+
   # Helpers
 
   defp run(input, bin_rel_path, global_name, dune_target) do

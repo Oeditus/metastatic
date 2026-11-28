@@ -1806,6 +1806,7 @@ defmodule Metastatic.AST do
     canonical_meta =
       meta
       |> Keyword.take(@semantic_meta_keys)
+      |> Enum.sort_by(fn {key, _} -> key end)
       |> Enum.map(fn {key, value} -> {key, canonicalize_meta_value(value)} end)
 
     {type, canonical_meta, canonicalize(children)}

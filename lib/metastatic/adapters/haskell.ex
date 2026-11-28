@@ -30,11 +30,13 @@ defmodule Metastatic.Adapters.Haskell do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "Haskell source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(haskell_ast) do
+  def to_meta(haskell_ast, opts \\ []) do
     haskell_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:haskell)
+    |> Metastatic.Adapter.enrich(:haskell, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
@@ -54,5 +56,10 @@ defmodule Metastatic.Adapters.Haskell do
   @impl true
   def file_extensions do
     [".hs", ".lhs"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

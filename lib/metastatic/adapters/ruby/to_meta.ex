@@ -412,7 +412,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, value_meta, _} <- transform(value) do
       {:ok,
        add_location(
-         {:assignment, [scope: :local], [{:variable, [], var_name}, value_meta]},
+         {:assignment, [], [{:variable, [scope: :local], var_name}, value_meta]},
          ast
        ), %{scope: :local}}
     end
@@ -441,7 +441,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, value_meta, _} <- transform(value) do
       {:ok,
        add_location(
-         {:assignment, [scope: :instance], [{:variable, [], var_name}, value_meta]},
+         {:assignment, [], [{:variable, [scope: :instance], var_name}, value_meta]},
          ast
        ), %{scope: :instance}}
     end
@@ -462,7 +462,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, value_meta, _} <- transform(value) do
       {:ok,
        add_location(
-         {:assignment, [scope: :class], [{:variable, [], var_name}, value_meta]},
+         {:assignment, [], [{:variable, [scope: :class], var_name}, value_meta]},
          ast
        ), %{scope: :class}}
     end
@@ -483,7 +483,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, value_meta, _} <- transform(value) do
       {:ok,
        add_location(
-         {:assignment, [scope: :global], [{:variable, [], var_name}, value_meta]},
+         {:assignment, [], [{:variable, [scope: :global], var_name}, value_meta]},
          ast
        ), %{scope: :global}}
     end

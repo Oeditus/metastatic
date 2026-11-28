@@ -42,7 +42,7 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   """
   @spec parse(String.t(), :javascript | :typescript) :: {:ok, map()} | {:error, String.t()}
   def parse(source, dialect \\ :javascript) when is_binary(source) do
-    with :ok <- available?(),
+    with :ok <- check_available(),
          {:ok, result} <- run_node_script(@parser_path, source, ".js", dialect_args(dialect)) do
       Bridge.decode(result)
     end
@@ -65,15 +65,21 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
     with {:ok, json} <- Bridge.encode(ast),
-         :ok <- available?(),
+         :ok <- check_available(),
          {:ok, result} <- run_node_script(@unparser_path, json, ".json", []) do
       Bridge.decode(result)
     end
   end
 
+  @doc """
+  Returns `true` when the Node.js runtime and JavaScript parser script are available.
+  """
+  @spec available?() :: boolean()
+  def available?, do: check_available() == :ok
+
   # Private Functions
 
-  defp available? do
+  defp check_available do
     cond do
       not File.exists?(Priv.parser_path(@parser_path)) ->
         {:error, "JavaScript parser unavailable: #{@parser_path} is missing from the package"}

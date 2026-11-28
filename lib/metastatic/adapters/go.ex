@@ -28,6 +28,7 @@ defmodule Metastatic.Adapters.Go do
   @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source), do: Subprocess.parse(source)
+  def parse(other), do: {:error, "Go source must be a binary, got: #{inspect(other)}"}
 
   @doc """
   Abstracts a native Go AST into MetaAST with semantic enrichment.
@@ -40,8 +41,12 @@ defmodule Metastatic.Adapters.Go do
       :binary_op
   """
   @impl true
-  @spec to_meta(map()) :: {:ok, Metastatic.AST.meta_ast(), map()} | {:error, String.t()}
-  def to_meta(ast), do: ast |> ToMeta.transform() |> Metastatic.Adapter.enrich(:go)
+  @spec to_meta(map(), keyword()) :: {:ok, Metastatic.AST.meta_ast(), map()} | {:error, String.t()}
+  def to_meta(ast, opts \\ []) do
+    ast
+    |> ToMeta.transform()
+    |> Metastatic.Adapter.enrich(:go, Keyword.take(opts, [:enrich]))
+  end
 
   @doc """
   Reifies MetaAST into a native Go AST.
@@ -54,7 +59,7 @@ defmodule Metastatic.Adapters.Go do
   """
   @impl true
   @spec from_meta(Metastatic.AST.meta_ast(), map()) :: {:ok, map()} | {:error, String.t()}
-  def from_meta(ast, metadata), do: FromMeta.transform(ast, metadata)
+  def from_meta(ast, metadata \\ %{}), do: FromMeta.transform(ast, metadata)
 
   @doc """
   Prints a native Go AST using `go/format`.
@@ -67,7 +72,8 @@ defmodule Metastatic.Adapters.Go do
   """
   @impl true
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
-  def unparse(ast), do: Subprocess.unparse(ast)
+  def unparse(ast) when is_map(ast), do: Subprocess.unparse(ast)
+  def unparse(other), do: {:error, "Invalid Go AST: #{inspect(other)}"}
 
   @doc """
   Returns the Go source file extension.
@@ -80,4 +86,11 @@ defmodule Metastatic.Adapters.Go do
   @impl true
   @spec file_extensions() :: [String.t()]
   def file_extensions, do: [".go"]
+
+  @doc """
+  Returns `true` when Go parsing is available in this environment.
+  """
+  @impl true
+  @spec available?() :: boolean()
+  def available?, do: Subprocess.available?()
 end

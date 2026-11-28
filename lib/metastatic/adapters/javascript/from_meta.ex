@@ -259,11 +259,9 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
            }}
         end
 
-      match?([_ | _], children) ->
-        [callee | args] = children
-
-        with {:ok, callee_babel} <- to_babel(callee),
-             {:ok, args_babel} <- to_babel_list(args) do
+      is_list(children) ->
+        with {:ok, callee_babel} <- callee_to_babel(meta[:callee], name),
+             {:ok, args_babel} <- to_babel_list(children) do
           type =
             cond do
               meta[:constructor] -> "NewExpression"
@@ -565,6 +563,26 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
   end
 
   # Collections & Objects
+  defp to_babel({:list, meta, elements}) when is_list(elements) do
+    with {:ok, babel_elements} <- to_babel_list(elements) do
+      if meta[:pattern] == true do
+        {:ok, %{"type" => "ArrayPattern", "elements" => babel_elements}}
+      else
+        {:ok, %{"type" => "ArrayExpression", "elements" => babel_elements}}
+      end
+    end
+  end
+
+  defp to_babel({:map, meta, elements}) when is_list(elements) do
+    with {:ok, babel_elements} <- to_babel_list(elements) do
+      if meta[:pattern] == true do
+        {:ok, %{"type" => "ObjectPattern", "properties" => babel_elements}}
+      else
+        {:ok, %{"type" => "ObjectExpression", "properties" => babel_elements}}
+      end
+    end
+  end
+
   defp to_babel({:collection, meta, elements}) do
     pattern? = meta[:pattern] == true
     map? = meta[:subtype] == :map
@@ -872,4 +890,27 @@ defmodule Metastatic.Adapters.JavaScript.FromMeta do
   defp unparse_assignment_op(:"*="), do: "*="
   defp unparse_assignment_op(:"/="), do: "/="
   defp unparse_assignment_op(op), do: to_string(op)
+
+  defp callee_to_babel(nil, name) when is_binary(name) do
+    case String.split(name, ".") do
+      [single] ->
+        {:ok, %{"type" => "Identifier", "name" => single}}
+
+      [head | tail] ->
+        member =
+          Enum.reduce(tail, %{"type" => "Identifier", "name" => head}, fn prop, obj ->
+            %{
+              "type" => "MemberExpression",
+              "object" => obj,
+              "property" => %{"type" => "Identifier", "name" => prop},
+              "computed" => false
+            }
+          end)
+
+        {:ok, member}
+    end
+  end
+
+  defp callee_to_babel(nil, _), do: {:error, "Missing function call name or callee"}
+  defp callee_to_babel(callee_ast, _name), do: to_babel(callee_ast)
 end

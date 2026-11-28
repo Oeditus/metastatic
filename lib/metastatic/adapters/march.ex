@@ -15,11 +15,13 @@ defmodule Metastatic.Adapters.March do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "March source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(march_ast) do
+  def to_meta(march_ast, opts \\ []) do
     march_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:march)
+    |> Metastatic.Adapter.enrich(:march, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
@@ -32,8 +34,15 @@ defmodule Metastatic.Adapters.March do
     Subprocess.unparse(march_ast)
   end
 
+  def unparse(other), do: {:error, "Invalid March AST: #{inspect(other)}"}
+
   @impl true
   def file_extensions do
     [".march", ".mch"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

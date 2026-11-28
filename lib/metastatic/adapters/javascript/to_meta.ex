@@ -296,8 +296,8 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
     with {:ok, callee_ast, _} <- transform(callee),
          {:ok, args_ast} <- transform_list(args) do
       callee_name = extract_callee_name(callee_ast)
-      meta = [name: callee_name] ++ extract_ts_type(node)
-      ast = {:function_call, meta, [callee_ast | args_ast]}
+      meta = [name: callee_name] ++ callee_meta(callee_ast, callee_name) ++ extract_ts_type(node)
+      ast = {:function_call, meta, args_ast}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -308,8 +308,12 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
     with {:ok, callee_ast, _} <- transform(callee),
          {:ok, args_ast} <- transform_list(args) do
       callee_name = extract_callee_name(callee_ast)
-      meta = [name: callee_name, optional: true] ++ extract_ts_type(node)
-      ast = {:function_call, meta, [callee_ast | args_ast]}
+
+      meta =
+        [name: callee_name, optional: true] ++
+          callee_meta(callee_ast, callee_name) ++ extract_ts_type(node)
+
+      ast = {:function_call, meta, args_ast}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -318,8 +322,8 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
     with {:ok, callee_ast, _} <- transform(callee),
          {:ok, args_ast} <- transform_list(args) do
       callee_name = extract_callee_name(callee_ast)
-      meta = [name: callee_name, constructor: true]
-      ast = {:function_call, meta, [callee_ast | args_ast]}
+      meta = [name: callee_name, constructor: true] ++ callee_meta(callee_ast, callee_name)
+      ast = {:function_call, meta, args_ast}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -659,14 +663,14 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
   # reify an ObjectPattern/ArrayPattern instead of a literal.
   def transform(%{"type" => "ObjectPattern", "properties" => properties} = node) do
     with {:ok, props} <- transform_list(properties) do
-      ast = {:collection, [subtype: :map, pattern: true], props}
+      ast = {:map, [pattern: true], props}
       {:ok, add_location(ast, node), %{}}
     end
   end
 
   def transform(%{"type" => "ArrayPattern", "elements" => elements} = node) do
     with {:ok, elems} <- transform_list(elements) do
-      ast = {:collection, [subtype: :list, pattern: true], elems}
+      ast = {:list, [pattern: true], elems}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -720,14 +724,14 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
   # Objects & Arrays (Collections)
   def transform(%{"type" => "ArrayExpression", "elements" => elements} = node) do
     with {:ok, transformed_elements} <- transform_list(Enum.reject(elements, &is_nil/1)) do
-      ast = {:collection, [subtype: :list], transformed_elements}
+      ast = {:list, [], transformed_elements}
       {:ok, add_location(ast, node), %{}}
     end
   end
 
   def transform(%{"type" => "ObjectExpression", "properties" => properties} = node) do
     with {:ok, transformed_props} <- transform_list(properties) do
-      ast = {:collection, [subtype: :map], transformed_props}
+      ast = {:map, [], transformed_props}
       {:ok, add_location(ast, node), %{}}
     end
   end
@@ -1029,6 +1033,24 @@ defmodule Metastatic.Adapters.JavaScript.ToMeta do
   end
 
   defp extract_ts_type(_), do: []
+
+  defp callee_meta({:variable, _, name}, name), do: []
+  defp callee_meta(callee_ast, _name), do: [callee: callee_ast]
+
+  defp add_location(
+         tuple,
+         %{
+           "loc" => %{
+             "start" => %{"line" => line, "column" => col},
+             "end" => %{"line" => end_line, "column" => end_col}
+           }
+         }
+       )
+       when is_tuple(tuple) do
+    {type, meta, children} = tuple
+    loc_meta = [line: line, col: col, end_line: end_line, end_col: end_col]
+    {type, Keyword.merge(loc_meta, meta), children}
+  end
 
   defp add_location(tuple, %{"loc" => %{"start" => %{"line" => line, "column" => col}}})
        when is_tuple(tuple) do

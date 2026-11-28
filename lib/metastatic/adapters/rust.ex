@@ -92,22 +92,26 @@ defmodule Metastatic.Adapters.Rust do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "Rust source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(rust_ast) do
+  def to_meta(rust_ast, opts \\ []) do
     rust_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:rust)
+    |> Metastatic.Adapter.enrich(:rust, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
-  def unparse(rust_ast) do
+  def unparse(rust_ast) when is_map(rust_ast) do
     Subprocess.unparse(rust_ast)
   end
+
+  def unparse(other), do: {:error, "Invalid Rust AST: #{inspect(other)}"}
 
   @doc """
   Validates that a MetaAST mutation produces valid Rust.
@@ -177,6 +181,7 @@ defmodule Metastatic.Adapters.Rust do
   @doc """
   Returns `true` when Rust parsing is available in this environment.
   """
+  @impl true
   @spec available?() :: boolean()
   def available? do
     Subprocess.available?()

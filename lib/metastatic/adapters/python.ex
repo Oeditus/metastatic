@@ -123,25 +123,34 @@ defmodule Metastatic.Adapters.Python do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "Python source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(python_ast) do
+  def to_meta(python_ast, opts \\ []) do
     python_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:python)
+    |> Metastatic.Adapter.enrich(:python, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
-  def unparse(python_ast) do
+  def unparse(python_ast) when is_map(python_ast) do
     Subprocess.unparse(python_ast)
   end
+
+  def unparse(other), do: {:error, "Invalid Python AST: #{inspect(other)}"}
 
   @impl true
   def file_extensions do
     [".py", ".pyw"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

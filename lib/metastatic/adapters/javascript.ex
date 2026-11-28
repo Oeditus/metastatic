@@ -43,25 +43,34 @@ defmodule Metastatic.Adapters.JavaScript do
     Subprocess.parse(source, :javascript)
   end
 
+  def parse(other), do: {:error, "JavaScript source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(js_ast) do
+  def to_meta(js_ast, opts \\ []) do
     js_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:javascript)
+    |> Metastatic.Adapter.enrich(:javascript, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
-  def unparse(js_ast) do
+  def unparse(js_ast) when is_map(js_ast) do
     Subprocess.unparse(js_ast)
   end
+
+  def unparse(other), do: {:error, "Invalid JavaScript AST: #{inspect(other)}"}
 
   @impl true
   def file_extensions do
     [".js", ".mjs", ".cjs", ".jsx"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

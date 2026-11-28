@@ -103,25 +103,34 @@ defmodule Metastatic.Adapters.Java do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "Java source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(java_ast) do
+  def to_meta(java_ast, opts \\ []) do
     java_ast
     |> ToMeta.transform()
-    |> Metastatic.Adapter.enrich(:java)
+    |> Metastatic.Adapter.enrich(:java, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
-  def from_meta(meta_ast, metadata) do
+  def from_meta(meta_ast, metadata \\ %{}) do
     FromMeta.transform(meta_ast, metadata)
   end
 
   @impl true
-  def unparse(java_ast) do
+  def unparse(java_ast) when is_map(java_ast) do
     Subprocess.unparse(java_ast)
   end
+
+  def unparse(other), do: {:error, "Invalid Java AST: #{inspect(other)}"}
 
   @impl true
   def file_extensions do
     [".java"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

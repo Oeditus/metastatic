@@ -26,6 +26,8 @@ defmodule Metastatic.Adapters.SQL do
     Subprocess.parse(source)
   end
 
+  def parse(other), do: {:error, "SQL source must be a binary, got: #{inspect(other)}"}
+
   @doc """
   Parse SQL source code with optional dialect configuration.
 
@@ -61,7 +63,9 @@ defmodule Metastatic.Adapters.SQL do
   @impl true
   @spec to_meta(term(), keyword()) :: {:ok, term(), map()} | {:error, String.t()}
   def to_meta(sql_ast, opts) when is_list(opts) do
-    ToMeta.transform(sql_ast, opts)
+    sql_ast
+    |> ToMeta.transform(opts)
+    |> Metastatic.Adapter.enrich(:sql, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
@@ -77,5 +81,10 @@ defmodule Metastatic.Adapters.SQL do
   @impl true
   def file_extensions do
     [".sql"]
+  end
+
+  @impl true
+  def available? do
+    Subprocess.available?()
   end
 end

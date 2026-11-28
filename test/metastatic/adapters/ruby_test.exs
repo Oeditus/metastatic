@@ -338,8 +338,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      # Scope is in the meta keyword list
-      assert {:ok, {:assignment, [scope: :local], [{:variable, [], "x"}, value]},
+      # Scope is on the target variable node
+      assert {:ok, {:assignment, [], [{:variable, [scope: :local], "x"}, value]},
               %{scope: :local}} =
                ToMeta.transform(ast)
 
@@ -355,8 +355,8 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      # Scope is in the meta keyword list
-      assert {:ok, {:assignment, [scope: :instance], [{:variable, [], "@name"}, value]},
+      # Scope is on the target variable node
+      assert {:ok, {:assignment, [], [{:variable, [scope: :instance], "@name"}, value]},
               %{scope: :instance}} = ToMeta.transform(ast)
 
       assert {:literal, [subtype: :string], "John"} = value

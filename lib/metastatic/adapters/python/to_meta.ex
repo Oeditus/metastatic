@@ -1354,11 +1354,11 @@ defmodule Metastatic.Adapters.Python.ToMeta do
   # Build a positional `:param`, attaching `:default` and `:has_type` when the
   # Python node carries them.
   defp positional_param(%{"arg" => arg_name} = arg_node, default) do
-    {:param, [kind: :positional] ++ annotation_meta(arg_node) ++ default_meta(default), arg_name}
+    {:param, annotation_meta(arg_node) ++ default_meta(default), arg_name}
   end
 
   defp positional_param(_, default),
-    do: {:param, [kind: :positional] ++ default_meta(default), "_"}
+    do: {:param, default_meta(default), "_"}
 
   defp keyword_param(%{"arg" => arg_name} = arg_node, default) do
     {:param, [kind: :keyword] ++ annotation_meta(arg_node) ++ default_meta(default), arg_name}
@@ -1511,9 +1511,9 @@ defmodule Metastatic.Adapters.Python.ToMeta do
         default = Enum.at(defaults, index)
 
         case arg_node do
-          %{"arg" => name} -> {:param, [kind: :positional] ++ default_meta(default), name}
-          %{"id" => name} -> {:param, [kind: :positional] ++ default_meta(default), name}
-          _ -> {:param, [kind: :positional] ++ default_meta(default), "_"}
+          %{"arg" => name} -> {:param, default_meta(default), name}
+          %{"id" => name} -> {:param, default_meta(default), name}
+          _ -> {:param, default_meta(default), "_"}
         end
       end)
 

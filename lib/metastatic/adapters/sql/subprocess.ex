@@ -100,6 +100,18 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
     end
   end
 
+  @doc """
+  Returns `true` when a prebuilt SQL parser binary or Cargo + bundled sources are available.
+  """
+  @spec available?() :: boolean()
+  def available? do
+    File.exists?(Priv.parser_path(@parser_bin)) or
+      File.exists?(Priv.parser_path(@release_bin)) or
+      Priv.find_executable("metastatic-sql-parser") != nil or
+      (Priv.find_executable("cargo") != nil and
+         File.regular?(Path.join(Priv.parser_path(@cargo_rel_dir), "Cargo.toml")))
+  end
+
   # ----- Private Helpers -----
 
   defp run_sql_parser(args, input) do

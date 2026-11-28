@@ -38,9 +38,27 @@ defmodule Metastatic.AdapterContractTest do
                "#{inspect(adapter)} does not implement the Metastatic.Adapter behaviour"
 
         # `to_meta` may be arity 1 or 2 (see the optional callback).
-        assert function_exported?(adapter, :to_meta, 1) or
+        assert function_exported?(adapter, :to_meta, 1) and
                  function_exported?(adapter, :to_meta, 2),
-               "#{inspect(adapter)} implements neither to_meta/1 nor to_meta/2"
+               "#{inspect(adapter)} must export both to_meta/1 and to_meta/2"
+
+        assert function_exported?(adapter, :from_meta, 1) and
+                 function_exported?(adapter, :from_meta, 2),
+               "#{inspect(adapter)} must export both from_meta/1 and from_meta/2"
+
+        assert function_exported?(adapter, :available?, 0),
+               "#{inspect(adapter)} must export available?/0"
+
+        assert is_boolean(adapter.available?())
+        assert is_boolean(Adapter.available?(adapter))
+      end
+
+      test "#{language} adapter handles invalid parse/1 and unparse/1 inputs safely" do
+        language = unquote(language)
+        {:ok, adapter} = Languages.get_adapter(language)
+
+        assert {:error, _} = adapter.parse(12345)
+        assert {:error, _} = adapter.unparse(make_ref())
       end
     end
   end

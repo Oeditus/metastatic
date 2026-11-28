@@ -48,6 +48,16 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
     end
   end
 
+  @doc """
+  Returns `true` when a compiled Haskell parser or `stack` + bundled sources are available.
+  """
+  @spec available?() :: boolean()
+  def available? do
+    File.exists?(Priv.parser_path(@bin_rel_path)) or
+      Priv.find_executable("metastatic-haskell-parser") != nil or
+      (File.dir?(Priv.parser_path(@parser_rel_dir)) and Priv.find_executable("stack") != nil)
+  end
+
   defp run_parser(executable, args, source, opts) do
     with {:ok, output} <-
            Subprocess.run(executable, args, source, [ext: ".hs", prefix: "metastatic_hs"] ++ opts) do

@@ -60,9 +60,8 @@ defmodule Metastatic.Adapters.JavaScriptTest do
         "arguments" => [%{"type" => "StringLiteral", "value" => "Alice"}]
       }
 
-      assert {:ok, {:function_call, meta, [callee, arg]}, %{}} = ToMeta.transform(ast_node)
+      assert {:ok, {:function_call, meta, [arg]}, %{}} = ToMeta.transform(ast_node)
       assert meta[:name] == "greet"
-      assert callee == {:variable, [scope: :local], "greet"}
       assert arg == {:literal, [subtype: :string], "Alice"}
     end
 

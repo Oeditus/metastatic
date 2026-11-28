@@ -11,7 +11,7 @@ defmodule Metastatic.Adapters.English do
   def parse(source, opts \\ []), do: NLAdapter.parse(source, opts)
 
   @impl true
-  def to_meta(cst), do: NLAdapter.to_meta(cst)
+  def to_meta(cst, _opts \\ []), do: NLAdapter.to_meta(cst)
 
   @impl true
   def from_meta(meta_ast, metadata \\ %{}), do: NLAdapter.from_meta(meta_ast, metadata)
@@ -21,4 +21,7 @@ defmodule Metastatic.Adapters.English do
 
   @impl true
   def file_extensions, do: NLAdapter.file_extensions()
+
+  @impl true
+  def available?, do: true
 end

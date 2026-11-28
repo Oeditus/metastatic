@@ -71,9 +71,10 @@ defmodule Metastatic.Adapter.Bridge do
   alias Metastatic.Subprocess
 
   @typedoc """
-  A decoded bridge response: either the native AST (M1) or generated source.
+  A decoded bridge response: either the native AST (M1), a partial-parse AST
+  with metadata (e.g. skipped `:unsupported` statements), or generated source.
   """
-  @type response :: {:ok, term()} | {:error, String.t()}
+  @type response :: {:ok, term()} | {:ok, term(), map()} | {:error, String.t()}
 
   @doc """
   Parse source into the bridge's native AST (M1).
@@ -81,7 +82,7 @@ defmodule Metastatic.Adapter.Bridge do
   Must return `{:error, reason}` — never raise — when the language toolchain
   is unavailable.
   """
-  @callback parse(String.t()) :: {:ok, term()} | {:error, String.t()}
+  @callback parse(String.t()) :: {:ok, term()} | {:ok, term(), map()} | {:error, String.t()}
 
   @doc """
   Render a native AST (M1) back to source.
@@ -169,6 +170,12 @@ defmodule Metastatic.Adapter.Bridge do
   end
 
   defp extract_payload(%{"ast" => nil}), do: {:error, "Parser returned an empty AST"}
+
+  defp extract_payload(%{"ast" => ast, "unsupported" => unsupported})
+       when is_list(unsupported) and unsupported != [] do
+    {:ok, ast, %{unsupported: unsupported}}
+  end
+
   defp extract_payload(%{"ast" => ast}), do: {:ok, ast}
   defp extract_payload(%{"source" => source}), do: {:ok, source}
 

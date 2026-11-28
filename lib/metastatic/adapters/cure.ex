@@ -8,8 +8,7 @@ defmodule Metastatic.Adapters.Cure do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.{Adapters.Cure.FromMeta, Adapters.Cure.ToMeta, Document}
-  alias Metastatic.Semantic.Enricher
+  alias Metastatic.{Adapters.Cure.FromMeta, Adapters.Cure.Subprocess, Adapters.Cure.ToMeta, Document}
 
   @impl true
   def parse(source) when is_binary(source) do
@@ -19,12 +18,12 @@ defmodule Metastatic.Adapters.Cure do
     end
   end
 
+  def parse(other), do: {:error, "Cure source must be a binary, got: #{inspect(other)}"}
+
   @impl true
-  def to_meta(cure_ast) do
-    # `ToMeta.from_ast/1` returns the meta tree directly (not an
-    # `{:ok, ast, metadata}` tuple), so the enrichment is applied inline.
-    meta_ast = ToMeta.from_ast(cure_ast)
-    {:ok, Enricher.enrich_tree(meta_ast, :cure), %{language: :cure}}
+  def to_meta(cure_ast, opts \\ []) do
+    {:ok, ToMeta.from_ast(cure_ast), %{language: :cure}}
+    |> Metastatic.Adapter.enrich(:cure, Keyword.take(opts, [:enrich]))
   end
 
   @impl true
@@ -34,13 +33,22 @@ defmodule Metastatic.Adapters.Cure do
   end
 
   @impl true
-  def unparse(cure_ast) do
+  def unparse(cure_ast) when is_tuple(cure_ast) or is_list(cure_ast) do
     {:ok, FromMeta.to_source(cure_ast)}
+  rescue
+    e -> {:error, "Cure unparse failed: #{Exception.message(e)}"}
   end
+
+  def unparse(other), do: {:error, "Invalid Cure AST: #{inspect(other)}"}
 
   @impl true
   def file_extensions do
     [".cure"]
+  end
+
+  @impl true
+  def available? do
+    Code.ensure_loaded?(Cure.Compiler.Lexer) or Subprocess.available?()
   end
 
   @doc "Parse Cure source code into a MetaAST Document."
@@ -48,27 +56,19 @@ defmodule Metastatic.Adapters.Cure do
   def abstract(source, language \\ :cure, opts \\ [])
 
   def abstract(source, _language, opts) when is_binary(source) and is_list(opts) do
-    with {:ok, ast, metadata} <- ToMeta.from_source(source, opts) do
-      {:ok, Document.new(ast, :cure, metadata, source)}
+    with {:ok, ast, metadata} <- ToMeta.from_source(source, opts),
+         {:ok, enriched, metadata} <-
+           Metastatic.Adapter.enrich({:ok, ast, metadata}, :cure, Keyword.take(opts, [:enrich])) do
+      {:ok, Document.new(enriched, :cure, metadata, source)}
     end
   end
 
   @doc "Convert a Cure MetaAST Document back to Cure source."
   @spec reify(Document.t()) :: {:ok, String.t()} | {:error, term()}
-  def reify(%Document{ast: ast, language: :cure}) do
-    source = FromMeta.to_source(ast)
-    {:ok, source}
-  end
-
+  def reify(%Document{language: :cure} = doc), do: Metastatic.Adapter.reify(__MODULE__, doc)
   def reify(_), do: {:error, "Not a Cure document"}
 
   @doc "Round-trip: parse source to MetaAST, then back to source."
   @spec round_trip(String.t()) :: {:ok, String.t()} | {:error, term()}
-  def round_trip(source) do
-    with {:ok, ast} <- parse(source),
-         {:ok, meta_ast, metadata} <- to_meta(ast),
-         {:ok, ast2} <- from_meta(meta_ast, metadata) do
-      unparse(ast2)
-    end
-  end
+  def round_trip(source), do: Metastatic.Adapter.round_trip(__MODULE__, source)
 end
