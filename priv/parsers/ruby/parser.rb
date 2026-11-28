@@ -23,23 +23,35 @@ module Metastatic
       buffer = Parser::Source::Buffer.new('(string)', source: source)
       parser = Parser::CurrentRuby.new
       ast = parser.parse(buffer)
-      
-      {
-        status: 'ok',
-        ast: serialize_node(ast)
-      }
+
+      if ast.nil?
+        {
+          ok: false,
+          error: 'Parse error: syntax error'
+        }
+      else
+        {
+          ok: true,
+          ast: serialize_node(ast)
+        }
+      end
     rescue Parser::SyntaxError => e
       {
-        status: 'error',
-        error: e.message,
-        line: e.diagnostic.location.line,
-        column: e.diagnostic.location.column
+        ok: false,
+        error: {
+          type: 'SyntaxError',
+          msg: e.message,
+          line: e.diagnostic.location.line,
+          column: e.diagnostic.location.column
+        }
       }
     rescue StandardError => e
       {
-        status: 'error',
-        error: "#{e.class}: #{e.message}",
-        backtrace: e.backtrace.first(5)
+        ok: false,
+        error: {
+          type: e.class.to_s,
+          msg: e.message
+        }
       }
     end
 

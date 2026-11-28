@@ -8,6 +8,8 @@ defmodule Metastatic.Adapters.Cure.Subprocess do
   Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -17,6 +19,7 @@ defmodule Metastatic.Adapters.Cure.Subprocess do
   Parse Cure source code to AST using an external subprocess binary or the
   `cure` CLI executable.
   """
+  @impl true
   @spec parse(String.t(), keyword()) :: {:ok, term()} | {:error, String.t()}
   def parse(source, opts \\ []) when is_binary(source) and is_list(opts) do
     with {:ok, {executable, args}} <- resolve("parse", opts),
@@ -29,6 +32,7 @@ defmodule Metastatic.Adapters.Cure.Subprocess do
   Unparse Cure AST back to source code using an external subprocess binary or
   the `cure` CLI executable.
   """
+  @impl true
   @spec unparse(term(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast, opts \\ []) when is_list(opts) do
     with {:ok, json} <- Bridge.encode(ast),

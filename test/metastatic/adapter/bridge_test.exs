@@ -181,4 +181,37 @@ defmodule Metastatic.Adapter.BridgeTest do
       assert {:unparse, 1} in optional
     end
   end
+
+  describe "Bridge.Cache" do
+    alias Metastatic.Adapter.Bridge.Cache
+
+    test "builds once and serves subsequent calls from cache" do
+      unique = "bridge_cache_test_#{System.unique_integer([:positive])}"
+      counter = :counters.new(1, [])
+
+      build_fn = fn tmp ->
+        :counters.add(counter, 1, 1)
+        File.write!(tmp, "#!/bin/sh\necho ok\n")
+        File.chmod!(tmp, 0o755)
+        :ok
+      end
+
+      assert {:ok, path1} = Cache.fetch_or_build(:test_bridge, "demo", unique, build_fn)
+      assert Cache.executable_file?(path1)
+      assert {:ok, ^path1} = Cache.fetch_or_build(:test_bridge, "demo", unique, build_fn)
+      assert :counters.get(counter, 1) == 1
+
+      File.rm_rf!(Path.dirname(path1))
+    end
+
+    test "does not install a binary when the build fails" do
+      unique = "bridge_cache_fail_#{System.unique_integer([:positive])}"
+
+      assert {:error, "build boom"} =
+               Cache.fetch_or_build(:test_bridge, "broken", unique, fn tmp ->
+                 File.write!(tmp, "partial")
+                 {:error, "build boom"}
+               end)
+    end
+  end
 end

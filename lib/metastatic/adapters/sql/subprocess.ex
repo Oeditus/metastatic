@@ -13,9 +13,12 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
   Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
+  @canonical_bin "parsers/sql/bin/metastatic-sql-parser"
   @parser_bin "parsers/sql/bin/sql_parser"
   @release_bin "parsers/sql/target/release/metastatic-sql-parser"
   @cargo_rel_dir "parsers/sql"
@@ -46,40 +49,15 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
       iex> length(statements)
       1
   """
+  @impl true
   @spec parse(String.t(), keyword()) ::
           {:ok, term()} | {:ok, term(), map()} | {:error, String.t()}
   def parse(source, opts \\ []) when is_binary(source) do
     dialect = opts |> Keyword.get(:dialect, :generic) |> to_string()
     args = ["parse", "--dialect", dialect]
 
-    with {:ok, output} <- run_sql_parser(args, source) do
-      decode_parse_result(output)
-    end
-  end
-
-  # Parsing keeps a bespoke decoder because it is the only bridge that reports
-  # `{:ok, ast, metadata}`: statements the underlying parser cannot model are
-  # listed in `:unsupported` rather than silently dropped. Everything else
-  # (the envelope, the error shapes) is `Bridge.decode/1`.
-  defp decode_parse_result(result) do
-    case Metastatic.JSON.decode(result) do
-      {:ok, %{"ok" => true, "ast" => ast} = decoded} ->
-        case Map.get(decoded, "unsupported") do
-          unsupported when is_list(unsupported) and unsupported != [] ->
-            {:ok, ast, %{unsupported: unsupported}}
-
-          _ ->
-            {:ok, ast}
-        end
-
-      {:ok, %{"ok" => false, "error" => error}} ->
-        {:error, Bridge.format_error(error)}
-
-      {:ok, other} ->
-        {:error, "Unexpected SQL parser output: #{inspect(other, limit: 5)}"}
-
-      {:error, reason} ->
-        {:error, "JSON decode failed: #{inspect(reason)}"}
+    with {:ok, output} <- run_sql_parser(args, source, ".sql") do
+      Bridge.decode(output)
     end
   end
 
@@ -92,10 +70,11 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
       iex> Metastatic.Adapters.SQL.Subprocess.unparse(ast)
       {:ok, "SELECT 1"}
   """
+  @impl true
   @spec unparse(term()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
     with {:ok, json} <- Bridge.encode(ast),
-         {:ok, output} <- run_sql_parser(["unparse"], json) do
+         {:ok, output} <- run_sql_parser(["unparse"], json, ".json") do
       Bridge.decode(output)
     end
   end
@@ -105,7 +84,8 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
   """
   @spec available?() :: boolean()
   def available? do
-    File.exists?(Priv.parser_path(@parser_bin)) or
+    File.exists?(Priv.parser_path(@canonical_bin)) or
+      File.exists?(Priv.parser_path(@parser_bin)) or
       File.exists?(Priv.parser_path(@release_bin)) or
       Priv.find_executable("metastatic-sql-parser") != nil or
       (Priv.find_executable("cargo") != nil and
@@ -114,21 +94,25 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
 
   # ----- Private Helpers -----
 
-  defp run_sql_parser(args, input) do
+  defp run_sql_parser(args, input, ext) do
+    canonical_path = Priv.parser_path(@canonical_bin)
     bin_path = Priv.parser_path(@parser_bin)
     release_path = Priv.parser_path(@release_bin)
     global_bin = Priv.find_executable("metastatic-sql-parser")
     cargo_bin = Priv.find_executable("cargo")
 
     cond do
+      File.exists?(canonical_path) ->
+        execute_cmd(canonical_path, args, input, ext)
+
       File.exists?(bin_path) ->
-        execute_cmd(bin_path, args, input)
+        execute_cmd(bin_path, args, input, ext)
 
       File.exists?(release_path) ->
-        execute_cmd(release_path, args, input)
+        execute_cmd(release_path, args, input, ext)
 
       global_bin != nil ->
-        execute_cmd(global_bin, args, input)
+        execute_cmd(global_bin, args, input, ext)
 
       cargo_bin != nil ->
         cargo_dir = Priv.parser_path(@cargo_rel_dir)
@@ -136,7 +120,7 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
 
         if File.regular?(manifest) do
           cargo_args = ["run", "--quiet", "--locked", "--manifest-path", manifest, "--"] ++ args
-          execute_cmd(cargo_bin, cargo_args, input)
+          execute_cmd(cargo_bin, cargo_args, input, ext)
         else
           {:error,
            "SQL parser binary and Cargo.toml are missing from the installed Metastatic package " <>
@@ -152,8 +136,8 @@ defmodule Metastatic.Adapters.SQL.Subprocess do
     end
   end
 
-  defp execute_cmd(executable, args, input) do
-    case Subprocess.run(executable, args, input, ext: ".sql", prefix: "metastatic_sql") do
+  defp execute_cmd(executable, args, input, ext) do
+    case Subprocess.run(executable, args, input, ext: ext, prefix: "metastatic_sql") do
       {:ok, output} -> {:ok, output}
       {:error, reason} -> {:error, "SQL parser process failed: #{reason}"}
     end

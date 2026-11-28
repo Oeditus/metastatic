@@ -10,6 +10,8 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
   to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -40,6 +42,7 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
       iex> {:error, _} = Metastatic.Adapters.JavaScript.Subprocess.parse("let x: number = 1;")
       iex> {:ok, _} = Metastatic.Adapters.JavaScript.Subprocess.parse("let x: number = 1;", :typescript)
   """
+  @impl true
   @spec parse(String.t(), :javascript | :typescript) :: {:ok, map()} | {:error, String.t()}
   def parse(source, dialect \\ :javascript) when is_binary(source) do
     with :ok <- check_available(),
@@ -62,6 +65,7 @@ defmodule Metastatic.Adapters.JavaScript.Subprocess do
       iex> Metastatic.Adapters.JavaScript.Subprocess.unparse(ast)
       {:ok, "const x = 5;"}
   """
+  @impl true
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
     with {:ok, json} <- Bridge.encode(ast),

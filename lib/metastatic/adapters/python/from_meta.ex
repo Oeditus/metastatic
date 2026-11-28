@@ -601,6 +601,24 @@ defmodule Metastatic.Adapters.Python.FromMeta do
     end
   end
 
+  # Generators (yield / yield from) - M2.2 Extended Layer
+  def transform({:yield, meta, children}, metadata) when is_list(meta) and is_list(children) do
+    case {Keyword.get(meta, :kind, :yield), children} do
+      {:yield_from, [value]} ->
+        with {:ok, value_py} <- transform(value, metadata) do
+          {:ok, %{"_type" => "YieldFrom", "value" => value_py}}
+        end
+
+      {_, []} ->
+        {:ok, %{"_type" => "Yield", "value" => nil}}
+
+      {_, [value]} ->
+        with {:ok, value_py} <- transform(value, metadata) do
+          {:ok, %{"_type" => "Yield", "value" => value_py}}
+        end
+    end
+  end
+
   # Import - M2.2s Structural Layer (New 3-tuple format)
   def transform({:import, meta, []}, _metadata) when is_list(meta) do
     source = Keyword.get(meta, :source)

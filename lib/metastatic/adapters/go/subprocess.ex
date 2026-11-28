@@ -10,7 +10,10 @@ defmodule Metastatic.Adapters.Go.Subprocess do
   installed as a working executable.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
+  alias Metastatic.Adapter.Bridge.Cache
   alias Metastatic.{Priv, Subprocess}
 
   @binary "metastatic-go-parser"
@@ -25,6 +28,7 @@ defmodule Metastatic.Adapters.Go.Subprocess do
       iex> ast["kind"]
       "BasicLit"
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source), do: run("parse", source, ".go")
 
@@ -37,6 +41,7 @@ defmodule Metastatic.Adapters.Go.Subprocess do
       iex> Metastatic.Adapters.Go.Subprocess.unparse(ast)
       {:ok, "42"}
   """
+  @impl true
   @spec unparse(term()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
     with {:ok, json} <- Bridge.encode(ast), do: run("unparse", json, ".json")
@@ -100,7 +105,7 @@ defmodule Metastatic.Adapters.Go.Subprocess do
 
   defp prebuilt do
     bundled = Priv.parser_path("#{@source_dir}/bin/#{@binary}")
-    if executable_file?(bundled), do: bundled, else: Priv.find_executable(@binary)
+    if Cache.executable_file?(bundled), do: bundled, else: Priv.find_executable(@binary)
   end
 
   defp go_executable, do: Priv.find_executable("go")
@@ -132,60 +137,18 @@ defmodule Metastatic.Adapters.Go.Subprocess do
       |> Enum.sort()
       |> Enum.map(fn path -> [Path.basename(path), 0, File.read!(path), 0] end)
 
-    digest =
-      :crypto.hash(:sha256, [go, :erlang.system_info(:system_architecture), sources])
-      |> Base.encode16(case: :lower)
+    Cache.fetch_or_build(:go, @binary, [go, sources], fn temporary ->
+      case System.cmd(go, ["build", "-trimpath", "-o", temporary, "."],
+             cd: directory,
+             env: Priv.subprocess_env([{"GOWORK", "off"}]),
+             stderr_to_stdout: true
+           ) do
+        {_, 0} ->
+          :ok
 
-    cache = :filename.basedir(:user_cache, "metastatic") |> to_string()
-    destination = Path.join([cache, "go", digest, @binary])
-
-    # The resource identifies the build; the requester must identify this
-    # process so different callers cannot enter the first-build section together.
-    :global.trans({{__MODULE__, destination}, self()}, fn ->
-      if executable_file?(destination) do
-        {:ok, destination}
-      else
-        compile_bridge(go, directory, destination)
+        {output, code} ->
+          {:error, "Go parser build failed (exit #{code}): #{String.trim(output)}"}
       end
     end)
-  end
-
-  defp compile_bridge(go, directory, destination) do
-    suffix = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
-    temporary = destination <> "." <> suffix
-
-    case File.mkdir_p(Path.dirname(destination)) do
-      :ok ->
-        do_compile_bridge(go, directory, temporary, destination)
-
-      {:error, reason} ->
-        {:error, "Cannot create Go parser cache: #{inspect(reason)}"}
-    end
-  end
-
-  defp do_compile_bridge(go, directory, temporary, destination) do
-    case System.cmd(go, ["build", "-trimpath", "-o", temporary, "."],
-           cd: directory,
-           env: Priv.subprocess_env([{"GOWORK", "off"}]),
-           stderr_to_stdout: true
-         ) do
-      {_, 0} ->
-        case File.rename(temporary, destination) do
-          :ok -> {:ok, destination}
-          {:error, reason} -> {:error, "Cannot install Go parser cache: #{inspect(reason)}"}
-        end
-
-      {output, code} ->
-        {:error, "Go parser build failed (exit #{code}): #{String.trim(output)}"}
-    end
-  after
-    File.rm(temporary)
-  end
-
-  defp executable_file?(path) do
-    case File.stat(path) do
-      {:ok, %{type: :regular, mode: mode}} -> Bitwise.band(mode, 0o111) != 0
-      _ -> false
-    end
   end
 end

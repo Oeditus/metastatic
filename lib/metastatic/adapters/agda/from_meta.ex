@@ -167,6 +167,22 @@ defmodule Metastatic.Adapters.Agda.FromMeta do
     end
   end
 
+  # Blocks
+  def transform({:block, meta, [single]}, metadata) when is_list(meta) do
+    transform(single, metadata)
+  end
+
+  def transform({:block, meta, statements}, _metadata) when is_list(meta) and is_list(statements) do
+    with {:ok, decls_ast} <- transform_list(statements) do
+      {:ok,
+       %{
+         "type" => "module",
+         "name" => nil,
+         "declarations" => decls_ast
+       }}
+    end
+  end
+
   # Imports
   def transform({:import, meta, _}, _metadata) when is_list(meta) do
     mod = Keyword.get(meta, :module, "")

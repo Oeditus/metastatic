@@ -45,5 +45,27 @@ defmodule Metastatic.NL.Adapters.SpanishTest do
       assert issue.message =~ "La migración fue ejecutada por el operador"
       assert issue.suggestion =~ "operador"
     end
+
+    test "round-trips Spanish prose through structured CST" do
+      text = "El sistema procesa los datos. El resultado es correcto."
+      assert {:ok, cst} = Spanish.parse(text)
+      assert cst["type"] == "document"
+      assert cst["language"] == "es"
+      assert is_list(cst["children"])
+
+      assert {:ok, doc, meta} = Spanish.to_meta(cst)
+      assert {:ok, cst2} = Spanish.from_meta(doc, meta)
+      assert cst2["type"] == "document"
+      assert cst2["language"] == "es"
+      assert is_list(cst2["children"])
+
+      assert {:ok, unparsed} = Spanish.unparse(cst2)
+      assert unparsed =~ "El sistema procesa los datos."
+      assert unparsed =~ "El resultado es correcto."
+
+      # Re-abstracting the CST returned by from_meta works too
+      assert {:ok, doc2, _} = Spanish.to_meta(cst2)
+      assert AST.type(doc2) == :document
+    end
   end
 end

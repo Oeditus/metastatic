@@ -513,4 +513,61 @@ defmodule Metastatic.Adapters.ErlangTest do
              )
     end
   end
+
+  describe "FromMeta - structural & extended constructs" do
+    test "round-trips function definitions" do
+      {:ok, ast} = ErlangAdapter.parse("add(A, B) -> A + B.")
+      {:ok, meta, _} = ErlangAdapter.to_meta(ast)
+      assert {:ok, reified} = ErlangAdapter.from_meta(meta, %{})
+      assert {:ok, source} = ErlangAdapter.unparse(reified)
+      assert source =~ "add(A, B) ->"
+      assert source =~ "A + B"
+    end
+
+    test "reifies lambdas, maps, containers, imports, and exception handling" do
+      lambda =
+        {:lambda, [params: [{:param, [], "X"}]],
+         [{:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "X"}, {:literal, [subtype: :integer], 1}]}]}
+
+      assert {:ok, fun_ast} = ErlangAdapter.from_meta(lambda, %{})
+      assert {:ok, fun_src} = ErlangAdapter.unparse(fun_ast)
+      assert fun_src =~ "fun(X) ->"
+
+      map_node =
+        {:map, [],
+         [{:pair, [], [{:literal, [subtype: :symbol], :a}, {:literal, [subtype: :integer], 1}]}]}
+
+      assert {:ok, map_ast} = ErlangAdapter.from_meta(map_node, %{})
+      assert {:ok, map_src} = ErlangAdapter.unparse(map_ast)
+      assert map_src =~ "a => 1"
+
+      mod_node =
+        {:container, [container_type: :module, name: "demo"],
+         [
+           {:import, [source: "self", names: ["add/2"], import_type: :export], []},
+           {:function_def, [name: "add", params: [{:param, [], "A"}, {:param, [], "B"}], arity: 2],
+            [{:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "A"}, {:variable, [], "B"}]}]}
+         ]}
+
+      assert {:ok, mod_ast} = ErlangAdapter.from_meta(mod_node, %{})
+      assert {:ok, mod_src} = ErlangAdapter.unparse(mod_ast)
+      assert mod_src =~ "-module(demo)."
+      assert mod_src =~ "-export([add/2])."
+      assert mod_src =~ "add(A, B) ->"
+
+      try_node =
+        {:exception_handling, [],
+         [
+           {:function_call, [name: "risky"], []},
+           [{:match_arm, [pattern: {:variable, [], "E"}], [{:variable, [], "E"}]}],
+           {:literal, [subtype: :symbol], :ok}
+         ]}
+
+      assert {:ok, try_ast} = ErlangAdapter.from_meta(try_node, %{})
+      assert {:ok, try_src} = ErlangAdapter.unparse(try_ast)
+      assert try_src =~ "try"
+      assert try_src =~ "catch"
+      assert try_src =~ "after"
+    end
+  end
 end

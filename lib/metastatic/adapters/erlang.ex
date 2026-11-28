@@ -185,6 +185,34 @@ defmodule Metastatic.Adapters.Erlang do
   end
 
   @impl true
+  def unparse({:block, forms}) when is_list(forms) do
+    forms
+    |> Enum.reduce_while({:ok, []}, fn form, {:ok, acc} ->
+      case unparse(form) do
+        {:ok, src} -> {:cont, {:ok, [src | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, parts} -> {:ok, parts |> Enum.reverse() |> Enum.join("\n")}
+      error -> error
+    end
+  end
+
+  def unparse({form_type, _, _, _} = form) when form_type in [:attribute] do
+    iolist = :erl_pp.form(form)
+    {:ok, iolist |> IO.iodata_to_binary() |> String.trim()}
+  rescue
+    e -> {:error, "Unparse failed: #{Exception.message(e)}"}
+  end
+
+  def unparse({:function, _, _, _, _} = form) do
+    iolist = :erl_pp.form(form)
+    {:ok, iolist |> IO.iodata_to_binary() |> String.trim()}
+  rescue
+    e -> {:error, "Unparse failed: #{Exception.message(e)}"}
+  end
+
   def unparse(erlang_ast) when is_tuple(erlang_ast) do
     # Use erl_pp (Erlang pretty printer) to format the AST.
     # `:erl_pp.expr/1` renders an expression *without* its terminating

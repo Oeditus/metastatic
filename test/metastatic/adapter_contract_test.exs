@@ -57,7 +57,7 @@ defmodule Metastatic.AdapterContractTest do
         language = unquote(language)
         {:ok, adapter} = Languages.get_adapter(language)
 
-        assert {:error, _} = adapter.parse(12345)
+        assert {:error, _} = adapter.parse(12_345)
         assert {:error, _} = adapter.unparse(make_ref())
       end
     end

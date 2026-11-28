@@ -29,6 +29,8 @@ defmodule Metastatic.Adapters.Java.Subprocess do
   Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -46,6 +48,7 @@ defmodule Metastatic.Adapters.Java.Subprocess do
       iex> Metastatic.Adapters.Java.Subprocess.parse("class {")
       {:error, "SyntaxError at line 1: ..."}
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
     with :ok <- bridge_available?(),
@@ -64,6 +67,7 @@ defmodule Metastatic.Adapters.Java.Subprocess do
       iex> String.contains?(source, "class A")
       true
   """
+  @impl true
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
     with :ok <- bridge_available?(),
@@ -87,7 +91,7 @@ defmodule Metastatic.Adapters.Java.Subprocess do
     candidates =
       [
         java_home && Path.join([java_home, "bin", "java"]),
-        System.find_executable("java")
+        Priv.find_executable("java")
       ] ++ Path.wildcard(Path.join([home, ".local/share/mise/installs/java", "*", "bin/java"]))
 
     candidates
@@ -97,8 +101,25 @@ defmodule Metastatic.Adapters.Java.Subprocess do
   end
 
   defp working_java?(path) do
-    File.regular?(path) and
-      match?({_output, 0}, System.cmd(path, ["-version"], stderr_to_stdout: true))
+    if File.regular?(path) do
+      key = {__MODULE__, :working_java, path}
+
+      case :persistent_term.get(key, :uncached) do
+        :uncached ->
+          ok? = probe_java(path)
+          :persistent_term.put(key, ok?)
+          ok?
+
+        cached ->
+          cached
+      end
+    else
+      false
+    end
+  end
+
+  defp probe_java(path) do
+    match?({_output, 0}, System.cmd(path, ["-version"], stderr_to_stdout: true))
   rescue
     _error -> false
   end

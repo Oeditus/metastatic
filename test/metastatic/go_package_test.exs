@@ -51,6 +51,7 @@ defmodule Metastatic.GoPackageTest do
         "lib/metastatic/subprocess.ex",
         "lib/metastatic/json.ex",
         "lib/metastatic/adapter/bridge.ex",
+        "lib/metastatic/adapter/bridge/cache.ex",
         "lib/metastatic/adapters/go/subprocess.ex"
       ]
 

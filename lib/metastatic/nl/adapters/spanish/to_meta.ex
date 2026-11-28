@@ -35,9 +35,13 @@ defmodule Metastatic.NL.Adapters.Spanish.ToMeta do
     {:ok, doc_node, %{language: :es}}
   end
 
-  def transform(%{"children" => _} = map) do
-    # When given CST map
-    transform(to_string(map))
+  def transform(%{"type" => "document", "children" => paras}) when is_list(paras) do
+    source =
+      Enum.map_join(paras, "\n\n", fn %{"children" => sents} ->
+        Enum.map_join(sents, " ", & &1["text"])
+      end)
+
+    transform(source)
   end
 
   defp transform_sentence(sentence) do

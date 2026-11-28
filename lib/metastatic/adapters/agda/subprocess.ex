@@ -7,7 +7,10 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
   on first use. Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
+  alias Metastatic.Adapter.Bridge.Cache
   alias Metastatic.{Priv, Subprocess}
 
   @parser_rel_dir "parsers/agda"
@@ -24,6 +27,7 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
       {:ok, %{"type" => "infix", ...}}
 
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
     bin_path = Priv.parser_path(@bin_rel_path)
@@ -39,7 +43,7 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
         run_parser(global_bin, source)
 
       File.dir?(parser_dir) and ghc_bin != nil ->
-        ensure_compiled_and_run(source, parser_dir, bin_path, ghc_bin)
+        ensure_compiled_and_run(source, parser_dir, ghc_bin)
 
       true ->
         {:error,
@@ -58,19 +62,26 @@ defmodule Metastatic.Adapters.Agda.Subprocess do
       (File.dir?(Priv.parser_path(@parser_rel_dir)) and Priv.find_executable("ghc") != nil)
   end
 
-  defp ensure_compiled_and_run(source, parser_dir, bin_path, ghc) do
-    File.mkdir_p!(Path.dirname(bin_path))
+  defp ensure_compiled_and_run(source, parser_dir, ghc) do
+    parser_src = Path.join(parser_dir, "Parser.hs")
 
-    case System.cmd(ghc, ["-O2", "Parser.hs", "-o", bin_path],
-           cd: parser_dir,
-           env: Priv.subprocess_env(),
-           stderr_to_stdout: true
-         ) do
-      {_, 0} ->
-        run_parser(bin_path, source)
-
-      {error_output, _} ->
-        {:error, "Failed to compile Agda parser: #{inspect(error_output)}"}
+    with {:ok, bin_path} <-
+           Cache.fetch_or_build(
+             :agda,
+             "metastatic-agda-parser",
+             [ghc, File.read!(parser_src)],
+             fn temporary ->
+               case System.cmd(ghc, ["-O2", "Parser.hs", "-o", temporary],
+                      cd: parser_dir,
+                      env: Priv.subprocess_env(),
+                      stderr_to_stdout: true
+                    ) do
+                 {_, 0} -> :ok
+                 {error_output, _} -> {:error, "Failed to compile Agda parser: #{inspect(error_output)}"}
+               end
+             end
+           ) do
+      run_parser(bin_path, source)
     end
   end
 

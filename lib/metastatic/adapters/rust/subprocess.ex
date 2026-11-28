@@ -25,6 +25,8 @@ defmodule Metastatic.Adapters.Rust.Subprocess do
   Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -43,6 +45,7 @@ defmodule Metastatic.Adapters.Rust.Subprocess do
 
       iex> {:error, "SyntaxError" <> _} = Metastatic.Adapters.Rust.Subprocess.parse("fn broken( {")
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
     with {:ok, output} <- run_parser(["parse"], source, ".rs") do
@@ -60,6 +63,7 @@ defmodule Metastatic.Adapters.Rust.Subprocess do
       iex> String.contains?(source, "fn main()")
       true
   """
+  @impl true
   @spec unparse(term()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
     with {:ok, json} <- Bridge.encode(ast),

@@ -22,23 +22,23 @@ module Metastatic
     # @return [Hash] Result with source code or error
     def self.unparse(ast_json)
       data = JSON.parse(ast_json, symbolize_names: true)
-      ast = deserialize_node(data[:ast])
+      raw_ast = data.is_a?(Hash) && data.key?(:ast) ? data[:ast] : data
+      ast = deserialize_node(raw_ast)
       source = Unparser.unparse(ast)
       
       {
-        status: 'ok',
+        ok: true,
         source: source
       }
     rescue JSON::ParserError => e
       {
-        status: 'error',
+        ok: false,
         error: "JSON parse error: #{e.message}"
       }
     rescue StandardError => e
       {
-        status: 'error',
-        error: "#{e.class}: #{e.message}",
-        backtrace: e.backtrace.first(5)
+        ok: false,
+        error: "#{e.class}: #{e.message}"
       }
     end
 
@@ -114,7 +114,7 @@ module Metastatic
   end
 end
 
-# CLI interface: read JSON from file (if passed) or STDIN, write source to STDOUT
+# CLI interface: read JSON from file (if passed) or STDIN, write JSON envelope to STDOUT
 if __FILE__ == $PROGRAM_NAME
   if ARGV[0] && File.exist?(ARGV[0])
     ast_json = File.read(ARGV[0])
@@ -122,12 +122,5 @@ if __FILE__ == $PROGRAM_NAME
     ast_json = $stdin.read
   end
   result = Metastatic::RubyUnparser.unparse(ast_json)
-  
-  if result[:status] == 'ok'
-    puts result[:source]
-  else
-    warn "Error: #{result[:error]}"
-    warn result[:backtrace].join("\n") if result[:backtrace]
-    exit 1
-  end
+  puts JSON.generate(result)
 end

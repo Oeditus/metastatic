@@ -7,6 +7,8 @@ defmodule Metastatic.Adapters.Python.Subprocess do
   are delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -24,6 +26,7 @@ defmodule Metastatic.Adapters.Python.Subprocess do
       iex> Metastatic.Adapters.Python.Subprocess.parse("x +")
       {:error, "SyntaxError: ..."}
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
     with :ok <- check_available(),
@@ -41,6 +44,7 @@ defmodule Metastatic.Adapters.Python.Subprocess do
       iex> Metastatic.Adapters.Python.Subprocess.unparse(ast)
       {:ok, "x + 5"}
   """
+  @impl true
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
     with {:ok, json} <- Bridge.encode(ast),

@@ -2924,5 +2924,23 @@ defmodule Metastatic.Adapters.PythonTest do
       assert result =~ "def total(items, *, start=0):"
       assert result =~ "acc += item"
     end
+
+    test "round-trips yield and yield from generators" do
+      source = """
+      def gen(items):
+          yield
+          yield 1
+          yield from items
+      """
+
+      assert {:ok, ast} = Python.parse(source)
+      assert {:ok, meta_ast, metadata} = Python.to_meta(ast)
+      assert {:ok, ast2} = Python.from_meta(meta_ast, metadata)
+      assert {:ok, result} = Python.unparse(ast2)
+
+      assert result =~ "yield"
+      assert result =~ "yield 1"
+      assert result =~ "yield from items"
+    end
   end
 end

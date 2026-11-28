@@ -424,4 +424,24 @@ defmodule Metastatic.Adapters.AgdaTest do
       assert {:ok, Agda} = Languages.get_adapter(:agda)
     end
   end
+
+  describe "FromMeta - block support" do
+    test "reifies single-element and multi-element blocks" do
+      single = {:block, [], [{:literal, [subtype: :integer], 42}]}
+      assert {:ok, ast1} = Agda.from_meta(single)
+      assert {:ok, "42"} = Agda.unparse(ast1)
+
+      multi =
+        {:block, [],
+         [
+           {:function_def, [name: "x", params: []], [{:literal, [subtype: :integer], 1}]},
+           {:function_def, [name: "y", params: []], [{:literal, [subtype: :integer], 2}]}
+         ]}
+
+      assert {:ok, ast2} = Agda.from_meta(multi)
+      assert {:ok, src} = Agda.unparse(ast2)
+      assert src =~ "x = 1"
+      assert src =~ "y = 2"
+    end
+  end
 end

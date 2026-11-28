@@ -6,6 +6,8 @@ defmodule Metastatic.Adapters.March.Subprocess do
   serialization. Temp-file handling is delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -16,9 +18,10 @@ defmodule Metastatic.Adapters.March.Subprocess do
   @doc """
   Parse March source code to AST JSON map using the native OCaml parser.
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
-    with {:ok, output} <- run(source, @parser_bin, "metastatic-march-parser", "parser") do
+    with {:ok, output} <- run(source, @parser_bin, "metastatic-march-parser", "parser", ".march") do
       Bridge.decode(output)
     end
   end
@@ -26,10 +29,12 @@ defmodule Metastatic.Adapters.March.Subprocess do
   @doc """
   Unparse AST JSON map back to March source code using the native OCaml unparser.
   """
+  @impl true
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) when is_map(ast) do
     with {:ok, json} <- Bridge.encode(ast),
-         {:ok, output} <- run(json, @unparser_bin, "metastatic-march-unparser", "unparser") do
+         {:ok, output} <-
+           run(json, @unparser_bin, "metastatic-march-unparser", "unparser", ".json") do
       Bridge.decode(output)
     end
   end
@@ -46,24 +51,24 @@ defmodule Metastatic.Adapters.March.Subprocess do
 
   # Helpers
 
-  defp run(input, bin_rel_path, global_name, dune_target) do
+  defp run(input, bin_rel_path, global_name, dune_target, ext) do
     bin_full_path = Priv.parser_path(bin_rel_path)
     global_bin = Priv.find_executable(global_name)
     dune_bin = Priv.find_executable("dune")
 
     cond do
       File.exists?(bin_full_path) ->
-        Subprocess.run(bin_full_path, [], input, ext: ".march", prefix: "metastatic_march")
+        Subprocess.run(bin_full_path, [], input, ext: ext, prefix: "metastatic_march")
 
       global_bin != nil ->
-        Subprocess.run(global_bin, [], input, ext: ".march", prefix: "metastatic_march")
+        Subprocess.run(global_bin, [], input, ext: ext, prefix: "metastatic_march")
 
       dune_bin != nil ->
         Subprocess.run(
           dune_bin,
           ["exec", dune_target, "--"],
           input,
-          ext: ".march",
+          ext: ext,
           prefix: "metastatic_march",
           cd: Priv.parser_path(@parser_rel_dir)
         )

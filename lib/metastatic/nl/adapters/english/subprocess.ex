@@ -21,7 +21,8 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
   """
 
   require Logger
-  alias Metastatic.Priv
+  alias Metastatic.Adapter.Bridge
+  alias Metastatic.{Priv, Subprocess}
 
   @parser_script "parsers/english/parser.js"
 
@@ -147,34 +148,15 @@ defmodule Metastatic.NL.Adapters.English.Subprocess do
     node_bin = Priv.find_executable("node")
 
     if File.exists?(script_full_path) and node_bin != nil do
-      temp_path =
-        Path.join(
-          System.tmp_dir!(),
-          "metastatic_nl_#{System.unique_integer([:positive, :monotonic])}.txt"
-        )
-
-      File.write!(temp_path, source)
-
-      try do
+      Subprocess.with_temp_file(source, [ext: ".txt", prefix: "metastatic_nl"], fn temp_path ->
         case System.cmd(node_bin, [script_full_path, temp_path, "--tree-sitter-bin", bin],
                env: Priv.subprocess_env([{"TREE_SITTER_BIN", bin}]),
                stderr_to_stdout: true
              ) do
-          {output, 0} ->
-            case Metastatic.JSON.decode(output) do
-              {:ok, %{"ok" => true, "ast" => ast}} ->
-                {:ok, ast}
-
-              _ ->
-                {:error, :json_decode_failed}
-            end
-
-          {error_out, exit_code} ->
-            {:error, {:exit_code, exit_code, error_out}}
+          {output, 0} -> Bridge.decode(output)
+          {error_out, exit_code} -> {:error, {:exit_code, exit_code, error_out}}
         end
-      after
-        File.rm(temp_path)
-      end
+      end)
     else
       {:error, :script_unavailable}
     end

@@ -8,7 +8,12 @@ defmodule Metastatic.Adapters.Cure do
 
   @behaviour Metastatic.Adapter
 
-  alias Metastatic.{Adapters.Cure.FromMeta, Adapters.Cure.Subprocess, Adapters.Cure.ToMeta, Document}
+  alias Metastatic.{
+    Adapters.Cure.FromMeta,
+    Adapters.Cure.Subprocess,
+    Adapters.Cure.ToMeta,
+    Document
+  }
 
   @impl true
   def parse(source) when is_binary(source) do

@@ -218,6 +218,112 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     end
   end
 
+  # Parameters - M2.2s Structural Layer
+
+  def transform({:param, meta, name}, metadata) when is_list(meta) and is_binary(name) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+
+    case Keyword.get(meta, :pattern) do
+      nil -> {:ok, {:var, line, String.to_atom(name)}}
+      pattern -> transform_pattern(pattern, metadata)
+    end
+  end
+
+  # Maps & Pairs - M2.1 Core Layer
+
+  def transform({:map, meta, pairs}, metadata) when is_list(meta) and is_list(pairs) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+
+    with {:ok, fields} <- transform_list(pairs, metadata) do
+      {:ok, {:map, line, fields}}
+    end
+  end
+
+  def transform({:pair, meta, [key, value]}, metadata) when is_list(meta) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+
+    with {:ok, key_erl} <- transform(key, metadata),
+         {:ok, val_erl} <- transform(value, metadata) do
+      {:ok, {:map_field_assoc, line, key_erl, val_erl}}
+    end
+  end
+
+  # Lambdas (fun expressions) - M2.2 Extended Layer
+
+  def transform({:lambda, meta, body}, metadata) when is_list(meta) and is_list(body) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+    params = Keyword.get(meta, :params, [])
+
+    with {:ok, params_erl} <- transform_params(params, line, metadata),
+         {:ok, body_erl} <- transform_body_exprs(body, metadata) do
+      {:ok, {:fun, line, {:clauses, [{:clause, line, params_erl, [], body_erl}]}}}
+    end
+  end
+
+  # Exception Handling (try/catch/after) - M2.2 Extended Layer
+
+  def transform({:exception_handling, meta, [body, handlers, finally_expr]}, metadata)
+      when is_list(meta) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+
+    with {:ok, body_erl} <- transform_body_exprs([body], metadata),
+         {:ok, catch_clauses} <- transform_catch_handlers(handlers, line, metadata),
+         {:ok, after_erl} <- transform_after_body(finally_expr, metadata) do
+      {:ok, {:try, line, body_erl, [], catch_clauses, after_erl}}
+    end
+  end
+
+  # Function Definitions - M2.2s Structural Layer
+
+  def transform({:function_def, meta, body}, metadata) when is_list(meta) and is_list(body) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+    name = Keyword.get(meta, :name, "anonymous")
+    params = Keyword.get(meta, :params, [])
+    arity = Keyword.get(meta, :arity, length(params))
+
+    with {:ok, params_erl} <- transform_params(params, line, metadata),
+         {:ok, body_erl} <- transform_body_exprs(body, metadata) do
+      clause = {:clause, line, params_erl, [], body_erl}
+      {:ok, {:function, line, String.to_atom(name), arity, [clause]}}
+    end
+  end
+
+  # Containers (Modules) - M2.2s Structural Layer
+
+  def transform({:container, meta, body}, metadata) when is_list(meta) and is_list(body) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+    name = Keyword.get(meta, :name, "unnamed")
+    mod_attr = {:attribute, line, :module, String.to_atom(name)}
+
+    case body do
+      [] ->
+        {:ok, mod_attr}
+
+      forms ->
+        with {:ok, forms_erl} <- transform_list(forms, metadata) do
+          {:ok, {:block, [mod_attr | forms_erl]}}
+        end
+    end
+  end
+
+  # Imports & Exports - M2.2s Structural Layer
+
+  def transform({:import, meta, _children}, metadata) when is_list(meta) do
+    line = Keyword.get(meta, :line, Map.get(metadata, :line, 0))
+    import_type = Keyword.get(meta, :import_type, :import)
+    names = Keyword.get(meta, :names, [])
+    fun_arities = Enum.map(names, &parse_fun_arity/1)
+
+    case import_type do
+      :export ->
+        {:ok, {:attribute, line, :export, fun_arities}}
+
+      _ ->
+        source = Keyword.get(meta, :source, "unknown")
+        {:ok, {:attribute, line, :import, {String.to_atom(source), fun_arities}}}
+    end
+  end
+
   # Language-Specific - M2.3 Native Layer (New 3-tuple format)
 
   def transform({:language_specific, meta, native_ast}, _metadata) when is_list(meta) do
@@ -304,4 +410,87 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
     # since we handle tuples and cons patterns in the main transform/2
     transform(pattern, metadata)
   end
+
+  defp transform_params(params, line, metadata) when is_list(params) do
+    params
+    |> Enum.reduce_while({:ok, []}, fn param, {:ok, acc} ->
+      res =
+        case param do
+          {:param, _, _} = p -> transform(p, metadata)
+          name when is_binary(name) -> {:ok, {:var, line, String.to_atom(name)}}
+          other -> transform_pattern(other, metadata)
+        end
+
+      case res do
+        {:ok, erl} -> {:cont, {:ok, [erl | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, items} -> {:ok, Enum.reverse(items)}
+      error -> error
+    end
+  end
+
+  defp transform_body_exprs([{:block, _, exprs}], metadata) when is_list(exprs) and exprs != [] do
+    transform_list(exprs, metadata)
+  end
+
+  defp transform_body_exprs([], _metadata), do: {:ok, [{:atom, 0, :ok}]}
+
+  defp transform_body_exprs(exprs, metadata) when is_list(exprs) do
+    transform_list(exprs, metadata)
+  end
+
+  defp transform_catch_handlers(nil, _line, _metadata), do: {:ok, []}
+
+  defp transform_catch_handlers(handlers, line, metadata) when is_list(handlers) do
+    handlers
+    |> Enum.reduce_while({:ok, []}, fn handler, {:ok, acc} ->
+      {class, pattern, body} =
+        case handler do
+          {:match_arm, arm_meta, arm_body} ->
+            {Keyword.get(arm_meta, :class, :error), Keyword.get(arm_meta, :pattern, :_),
+             List.last(arm_body)}
+
+          {p, b} ->
+            {:error, p, b}
+
+          other ->
+            {:error, :_, other}
+        end
+
+      with {:ok, pat_erl} <- transform_pattern(pattern, metadata),
+           {:ok, body_erl} <- transform(body, metadata) do
+        class_ast = {:atom, line, class}
+        stack_ast = {:var, line, :_}
+        clause = {:clause, line, [{:tuple, line, [class_ast, pat_erl, stack_ast]}], [], [body_erl]}
+        {:cont, {:ok, [clause | acc]}}
+      else
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, clauses} -> {:ok, Enum.reverse(clauses)}
+      error -> error
+    end
+  end
+
+  defp transform_after_body(nil, _metadata), do: {:ok, []}
+  defp transform_after_body(expr, metadata), do: transform_body_exprs([expr], metadata)
+
+  defp parse_fun_arity(str) when is_binary(str) do
+    case String.split(str, "/") do
+      [name, arity_str] ->
+        case Integer.parse(arity_str) do
+          {arity, ""} -> {String.to_atom(name), arity}
+          _ -> {String.to_atom(str), 0}
+        end
+
+      _ ->
+        {String.to_atom(str), 0}
+    end
+  end
+
+  defp parse_fun_arity({name, arity}) when is_atom(name) and is_integer(arity), do: {name, arity}
 end

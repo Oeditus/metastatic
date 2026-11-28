@@ -41,7 +41,8 @@ defmodule Metastatic.Adapters.Go do
       :binary_op
   """
   @impl true
-  @spec to_meta(map(), keyword()) :: {:ok, Metastatic.AST.meta_ast(), map()} | {:error, String.t()}
+  @spec to_meta(map(), keyword()) ::
+          {:ok, Metastatic.AST.meta_ast(), map()} | {:error, String.t()}
   def to_meta(ast, opts \\ []) do
     ast
     |> ToMeta.transform()

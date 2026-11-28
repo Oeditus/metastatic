@@ -7,6 +7,8 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
   handling is delegated to `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -24,6 +26,7 @@ defmodule Metastatic.Adapters.Haskell.Subprocess do
       {:ok, %{"type" => "infix", ...}}
 
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) when is_binary(source) do
     bin_path = Priv.parser_path(@bin_rel_path)

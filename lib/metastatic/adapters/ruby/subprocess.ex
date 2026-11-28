@@ -7,6 +7,8 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
   `Metastatic.Subprocess`.
   """
 
+  @behaviour Metastatic.Adapter.Bridge
+
   alias Metastatic.Adapter.Bridge
   alias Metastatic.{Priv, Subprocess}
 
@@ -22,24 +24,14 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
       {:ok, %{"type" => "lvasgn", "children" => [...]}}
 
       iex> Metastatic.Adapters.Ruby.Subprocess.parse("x = ")
-      {:error, "Parse error: ..."}
+      {:error, "SyntaxError at line 1: ..."}
   """
+  @impl true
   @spec parse(String.t()) :: {:ok, map()} | {:error, String.t()}
   def parse(source) do
     with :ok <- check_available(),
          {:ok, result} <- run_ruby_script(@parser_path, source, ".rb") do
-      decode_parse(result)
-    end
-  end
-
-  # The Ruby bridge reports a *syntax error* as `{"status": "ok", "ast": null}`
-  # rather than an error envelope, so that shape is translated here before
-  # `Bridge.decode/1` sees it. Every other shape (including the legacy
-  # `status` envelope) is handled by the shared decoder.
-  defp decode_parse(result) do
-    case Metastatic.JSON.decode(result) do
-      {:ok, %{"status" => "ok", "ast" => nil}} -> {:error, "Parse error: syntax error"}
-      _ -> Bridge.decode(result)
+      Bridge.decode(result)
     end
   end
 
@@ -52,16 +44,14 @@ defmodule Metastatic.Adapters.Ruby.Subprocess do
       iex> Metastatic.Adapters.Ruby.Subprocess.unparse(ast)
       {:ok, "x = 42"}
   """
+  @impl true
   @spec unparse(map()) :: {:ok, String.t()} | {:error, String.t()}
   def unparse(ast) do
-    # The Ruby unparser expects the AST *wrapped* as `{"ast": ...}`, unlike
-    # the other bridges which take the bare AST. `Bridge.encode/1` encodes the
-    # value as given, so the wrapper is applied here.
-    with {:ok, json} <- Bridge.encode(%{ast: ast}),
+    with {:ok, json} <- Bridge.encode(ast),
          :ok <- check_available(),
-         {:ok, result} <- run_ruby_script(@unparser_path, json, ".json") do
-      # The unparser emits source directly, not JSON.
-      {:ok, String.trim(result)}
+         {:ok, result} <- run_ruby_script(@unparser_path, json, ".json"),
+         {:ok, source} <- Bridge.decode(result) do
+      {:ok, String.trim(source)}
     end
   end
 
