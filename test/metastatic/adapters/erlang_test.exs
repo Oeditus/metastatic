@@ -527,7 +527,10 @@ defmodule Metastatic.Adapters.ErlangTest do
     test "reifies lambdas, maps, containers, imports, and exception handling" do
       lambda =
         {:lambda, [params: [{:param, [], "X"}]],
-         [{:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "X"}, {:literal, [subtype: :integer], 1}]}]}
+         [
+           {:binary_op, [category: :arithmetic, operator: :+],
+            [{:variable, [], "X"}, {:literal, [subtype: :integer], 1}]}
+         ]}
 
       assert {:ok, fun_ast} = ErlangAdapter.from_meta(lambda, %{})
       assert {:ok, fun_src} = ErlangAdapter.unparse(fun_ast)
@@ -545,8 +548,12 @@ defmodule Metastatic.Adapters.ErlangTest do
         {:container, [container_type: :module, name: "demo"],
          [
            {:import, [source: "self", names: ["add/2"], import_type: :export], []},
-           {:function_def, [name: "add", params: [{:param, [], "A"}, {:param, [], "B"}], arity: 2],
-            [{:binary_op, [category: :arithmetic, operator: :+], [{:variable, [], "A"}, {:variable, [], "B"}]}]}
+           {:function_def,
+            [name: "add", params: [{:param, [], "A"}, {:param, [], "B"}], arity: 2],
+            [
+              {:binary_op, [category: :arithmetic, operator: :+],
+               [{:variable, [], "A"}, {:variable, [], "B"}]}
+            ]}
          ]}
 
       assert {:ok, mod_ast} = ErlangAdapter.from_meta(mod_node, %{})

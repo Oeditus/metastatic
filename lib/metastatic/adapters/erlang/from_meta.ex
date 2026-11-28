@@ -464,7 +464,10 @@ defmodule Metastatic.Adapters.Erlang.FromMeta do
            {:ok, body_erl} <- transform(body, metadata) do
         class_ast = {:atom, line, class}
         stack_ast = {:var, line, :_}
-        clause = {:clause, line, [{:tuple, line, [class_ast, pat_erl, stack_ast]}], [], [body_erl]}
+
+        clause =
+          {:clause, line, [{:tuple, line, [class_ast, pat_erl, stack_ast]}], [], [body_erl]}
+
         {:cont, {:ok, [clause | acc]}}
       else
         error -> {:halt, error}

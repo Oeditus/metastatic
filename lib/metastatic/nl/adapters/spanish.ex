@@ -25,7 +25,8 @@ defmodule Metastatic.NL.Adapters.Spanish do
         %{"type" => "paragraph", "children" => sentences}
       end)
 
-    {:ok, %{"type" => "document", "language" => "es", "source" => source, "children" => paragraphs}}
+    {:ok,
+     %{"type" => "document", "language" => "es", "source" => source, "children" => paragraphs}}
   end
 
   def parse(other), do: {:error, "Spanish source must be a binary, got: #{inspect(other)}"}

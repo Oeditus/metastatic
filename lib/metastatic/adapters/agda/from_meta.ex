@@ -172,7 +172,8 @@ defmodule Metastatic.Adapters.Agda.FromMeta do
     transform(single, metadata)
   end
 
-  def transform({:block, meta, statements}, _metadata) when is_list(meta) and is_list(statements) do
+  def transform({:block, meta, statements}, _metadata)
+      when is_list(meta) and is_list(statements) do
     with {:ok, decls_ast} <- transform_list(statements) do
       {:ok,
        %{
