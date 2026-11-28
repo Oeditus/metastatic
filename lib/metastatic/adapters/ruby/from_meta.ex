@@ -143,11 +143,13 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   def transform({:function_call, meta, args}, _metadata) when is_list(meta) do
     name = Keyword.get(meta, :name)
     null_safe = Keyword.get(meta, :null_safe, false)
+    receiver = Keyword.get(meta, :receiver)
     # Choose send type: csend for safe navigation (&.), send otherwise
     send_type = if null_safe, do: "csend", else: "send"
 
-    with {:ok, args_ast} <- transform_list(args) do
-      {:ok, %{"type" => send_type, "children" => [nil, String.to_atom(name) | args_ast]}}
+    with {:ok, args_ast} <- transform_list(args),
+         {:ok, receiver_ast} <- transform_receiver(receiver, name) do
+      {:ok, %{"type" => send_type, "children" => [receiver_ast, send_method(name) | args_ast]}}
     end
   end
 
@@ -214,6 +216,73 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
     end
   end
 
+  # M2.2 Extended Layer - Case/when (New 3-tuple format)
+  #
+  # `ToMeta` emits `{:pattern_match, meta, [scrutinee, branches, else]}` where
+  # each branch is a `{pattern, body}` tuple. Ruby's `case` node is
+  # `[scrutinee, when..., else]`, and each `when` is `[pattern..., body]`.
+  def transform({:pattern_match, meta, [scrutinee, branches, else_branch]}, _metadata)
+      when is_list(meta) do
+    with {:ok, scrutinee_ast} <- transform(scrutinee, %{}),
+         {:ok, when_asts} <- transform_when_branches(branches),
+         {:ok, else_ast} <- transform_or_nil(else_branch) do
+      children = [scrutinee_ast | when_asts] ++ if(is_nil(else_ast), do: [], else: [else_ast])
+      {:ok, %{"type" => "case", "children" => children}}
+    end
+  end
+
+  # M2.2 Extended Layer - Exception handling (New 3-tuple format)
+  #
+  # `ToMeta` emits `{:exception_handling, meta, [try_body, handlers, else]}`
+  # where each handler is `{types, var, body}`. Ruby represents this as a
+  # `rescue` node: `[try_body, resbody..., else]`, with each `resbody` being
+  # `[exception_array, var_binding, body]`. An `ensure` body, when present,
+  # arrives in the `:ensure` metadata key and wraps the result.
+  def transform({:exception_handling, meta, [try_body, handlers, else_branch]}, _metadata)
+      when is_list(meta) do
+    ensure_body = Keyword.get(meta, :ensure)
+
+    with {:ok, try_ast} <- transform_or_nil(try_body),
+         {:ok, resbody_asts} <- transform_rescue_handlers(handlers),
+         {:ok, else_ast} <- transform_or_nil(else_branch),
+         {:ok, ensure_ast} <- transform_or_nil(ensure_body) do
+      # `rescue` is `[body, resbody..., else]` — the else slot is always
+      # present, even when it is `nil`. Omitting it made `Unparser` treat the
+      # last `resbody` as the else branch and fail on it.
+      children = [try_ast | resbody_asts] ++ [else_ast]
+      rescue_ast = %{"type" => "rescue", "children" => children}
+
+      # A bare `rescue` at statement level needs no explicit `begin`; the
+      # `kwbegin` wrapper is required whenever an `ensure` clause is present,
+      # because `ensure` is only valid directly inside `begin ... end`.
+      if is_nil(ensure_ast) do
+        {:ok, rescue_ast}
+      else
+        ensure_node = %{"type" => "ensure", "children" => [rescue_ast, ensure_ast]}
+        {:ok, %{"type" => "kwbegin", "children" => [ensure_node]}}
+      end
+    end
+  end
+
+  # M2.2s Structural Layer - Module mixins
+  #
+  # `ToMeta` maps Ruby's `include`, `prepend` and `extend` to `:import` nodes
+  # because they bring in module behaviour rather than calling a method. They
+  # must be rebuilt as `send(nil, <mixin>, const)` for the round-trip.
+  def transform({:import, meta, _children}, _metadata) when is_list(meta) do
+    case Keyword.get(meta, :import_type) do
+      mixin when mixin in [:include, :prepend, :extend] ->
+        source = Keyword.get(meta, :source)
+
+        with {:ok, const_ast} <- build_const_ast(source) do
+          {:ok, %{"type" => "send", "children" => [nil, mixin, const_ast]}}
+        end
+
+      _ ->
+        {:error, "Unsupported Ruby import type: #{inspect(Keyword.get(meta, :import_type))}"}
+    end
+  end
+
   # M2.2s Structural Layer - Container support (New 3-tuple format)
 
   def transform({:container, meta, [body]}, _metadata) when is_list(meta) do
@@ -244,17 +313,32 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   def transform({:function_def, meta, [body]}, _metadata) when is_list(meta) do
     name = Keyword.get(meta, :name)
     params = Keyword.get(meta, :params, [])
+    receiver = Keyword.get(meta, :receiver)
 
     args_ast = build_args_ast(params)
 
     with {:ok, body_ast} <- transform_or_nil(body) do
-      # Check if it's a class method (self.method_name)
-      if String.starts_with?(name, "self.") do
-        method_name = String.replace_prefix(name, "self.", "")
-        self_ast = %{"type" => "self", "children" => []}
-        {:ok, %{"type" => "defs", "children" => [self_ast, method_name, args_ast, body_ast]}}
-      else
-        {:ok, %{"type" => "def", "children" => [name, args_ast, body_ast]}}
+      # `defs` covers `def self.m` and every other singleton receiver
+      # (`def Foo.m`). The receiver node is carried in `:receiver` so any
+      # receiver shape survives; the name-prefix check is the fallback for
+      # MetaAST produced before that key existed.
+      case receiver do
+        nil ->
+          if String.starts_with?(name, "self.") do
+            method_name = String.replace_prefix(name, "self.", "")
+            self_ast = %{"type" => "self", "children" => []}
+            {:ok, %{"type" => "defs", "children" => [self_ast, method_name, args_ast, body_ast]}}
+          else
+            {:ok, %{"type" => "def", "children" => [name, args_ast, body_ast]}}
+          end
+
+        receiver_node ->
+          with {:ok, receiver_ast} <- transform(receiver_node, %{}) do
+            method_name = singleton_method_name(name)
+
+            {:ok,
+             %{"type" => "defs", "children" => [receiver_ast, method_name, args_ast, body_ast]}}
+          end
       end
     end
   end
@@ -420,9 +504,16 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
   end
 
   # M2.3 Native Layer
-
-  def transform({:language_specific, meta, original_ast}, _metadata) when is_list(meta) do
-    {:ok, original_ast}
+  #
+  # Most `:language_specific` nodes carry the original M1 node as their
+  # payload, which reifies to itself. A few hints carry *transformed* MetaAST
+  # instead (so the node stays analysable); those are rebuilt here so the
+  # payload never leaks a MetaAST node into M1.
+  def transform({:language_specific, meta, payload}, metadata) when is_list(meta) do
+    case Keyword.get(meta, :hint) do
+      :kwsplat -> rebuild_kwsplat(payload, metadata)
+      _ -> {:ok, payload}
+    end
   end
 
   # Nil passthrough
@@ -578,4 +669,121 @@ defmodule Metastatic.Adapters.Ruby.FromMeta do
     # Fallback: empty args and the whole thing as body
     {%{"type" => "args", "children" => []}, other}
   end
+
+  # Rebuilds the receiver node of a `send` from the `:receiver` meta key.
+  #
+  # When the key is absent (MetaAST produced before it existed, or a
+  # hand-built node) the previous behaviour is preserved: a `nil` receiver
+  # for a plain name, or a `nil` receiver plus a literal method name for a
+  # dotted name. That keeps old callers working while new MetaAST round-trips
+  # without loss.
+  defp transform_receiver(nil, _name), do: {:ok, nil}
+  defp transform_receiver(receiver_node, _name), do: transform(receiver_node, %{})
+
+  # Extracts the bare method name from a possibly-qualified `:name`.
+  #
+  # `:name` is a display string such as `"self.helper"` or `"User.find_by"`.
+  # Ruby's `send`/`defs` nodes want only the trailing segment; the receiver
+  # travels separately.
+  defp send_method(name) when is_binary(name) do
+    name |> String.split(".") |> List.last() |> String.to_atom()
+  end
+
+  defp send_method(name) when is_atom(name), do: name
+
+  # `:name` for a singleton definition is `"self.m"` or `"Foo.m"`; the
+  # `defs` node stores only `m`.
+  defp singleton_method_name(name) when is_binary(name) do
+    name |> String.split(".") |> List.last()
+  end
+
+  defp singleton_method_name(name), do: name
+
+  # Rebuilds a `kwsplat` (`**expr`) M1 node.
+  #
+  # Two payload shapes reach here: a list containing one MetaAST node (the
+  # hash-pair form) and a raw M1 map (the standalone form). Both are
+  # normalised to a `kwsplat` node so the result is always valid M1.
+  defp rebuild_kwsplat([value_meta], metadata) do
+    with {:ok, value_ast} <- transform(value_meta, metadata) do
+      {:ok, %{"type" => "kwsplat", "children" => [value_ast]}}
+    end
+  end
+
+  defp rebuild_kwsplat(%{"type" => "kwsplat"} = ast, _metadata), do: {:ok, ast}
+
+  defp rebuild_kwsplat(payload, metadata) when is_list(payload) do
+    with {:ok, value_ast} <- transform(payload, metadata) do
+      {:ok, %{"type" => "kwsplat", "children" => [value_ast]}}
+    end
+  end
+
+  defp rebuild_kwsplat(payload, _metadata), do: {:ok, payload}
+
+  # Rebuilds the `when` nodes of a `case` from `{pattern, body}` tuples.
+  defp transform_when_branches(branches) when is_list(branches) do
+    branches
+    |> Enum.reduce_while({:ok, []}, fn
+      {pattern, body}, {:ok, acc} ->
+        with {:ok, pattern_ast} <- transform(pattern, %{}),
+             {:ok, body_ast} <- transform_or_nil(body) do
+          when_children = [pattern_ast] ++ if(is_nil(body_ast), do: [], else: [body_ast])
+          {:cont, {:ok, [%{"type" => "when", "children" => when_children} | acc]}}
+        else
+          {:error, _} = err -> {:halt, err}
+        end
+
+      other, _acc ->
+        {:halt, {:error, "Invalid case/when branch: #{inspect(other)}"}}
+    end)
+    |> case do
+      {:ok, asts} -> {:ok, Enum.reverse(asts)}
+      error -> error
+    end
+  end
+
+  # Rebuilds the `resbody` nodes of a `rescue` from `{types, var, body}` tuples.
+  defp transform_rescue_handlers(handlers) when is_list(handlers) do
+    handlers
+    |> Enum.reduce_while({:ok, []}, fn
+      {types, var, body}, {:ok, acc} ->
+        with {:ok, types_ast} <- transform_exception_types(types),
+             {:ok, var_ast} <- transform_or_nil(var),
+             {:ok, body_ast} <- transform_or_nil(body) do
+          # The bound variable in a `resbody` is a *binding* (`lvasgn`), not a
+          # reference (`lvar`). Emitting `lvar` here made the unparser reject
+          # the whole `ensure` node with a bare exit code.
+          #
+          # `resbody` has exactly three children: `[types, var, body]`. The
+          # else-branch slot belongs to the enclosing `rescue`, not here —
+          # putting a fourth child on `resbody` made `Unparser` raise
+          # `UnknownNodeError: Unknown node type: :resbody`.
+          resbody = %{
+            "type" => "resbody",
+            "children" => [types_ast, to_binding_asgn(var_ast), body_ast]
+          }
+
+          {:cont, {:ok, [resbody | acc]}}
+        else
+          {:error, _} = err -> {:halt, err}
+        end
+
+      other, _acc ->
+        {:halt, {:error, "Invalid rescue handler: #{inspect(other)}"}}
+    end)
+    |> case do
+      {:ok, asts} -> {:ok, Enum.reverse(asts)}
+      error -> error
+    end
+  end
+
+  # Ruby's `resbody` holds the exception classes as an `array` node; an empty
+  # list means "rescue StandardError" and is represented as an empty array.
+  defp transform_exception_types(types) when is_list(types) do
+    with {:ok, type_asts} <- transform_list(types) do
+      {:ok, %{"type" => "array", "children" => type_asts}}
+    end
+  end
+
+  defp transform_exception_types(nil), do: {:ok, %{"type" => "array", "children" => []}}
 end

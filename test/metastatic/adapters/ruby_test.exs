@@ -736,10 +736,13 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:exception_handling, [], [_try_body, _handlers, nil]}, %{ensure: ensure_body}} =
+      # The `ensure` body lives on the node's own meta so it survives being
+      # nested in a statement list (child metadata is discarded by
+      # `transform_list/1`); it is what makes the round-trip possible.
+      assert {:ok, {:exception_handling, node_meta, [_try_body, _handlers, nil]}, %{}} =
                ToMeta.transform(ast)
 
-      assert {:function_call, [name: "cleanup"], []} = ensure_body
+      assert {:function_call, [name: "cleanup"], []} = Keyword.get(node_meta, :ensure)
     end
 
     test "transforms begin/ensure without rescue" do
@@ -756,11 +759,11 @@ defmodule Metastatic.Adapters.RubyTest do
         ]
       }
 
-      assert {:ok, {:exception_handling, [], [try_body, [], nil]}, %{ensure: ensure_body}} =
+      assert {:ok, {:exception_handling, node_meta, [try_body, [], nil]}, %{}} =
                ToMeta.transform(ast)
 
       assert {:function_call, [name: "operation"], []} = try_body
-      assert {:function_call, [name: "cleanup"], []} = ensure_body
+      assert {:function_call, [name: "cleanup"], []} = Keyword.get(node_meta, :ensure)
     end
   end
 
@@ -1817,8 +1820,8 @@ defmodule Metastatic.Adapters.RubyTest do
       """
 
       {:ok, ast} = Ruby.parse(source)
-      assert {:ok, {:exception_handling, _, _}, metadata} = ToMeta.transform(ast)
-      assert metadata.ensure != nil
+      assert {:ok, {:exception_handling, node_meta, _}, _metadata} = ToMeta.transform(ast)
+      assert Keyword.get(node_meta, :ensure) != nil
     end
   end
 
@@ -2441,4 +2444,269 @@ defmodule Metastatic.Adapters.RubyTest do
       assert loc["end_line"] >= 4
     end
   end
+
+  # ============================================================
+  # Round-trip fidelity
+  #
+  # These tests exist because the suite above asserted almost exclusively on
+  # `to_meta/1` output. Several constructs abstracted correctly but could not
+  # be reified at all, or came back with their receiver silently replaced by
+  # the literal string "obj". Each case below is a bug that shipped because
+  # nothing exercised `from_meta/2` + `unparse/1`.
+  # ============================================================
+
+  describe "round-trip - method receivers" do
+    # `ToMeta` used to flatten `receiver.method` into a single name string and
+    # render the receiver with `format_receiver/1`, which returned "obj" for
+    # anything that was not a plain variable. `User.find_by(id: 1)` came back
+    # as `obj.find_by({id: 1})`.
+    @receiver_cases [
+      {"constant receiver", "User.find_by(id: 1)", "User.find_by"},
+      {"constant, no args", "Foo.bar", "Foo.bar"},
+      {"namespaced constant", "Foo::Bar.new", "Foo::Bar.new"},
+      {"self receiver", "self.foo(1)", "self.foo"},
+      {"instance variable receiver", "@x.foo", "@x.foo"},
+      {"chained calls", "a.b.c", "a.b.c"},
+      {"deep chain", "a.b.c.d", "a.b.c.d"},
+      {"local variable receiver", "x.foo", "x.foo"},
+      {"safe navigation chain", "a&.b&.c", "a&.b&.c"},
+      {"safe navigation with args", "x&.y(1)", "x&.y"}
+    ]
+
+    for {label, source, expected} <- @receiver_cases do
+      test "preserves the receiver of #{label}" do
+        assert {:ok, source} = round_trip(unquote(source))
+        assert source =~ unquote(expected)
+        refute source =~ "obj."
+      end
+    end
+
+    test "carries the receiver node in the :receiver meta key" do
+      {:ok, ast} = Ruby.parse("User.find_by(id: 1)")
+      assert {:ok, {:function_call, meta, _args}, _} = ToMeta.transform(ast)
+
+      assert Keyword.get(meta, :name) == "User.find_by"
+
+      assert {:literal, receiver_meta, "User"} = Keyword.get(meta, :receiver)
+      assert Keyword.get(receiver_meta, :subtype) == :constant
+    end
+
+    test "keeps :name a plain string for existing callers" do
+      {:ok, ast} = Ruby.parse("a.b.c")
+      assert {:ok, {:function_call, meta, _}, _} = ToMeta.transform(ast)
+      assert is_binary(Keyword.get(meta, :name))
+    end
+
+    test "reifies singleton method definitions on any receiver" do
+      assert {:ok, source} = round_trip("def Foo.bar; 1; end")
+      assert source =~ "def Foo.bar"
+    end
+  end
+
+  describe "round-trip - constructs that previously could not be reified" do
+    # `from_meta/2` had no clause for these, so they raised
+    # "Unsupported MetaAST construct for Ruby reification".
+    test "case/when" do
+      assert {:ok, source} = round_trip("case y when 1 then 2 else 3 end")
+      assert source =~ "case y"
+      assert source =~ "when 1"
+      assert source =~ "else"
+    end
+
+    test "case/when without else" do
+      assert {:ok, source} = round_trip("case y when 1 then 2 end")
+      assert source =~ "when 1"
+    end
+
+    test "rescue" do
+      assert {:ok, source} = round_trip("begin; 1; rescue; 2; end")
+      assert source =~ "rescue"
+    end
+
+    test "rescue with a class and a bound variable" do
+      assert {:ok, source} = round_trip("begin; 1; rescue E => e; 2; end")
+      assert source =~ "rescue E => e"
+    end
+
+    test "rescue with ensure" do
+      assert {:ok, source} = round_trip("begin; 1; rescue E => e; 2; ensure; 3; end")
+      assert source =~ "rescue E => e"
+      assert source =~ "ensure"
+    end
+
+    test "ensure without rescue" do
+      assert {:ok, source} = round_trip("begin; 1; ensure; 2; end")
+      assert source =~ "ensure"
+    end
+
+    test "module mixins are reified as import directives" do
+      for mixin <- ["include", "prepend", "extend"] do
+        assert {:ok, source} = round_trip("#{mixin} Foo")
+        assert source =~ mixin
+        assert source =~ "Foo"
+      end
+    end
+  end
+
+  describe "round-trip - literals" do
+    test "symbol literals stay symbols, not strings" do
+      # JSON has no symbol type, so the bridge used to hand Unparser a string
+      # and every symbol literal silently became a string literal.
+      assert {:ok, source} = round_trip("x = :foo")
+      assert source =~ ":foo"
+      refute source =~ ~s("foo")
+    end
+
+    test "word arrays" do
+      assert {:ok, source} = round_trip("%w[draft published]")
+      assert source =~ "draft"
+      assert source =~ "published"
+    end
+
+    test "symbol arrays" do
+      assert {:ok, source} = round_trip("%i[a b]")
+      assert source =~ ":a"
+      assert source =~ ":b"
+    end
+
+    test "word array with a trailing method call keeps the array" do
+      # Previously collapsed to `obj.freeze`, dropping the array entirely.
+      assert {:ok, source} = round_trip("%w[draft published].freeze")
+      assert source =~ "draft"
+      assert source =~ "freeze"
+    end
+
+    test "string interpolation" do
+      assert {:ok, source} = round_trip("x = \"a\#{b}\"")
+      assert source =~ "a"
+    end
+  end
+
+  describe "round-trip - splats and block pass" do
+    test "keyword splat in a call" do
+      assert {:ok, source} = round_trip("foo(**o)")
+      assert source =~ "**o"
+    end
+
+    test "splat in a call" do
+      assert {:ok, source} = round_trip("foo(*args)")
+      assert source =~ "*args"
+    end
+
+    test "block pass" do
+      assert {:ok, source} = round_trip("foo(&b)")
+      assert source =~ "&b"
+    end
+
+    test "splat in an array" do
+      assert {:ok, source} = round_trip("[1, *rest]")
+      assert source =~ "*rest"
+    end
+  end
+
+  describe "round-trip - fixtures" do
+    test "every fixture reifies, unparses and re-parses to the same semantics" do
+      fixture_dir = Path.expand("../../fixtures/ruby", __DIR__)
+      files = Path.wildcard(Path.join(fixture_dir, "*.rb"))
+      assert match?([_ | _], files), "Expected Ruby fixtures in #{fixture_dir}"
+
+      failures =
+        Enum.flat_map(files, fn file ->
+          name = Path.basename(file)
+          source = File.read!(file)
+
+          with {:ok, ast} <- Ruby.parse(source),
+               {:ok, meta_ast, metadata} <- Ruby.to_meta(ast),
+               {:ok, native} <- Ruby.from_meta(meta_ast, metadata),
+               {:ok, regenerated} <- Ruby.unparse(native),
+               {:ok, reparsed} <- Ruby.parse(regenerated),
+               {:ok, meta_ast2, _} <- Ruby.to_meta(reparsed) do
+            if semantically_equal?(meta_ast, meta_ast2) do
+              []
+            else
+              [{name, :semantics_changed}]
+            end
+          else
+            {:error, reason} -> [{name, reason}]
+          end
+        end)
+
+      assert failures == [], "Round-trip failures: #{inspect(failures)}"
+    end
+  end
+
+  describe "operator normalisation" do
+    test "known operators become atoms" do
+      assert {:ok, {:binary_op, meta, _}, _} =
+               ToMeta.transform(%{
+                 "type" => "send",
+                 "children" => [
+                   %{"type" => "int", "children" => [1]},
+                   "+",
+                   %{"type" => "int", "children" => [2]}
+                 ]
+               })
+
+      assert Keyword.get(meta, :operator) == :+
+    end
+
+    test "unknown operator names are not interned as atoms" do
+      # `String.to_atom/1` on a parser-supplied name let arbitrary input grow
+      # the atom table. An unknown operator is treated as an ordinary method
+      # call and keeps its string form rather than becoming a new atom.
+      assert {:ok, meta_ast, _} =
+               ToMeta.transform(%{
+                 "type" => "send",
+                 "children" => [
+                   %{"type" => "int", "children" => [1]},
+                   "some_custom_operator",
+                   %{"type" => "int", "children" => [2]}
+                 ]
+               })
+
+      assert {:function_call, meta, _args} = meta_ast
+      assert Keyword.get(meta, :name) =~ "some_custom_operator"
+    end
+  end
+
+  # ----- round-trip helpers -----
+
+  # Source -> M1 -> M2 -> M1 -> Source, returning the regenerated source.
+  defp round_trip(source) do
+    with {:ok, ast} <- Ruby.parse(source),
+         {:ok, meta_ast, metadata} <- Ruby.to_meta(ast),
+         {:ok, native} <- Ruby.from_meta(meta_ast, metadata) do
+      Ruby.unparse(native)
+    end
+  end
+
+  # Compares two MetaAST trees ignoring source positions.
+  #
+  # `to_meta/1` records line/column on every node and embeds raw M1 nodes
+  # (with their own `location` maps) inside `:language_specific` payloads.
+  # Regenerated source never has the same positions, so a byte comparison
+  # would fail on formatting alone.
+  #
+  # Meta *values* can themselves be nodes (e.g. `receiver:` on a
+  # `:function_call`), so the keyword list is rebuilt value-by-value rather
+  # than merely dropped.
+  defp semantically_equal?(a, b), do: strip_positions(a) == strip_positions(b)
+
+  defp strip_positions({type, meta, children}) when is_list(meta) do
+    stripped_meta =
+      meta
+      |> Keyword.drop([:line, :col, :end_line, :end_col])
+      |> Enum.map(fn {key, value} -> {key, strip_positions(value)} end)
+
+    {type, stripped_meta, strip_positions(children)}
+  end
+
+  defp strip_positions(%{} = map) do
+    map
+    |> Map.drop(["location"])
+    |> Map.new(fn {key, value} -> {key, strip_positions(value)} end)
+  end
+
+  defp strip_positions(list) when is_list(list), do: Enum.map(list, &strip_positions/1)
+  defp strip_positions(other), do: other
 end

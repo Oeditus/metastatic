@@ -308,8 +308,11 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
             # Method call with receiver but no arguments: obj.method
             qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
 
-            {:ok, add_location({:function_call, [name: qualified_name], []}, ast),
-             %{call_type: :instance}}
+            {:ok,
+             add_location(
+               {:function_call, [name: qualified_name, receiver: receiver_meta], []},
+               ast
+             ), %{call_type: :instance}}
         end
       end
     end
@@ -326,11 +329,14 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     with {:ok, const_meta, _} <- transform(const_node) do
       source_name = extract_constant_name(const_meta)
 
+      # `mixin_type` arrives as either an atom or a string depending on the
+      # bridge, so normalise explicitly rather than relying on `normalize_op/1`
+      # (which now passes unknown names through as strings).
       import_type =
-        case normalize_op(mixin_type) do
-          :include -> :include
-          :prepend -> :prepend
-          :extend -> :extend
+        case mixin_type do
+          t when t in [:include, "include"] -> :include
+          t when t in [:prepend, "prepend"] -> :prepend
+          t when t in [:extend, "extend"] -> :extend
         end
 
       {:ok,
@@ -358,12 +364,13 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
       when not is_nil(receiver) and is_atom(method_name) do
     with {:ok, receiver_meta, _} <- transform(receiver),
          {:ok, args_meta} <- transform_list(args) do
-      # For now, represent as "receiver.method" format
-      # In future, might want to preserve receiver as separate field
       method_str = "#{format_receiver(receiver_meta)}.#{method_name}"
 
-      {:ok, add_location({:function_call, [name: method_str], args_meta}, ast),
-       %{call_type: :instance}}
+      {:ok,
+       add_location(
+         {:function_call, [name: method_str, receiver: receiver_meta], args_meta},
+         ast
+       ), %{call_type: :instance}}
     end
   end
 
@@ -374,8 +381,11 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
          {:ok, args_meta} <- transform_list(args) do
       method_str = "#{format_receiver(receiver_meta)}.#{method_name}"
 
-      {:ok, add_location({:function_call, [name: method_str], args_meta}, ast),
-       %{call_type: :instance}}
+      {:ok,
+       add_location(
+         {:function_call, [name: method_str, receiver: receiver_meta], args_meta},
+         ast
+       ), %{call_type: :instance}}
     end
   end
 
@@ -553,7 +563,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
           {:ok,
            add_location(
-             {:function_call, [name: qualified_name, null_safe: true], []},
+             {:function_call, [name: qualified_name, null_safe: true, receiver: receiver_meta],
+              []},
              ast
            ), %{call_type: :instance, null_safe: true}}
       end
@@ -571,7 +582,8 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
       {:ok,
        add_location(
-         {:function_call, [name: qualified_name, null_safe: true], args_meta},
+         {:function_call, [name: qualified_name, null_safe: true, receiver: receiver_meta],
+          args_meta},
          ast
        ), %{call_type: :instance, null_safe: true}}
     end
@@ -677,23 +689,26 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   end
 
   # Ensure block (with or without rescue)
+  #
+  # The `ensure` body is stored on the node's *own* meta rather than in the
+  # returned metadata map. `transform_list/1` discards child metadata, so
+  # keeping it here is what makes `begin/rescue/ensure` survive a round-trip
+  # through a statement list.
   def transform(%{"type" => "ensure", "children" => [try_body, ensure_body]} = ast) do
     case try_body do
       %{"type" => "rescue"} ->
         # Has both rescue and ensure
-        with {:ok, rescue_meta, rescue_metadata} <- transform(try_body),
+        with {:ok, rescue_meta, _} <- transform(try_body),
              {:ok, ensure_meta, _} <- transform(ensure_body) do
-          # Merge rescue handlers with ensure
-          metadata = Map.put(rescue_metadata, :ensure, ensure_meta)
-          {:ok, rescue_meta, metadata}
+          {:ok, put_node_meta(rescue_meta, :ensure, ensure_meta), %{}}
         end
 
       _ ->
         # Only ensure, no rescue
         with {:ok, try_meta, _} <- transform(try_body),
              {:ok, ensure_meta, _} <- transform(ensure_body) do
-          {:ok, add_location({:exception_handling, [], [try_meta, [], nil]}, ast),
-           %{ensure: ensure_meta}}
+          node = add_location({:exception_handling, [], [try_meta, [], nil]}, ast)
+          {:ok, put_node_meta(node, :ensure, ensure_meta), %{}}
         end
     end
   end
@@ -808,10 +823,18 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
         visibility: :public
       }
 
-      # Create function_def with qualified name
+      # Create function_def with qualified name. The `:receiver` key lets
+      # `FromMeta` rebuild a `defs` node for any singleton receiver, not just
+      # `self` (e.g. `def Foo.bar`).
       function_def =
-        {:function_def, [name: qualified_name, params: params, visibility: :public, arity: arity],
-         [body_meta]}
+        {:function_def,
+         [
+           name: qualified_name,
+           params: params,
+           visibility: :public,
+           arity: arity,
+           receiver: receiver_meta
+         ], [body_meta]}
 
       {:ok, add_location_with_context(function_def, ast, func_context),
        %{ruby_ast: ast, is_class_method: true}}
@@ -1084,10 +1107,15 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     end
   end
 
-  # Keyword splat in hash context (e.g., {**other_hash})
+  # Keyword splat in hash context (e.g., {**other_hash}).
+  #
+  # The payload is the *transformed* value, not the raw M1 node, so that
+  # `FromMeta` can reify it and the node stays traversable by analyzers.
+  # The previous version stored the raw M1 map, which made the node opaque
+  # and crashed JSON encoding on the way back out.
   defp transform_hash_pair(%{"type" => "kwsplat", "children" => [value]}) do
     with {:ok, value_meta, _} <- transform(value) do
-      {:ok, {:language_specific, [language: :ruby, hint: :kwsplat], value_meta}}
+      {:ok, {:language_specific, [language: :ruby, hint: :kwsplat], [value_meta]}}
     end
   end
 
@@ -1095,7 +1123,30 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
     {:error, "Invalid hash pair: #{inspect(other)}"}
   end
 
+  # Renders a receiver node as a dotted-path string for the `:name` key.
+  #
+  # This is a *display* rendering only. `FromMeta` never parses it back — the
+  # real receiver node travels in the `:receiver` meta key — so a lossy
+  # rendering here cannot corrupt a round-trip.
   defp format_receiver({:variable, _, name}), do: name
+  defp format_receiver({:literal, [subtype: :constant], name}), do: name
+  defp format_receiver({:literal, _, name}) when is_binary(name), do: name
+
+  defp format_receiver({:function_call, meta, _args}) do
+    case {Keyword.get(meta, :receiver), Keyword.get(meta, :name)} do
+      {nil, name} when is_binary(name) -> name
+      {receiver, name} when is_binary(name) -> "#{format_receiver(receiver)}.#{name}"
+      _ -> "obj"
+    end
+  end
+
+  defp format_receiver({:attribute_access, meta, [receiver]}) do
+    case Keyword.get(meta, :attribute) do
+      attribute when is_binary(attribute) -> "#{format_receiver(receiver)}.#{attribute}"
+      _ -> "obj"
+    end
+  end
+
   defp format_receiver(_), do: "obj"
 
   defp format_const({:literal, [subtype: :constant], name}), do: name
@@ -1103,8 +1154,86 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
   defp format_const(_), do: "Unknown"
 
   # Operator normalization helpers
+  # `String.to_atom/1` on a parser-supplied string interns a new atom for
+  # every distinct operator or method name in the input. Ruby permits
+  # arbitrary method names, so a long-running process parsing untrusted
+  # source could exhaust the atom table. Only a fixed set of operators is
+  # interned here; anything else keeps its string form, which every caller
+  # already handles (`is_arithmetic_op?/1` and friends match on strings too).
   defp normalize_op(op) when is_atom(op), do: op
-  defp normalize_op(op) when is_binary(op), do: String.to_atom(op)
+  defp normalize_op(op) when is_binary(op), do: known_op(op)
+
+  defp known_op("+"), do: :+
+  defp known_op("-"), do: :-
+  defp known_op("*"), do: :*
+  defp known_op("/"), do: :/
+  defp known_op("%"), do: :%
+  defp known_op("**"), do: :**
+  defp known_op("<<"), do: :"<<"
+  defp known_op(">>"), do: :">>"
+  defp known_op("=="), do: :==
+  defp known_op("!="), do: :!=
+  defp known_op("<"), do: :<
+  defp known_op(">"), do: :>
+  defp known_op("<="), do: :<=
+  defp known_op(">="), do: :>=
+  defp known_op("==="), do: :===
+  defp known_op("<=>"), do: :"<=>"
+  defp known_op("eql?"), do: :eql?
+  defp known_op("!"), do: :!
+  defp known_op("~"), do: :"~"
+  defp known_op("&"), do: :&
+  defp known_op("|"), do: :|
+  defp known_op("^"), do: :^
+  defp known_op("[]"), do: :"[]"
+  defp known_op(other), do: other
+
+  # Maps a block-taking method name to the atom used as `op_type`.
+  #
+  # Method names arrive as atoms or strings depending on the bridge. Only the
+  # iterators this adapter models get an atom; anything else keeps its string
+  # form and falls through to `transform_generic_block/6`. This avoids
+  # `String.to_atom/1` on arbitrary method names.
+  @iterator_ops [
+    :each,
+    :map,
+    :select,
+    :filter,
+    :reject,
+    :reduce,
+    :inject,
+    :proc,
+    :tap,
+    :times,
+    :upto,
+    :downto,
+    :each_with_index,
+    :each_with_object,
+    :find,
+    :detect,
+    :sort_by,
+    :group_by,
+    :partition,
+    :flat_map,
+    :take_while,
+    :drop_while,
+    :all?,
+    :any?,
+    :none?,
+    :one?,
+    :count,
+    :sum,
+    :min_by,
+    :max_by
+  ]
+
+  defp iterator_op(method) when is_atom(method) do
+    if method in @iterator_ops, do: method, else: Atom.to_string(method)
+  end
+
+  defp iterator_op(method) when is_binary(method) do
+    Enum.find(@iterator_ops, method, fn op -> Atom.to_string(op) == method end)
+  end
 
   @ruby_arithmetic_ops [:+, :-, :*, :/, :%, :**]
   @ruby_bitwise_ops [:"<<", :">>"]
@@ -1130,8 +1259,11 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
          {:ok, arg_meta, _} <- transform(arg) do
       qualified_name = "#{format_receiver(receiver_meta)}.#{method_str}"
 
-      {:ok, add_location({:function_call, [name: qualified_name], [arg_meta]}, ast),
-       %{call_type: :instance}}
+      {:ok,
+       add_location(
+         {:function_call, [name: qualified_name, receiver: receiver_meta], [arg_meta]},
+         ast
+       ), %{call_type: :instance}}
     end
   end
 
@@ -1168,7 +1300,7 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   # Transform iterator methods (map, each, select, reduce, proc, etc.)
   defp transform_iterator_method(collection, method, method_args, args_node, body, block_ast) do
-    method_atom = normalize_op(method)
+    method_atom = iterator_op(method)
 
     case method_atom do
       m when m in [:each, :map, :select, :filter, :reject] ->
@@ -1619,4 +1751,10 @@ defmodule Metastatic.Adapters.Ruby.ToMeta do
 
   defp maybe_prepend(list, _key, nil), do: list
   defp maybe_prepend(list, key, value), do: [{key, value} | list]
+
+  # Adds or replaces a single entry in a node's own keyword meta.
+  # Used where a child must survive `transform_list/1` discarding metadata.
+  defp put_node_meta({type, meta, children}, key, value) when is_list(meta) do
+    {type, Keyword.put(meta, key, value), children}
+  end
 end
